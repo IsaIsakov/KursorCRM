@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <polygon points="64,8 118,38 118,90 64,120 10,90 10,38" fill="#00599C" stroke="#003B6F" stroke-width="2"/>
+  <polygon points="64,16 110,42 110,86 64,112 18,86 18,42" fill="#004482"/>
+  <text x="64" y="80" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="50" fill="white">C+</text>
+  <text x="100" y="62" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="22" fill="white">+</text>
+</svg>

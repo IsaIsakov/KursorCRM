@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><title>Рейтинг — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="nav"></div>
+<div class="container"><div id="content">Загружаем…</div></div>
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['student','teacher','admin']);
+if (user) init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('leaderboard'); I18N.applyI18n(document.getElementById('nav'));
+  try {
+    const ranked = await API._request('GET', '/api/progress/leaderboard');
+    render(ranked);
+  } catch (err) {
+    document.getElementById('content').innerHTML =
+      `<div class="card" style="padding:30px;text-align:center;color:#ef4444">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function render(ranked) {
+  document.getElementById('content').innerHTML = `
+    <div class="welcome-banner">
+      <img src="${KURSOR_DB.MASCOT.happy}" class="mascot-md" alt="">
+      <div>
+        <h1>${I18N.t('lb.title')}</h1>
+        <p>${I18N.t('lb.subtitle')}</p>
+      </div>
+    </div>
+    <div class="leader-list">
+      ${ranked.map((s, i) => {
+        const isMe = user && s.id === user.id;
+        const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+        const initial = s.name.charAt(0).toUpperCase();
+        return `
+          <div class="leader-item" style="${isMe ? 'border:2px solid #6366f1;background:#eef2ff' : ''}">
+            <div class="leader-rank ${rankClass}">${i+1}</div>
+            <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px">${initial}</div>
+            <div class="leader-info">
+              <div class="name">${escapeHtml(s.name)} ${isMe ? `<span class="badge badge-info">${I18N.t('lb.its_you')}</span>` : ''}</div>
+              <div class="stats" style="display:flex;align-items:center;gap:8px">
+                <img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:13px;height:13px"> ${s.done} ${I18N.t('lb.tasks')}
+                <img src="https://cdn-icons-png.flaticon.com/512/785/785116.png" style="width:13px;height:13px"> ${s.streak} ${I18N.t('lb.days')}
+                <img src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" style="width:13px;height:13px"> ${s.badges} ${I18N.t('lb.badges')}
+              </div>
+            </div>
+            <div class="leader-points" style="display:flex;align-items:center;gap:5px">
+              <img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:18px;height:18px"> ${s.points}
+            </div>
+          </div>`;
+      }).join('') || `<div class="card" style="text-align:center;padding:30px">${I18N.t('lb.no_participants')}</div>`}
+    </div>
+  `;
+}
+</script>
+</body>
+</html>

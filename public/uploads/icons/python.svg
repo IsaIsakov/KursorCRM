@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="pyBlue" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#387EB8"/><stop offset="100%" stop-color="#366994"/></linearGradient>
+    <linearGradient id="pyYellow" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FFE873"/><stop offset="100%" stop-color="#FFD43B"/></linearGradient>
+  </defs>
+  <path d="M62 10 Q40 10 40 28 L40 44 L66 44 L66 50 L30 50 Q12 50 12 74 L12 84 Q12 100 30 100 L40 100 L40 84 Q40 72 52 72 L82 72 Q98 72 98 56 L98 28 Q98 10 80 10 Z" fill="url(#pyBlue)"/>
+  <circle cx="54" cy="24" r="5" fill="white"/>
+  <path d="M66 118 Q88 118 88 100 L88 84 L62 84 L62 78 L98 78 Q116 78 116 54 L116 44 Q116 28 98 28 L88 28 L88 44 Q88 56 76 56 L46 56 Q30 56 30 72 L30 100 Q30 118 48 118 Z" fill="url(#pyYellow)"/>
+  <circle cx="74" cy="104" r="5" fill="white"/>
+</svg>

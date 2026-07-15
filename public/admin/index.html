@@ -1,0 +1,2200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><title>Админ — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="admin-layout">
+  <aside class="admin-sidebar">
+    <div class="logo">
+      <img src="https://salamalekum.sirv.com/_1_1.png.webp" alt="KURSOR" style="height:36px;background:white;border-radius:8px;padding:4px;">
+    </div>
+    <div id="navLangSlot" style="padding:0 16px 12px"></div>
+    <div class="nav-search">
+      <input id="navSearch" placeholder="Поиск раздела…" data-i18n-ph="admin.search_nav" oninput="filterNav(this.value)">
+    </div>
+    <nav id="navTree"></nav>
+    <a href="#" onclick="logout();return false;" style="margin-top:18px;display:flex;align-items:center;gap:10px;color:#fca5a5">
+      <img class="ic ic-20" src="https://cdn-icons-png.flaticon.com/512/1828/1828479.png" alt=""><span data-i18n="nav.logout">Выйти</span>
+    </a>
+  </aside>
+  <main class="admin-main">
+    <div id="tab">Загружаем…</div>
+  </main>
+</div>
+
+<div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
+
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['admin','teacher','assistant']);
+let userPerms = {};
+const isAdmin = user && user.role === 'admin';
+let currentTab = 'dashboard';
+let cache = { users: [], modules: [], tasks: [], progressById: {} };
+let _renderToken = 0;
+
+/* ---- Сгруппированное меню ---- */
+/* SVG-иконки — единый стиль (Heroicons outline, 20×20) */
+const NAV_ICONS = {
+  dashboard:     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="7" height="7" rx="1.5"/><rect x="11" y="2" width="7" height="7" rx="1.5"/><rect x="2" y="11" width="7" height="7" rx="1.5"/><rect x="11" y="11" width="7" height="7" rx="1.5"/></svg>`,
+  notifications: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2a6 6 0 0 1 6 6c0 3.5 1.5 5 1.5 5h-15S4 11.5 4 8a6 6 0 0 1 6-6z"/><path d="M8.27 17a2 2 0 0 0 3.46 0"/></svg>`,
+  modules:       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h5v5H4zM11 4h5v5h-5zM4 11h5v5H4zM11 11h5v5h-5z"/></svg>`,
+  tasks:         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9l2 2 4-4"/><rect x="3" y="3" width="14" height="14" rx="2"/></svg>`,
+  materials:     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h5l5 5v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4z"/><polyline points="11 2 11 7 16 7"/></svg>`,
+  access:        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="14" height="9" rx="2"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/></svg>`,
+  branches:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="4" r="2"/><circle cx="4" cy="16" r="2"/><circle cx="16" cy="16" r="2"/><path d="M10 6v3M10 9l-4 5M10 9l4 5"/></svg>`,
+  tariffs:       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="16" height="11" rx="2"/><path d="M2 9h16"/><path d="M6 13h.01M9 13h3"/></svg>`,
+  clients:       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="7" r="3"/><path d="M2 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M14 6a3 3 0 0 1 0 6M18 17c0-2.2-1.3-4.1-3.2-5"/></svg>`,
+  groups:        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="2.5"/><path d="M5.5 17c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5"/><circle cx="3.5" cy="8" r="1.8"/><path d="M1 16c0-1.9 1.1-3.2 2.5-3.2"/><circle cx="16.5" cy="8" r="1.8"/><path d="M19 16c0-1.9-1.1-3.2-2.5-3.2"/></svg>`,
+  sessions:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="14" height="13" rx="2"/><path d="M3 8h14M7 2v2M13 2v2M7 12h2M11 12h2M7 15h2"/></svg>`,
+  homework:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h5l5 5v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4z"/><path d="M7 11h6M7 14h4"/></svg>`,
+  users:         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="6" r="3"/><path d="M3 18c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>`,
+  permissions:   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2l7 3v5c0 4-3 7-7 8C3 17 0 14 0 10V5l7-3z" transform="translate(1,1) scale(0.9)"/><path d="M7 10l2 2 4-4"/></svg>`,
+  whatsapp:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2a8 8 0 0 1 6.93 12L18 18l-4.14-1.07A8 8 0 1 1 10 2z"/><path d="M7.5 8.5c.3.6.8 1.3 1.4 1.9s1.3 1.1 1.9 1.4l.7-.7c.2-.2.5-.3.8-.2.5.2 1 .3 1.5.4.3.1.5.3.5.6v1.5c0 .3-.2.6-.6.6A8.5 8.5 0 0 1 6 6.6c0-.3.2-.6.6-.6H8c.3 0 .6.2.6.5.1.5.2 1 .4 1.5.1.3 0 .6-.2.8l-.9.7z"/></svg>`,
+};
+function navIcon(key) {
+  const svg = NAV_ICONS[key] || NAV_ICONS.tasks;
+  return `<span class="nav-svg-icon">${svg}</span>`;
+}
+
+const NAV_GROUPS = [
+  { id:'overview', titleKey:'admin.grp_overview', items:[
+    { tab:'dashboard', i18n:'admin.dashboard', iconKey:'dashboard' },
+    { tab:'notifications', i18n:'admin.notifications', iconKey:'notifications' },
+  ]},
+  { id:'education', titleKey:'admin.grp_education', items:[
+    { tab:'modules', i18n:'admin.modules', iconKey:'modules' },
+    { tab:'tasks', i18n:'admin.tasks', iconKey:'tasks' },
+    { tab:'materials', i18n:'admin.materials', iconKey:'materials' },
+    { tab:'access', i18n:'admin.access', iconKey:'access', adminOnly:true },
+  ]},
+  { id:'crm', titleKey:'admin.grp_crm', adminOnly:true, items:[
+    { tab:'branches', i18n:'admin.branches', iconKey:'branches', adminOnly:true },
+    { tab:'tariffs', i18n:'admin.tariffs', iconKey:'tariffs', adminOnly:true },
+    { tab:'clients', i18n:'admin.clients', iconKey:'clients', adminOnly:true },
+  ]},
+  { id:'whatsapp_grp', titleKey:'admin.grp_whatsapp', show:() => isAdmin || (userPerms && userPerms.manage_whatsapp), items:[
+    { tab:'whatsapp', i18n:'admin.whatsapp', iconKey:'whatsapp' },
+  ]},
+  { id:'journal', titleKey:'admin.grp_journal', items:[
+    { tab:'calendar', i18n:'admin.calendar', iconKey:'calendar' },
+    { tab:'groups', i18n:'admin.groups', iconKey:'groups' },
+    { tab:'sessions', i18n:'admin.sessions', iconKey:'sessions' },
+    { tab:'homework', i18n:'admin.homework', iconKey:'homework' },
+  ]},
+  { id:'people', titleKey:'admin.grp_people', adminOnly:true, items:[
+    { tab:'users', i18n:'admin.users', iconKey:'users', adminOnly:true },
+    { tab:'permissions', i18n:'admin.permissions', iconKey:'permissions', adminOnly:true },
+  ]},
+];
+
+function buildNav() {
+  const tree = document.getElementById('navTree');
+  const collapsed = JSON.parse(localStorage.getItem('kursor_nav_collapsed') || '{}');
+  tree.innerHTML = NAV_GROUPS.map(g => {
+    if (g.adminOnly && !isAdmin) return '';
+    if (typeof g.show === 'function' && !g.show()) return '';
+    const items = g.items.filter(it => !(it.adminOnly && !isAdmin));
+    if (!items.length) return '';
+    const isCol = collapsed[g.id] ? 'collapsed' : '';
+    return `<div class="nav-group ${isCol}" data-group="${g.id}">
+      <div class="nav-group-title" onclick="toggleNavGroup('${g.id}')">
+        <span>${I18N.t(g.titleKey)}</span><span class="chev">▼</span>
+      </div>
+      <div class="nav-group-items">
+        ${items.map(it => `<a href="#" data-tab="${it.tab}" data-label="${I18N.t(it.i18n).toLowerCase()}" onclick="switchTab('${it.tab}');return false;">
+          ${navIcon(it.iconKey)}<span>${I18N.t(it.i18n)}</span></a>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  highlightActiveNav();
+}
+function toggleNavGroup(id) {
+  const collapsed = JSON.parse(localStorage.getItem('kursor_nav_collapsed') || '{}');
+  collapsed[id] = !collapsed[id];
+  localStorage.setItem('kursor_nav_collapsed', JSON.stringify(collapsed));
+  const el = document.querySelector(`.nav-group[data-group="${id}"]`);
+  if (el) el.classList.toggle('collapsed');
+}
+function highlightActiveNav() {
+  document.querySelectorAll('#navTree a').forEach(a => {
+    a.classList.toggle('active', a.dataset.tab === currentTab);
+  });
+}
+function filterNav(q) {
+  q = (q || '').toLowerCase().trim();
+  document.querySelectorAll('#navTree a').forEach(a => {
+    a.classList.toggle('nav-hidden', q && !a.dataset.label.includes(q));
+  });
+  document.querySelectorAll('.nav-group').forEach(g => {
+    const anyVisible = g.querySelectorAll('a:not(.nav-hidden)').length > 0;
+    g.classList.toggle('nav-hidden', q && !anyVisible);
+    if (q) g.classList.remove('collapsed');
+  });
+}
+
+function _withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Тайм-аут запроса: ' + label)), ms))
+  ]);
+}
+
+// Базовые данные нужны только для части вкладок — грузим по требованию
+let _baseLoaded = false;
+async function loadBase(force) {
+  if (_baseLoaded && !force) return;
+  const [users, modules, tasks] = await _withTimeout(Promise.all([
+    API.getUsers(true), API.getModules(true), API.getTasks(true),
+  ]), 15000, 'users/modules/tasks');
+  cache.users = users || [];
+  cache.modules = modules || [];
+  cache.tasks = tasks || [];
+  try {
+    const allProgress = await _withTimeout(API.getAllProgress(), 15000, 'progress');
+    cache.progressById = Object.fromEntries((allProgress || []).map(p => [p.userId, p]));
+  } catch (e) { console.warn('progress load failed:', e.message); cache.progressById = {}; }
+  _baseLoaded = true;
+}
+
+// Какие вкладки требуют базовый кэш (users/modules/tasks/progress)
+const BASE_TABS = ['dashboard','users','modules','tasks','materials','access','permissions','groups','sessions','homework','clients'];
+
+const TAB_RENDERERS = {
+  dashboard: () => renderDashboard(),
+  calendar: () => renderCalendar(),
+  users: () => renderUsers(),
+  modules: () => renderModules(),
+  tasks: () => renderTasks(),
+  materials: () => renderMaterials(),
+  access: () => renderAccess(),
+  branches: () => renderBranches(),
+  tariffs: () => renderTariffs(),
+  groups: () => renderGroups(),
+  clients: () => renderClients(),
+  permissions: () => renderPermissions(),
+  sessions: () => renderSessions(),
+  homework: () => renderHomeworkAdmin(),
+  notifications: () => renderNotificationsTab(),
+  whatsapp: () => renderWhatsapp(),
+};
+
+async function render() {
+  const myToken = ++_renderToken;
+  document.getElementById('tab').innerHTML = `<div class="card" style="padding:30px">${I18N.t('common.loading')}</div>`;
+  try {
+    if (BASE_TABS.includes(currentTab)) await loadBase();
+  } catch (e) {
+    if (myToken !== _renderToken) return;
+    document.getElementById('tab').innerHTML = `<div class="card" style="padding:30px;color:#ef4444">${I18N.t('common.error')}: ${escapeHtml(e.message)}<br><br><button class="btn" onclick="render()">${I18N.t('common.back')}</button></div>`;
+    return;
+  }
+  if (myToken !== _renderToken) return;
+  try {
+    const fn = TAB_RENDERERS[currentTab] || TAB_RENDERERS.dashboard;
+    await fn();
+  } catch (e) {
+    document.getElementById('tab').innerHTML = `<div class="card" style="padding:30px;color:#ef4444">${I18N.t('common.error')} "${currentTab}": ${escapeHtml(e.message)}</div>`;
+    console.error(e);
+  }
+}
+
+function switchTab(t) {
+  currentTab = t;
+  highlightActiveNav();
+  document.getElementById('navSearch').value = '';
+  filterNav('');
+  render();
+}
+
+// Инициализация после загрузки
+window.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('navLangSlot').innerHTML = I18N.switcherHtml();
+  try { const fresh = await API.refreshCurrentUser(); userPerms = fresh.permissions || {}; } catch {}
+  buildNav();
+  if (user) render();
+});
+
+function renderDashboard() {
+  const students = cache.users.filter(u => u.role === 'student');
+  const totalCompleted = students.reduce((sum, s) => {
+    const p = cache.progressById[s.id];
+    return sum + (p ? Object.values(p.tasks).filter(t=>t.status==='done').length : 0);
+  }, 0);
+  const totalPoints = students.reduce((sum, s) => sum + (cache.progressById[s.id]?.points || 0), 0);
+
+  document.getElementById('tab').innerHTML = `
+    <h1>${I18N.t('admin.overview_title')}</h1>
+    <p style="color:#64748b;margin-top:6px">${I18N.t('admin.greeting')} <b>${escapeHtml(user.name)}</b>! ${I18N.t('admin.role_label')} <span class="badge badge-${user.role==='admin'?'danger':'warning'}">${user.role}</span></p>
+    <div class="stats-grid" style="margin-top:20px">
+      <div class="stat-card"><div class="stat-icon blue"><img src="https://cdn-icons-png.flaticon.com/512/1995/1995470.png" style="width:22px;height:22px"></div><div><div class="stat-value">${students.length}</div><div class="stat-label">${I18N.t('admin.stat_students')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon purple"><img src="https://cdn-icons-png.flaticon.com/512/2232/2232688.png" style="width:22px;height:22px"></div><div><div class="stat-value">${cache.modules.length}</div><div class="stat-label">${I18N.t('admin.stat_modules')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon green"><img src="https://cdn-icons-png.flaticon.com/512/3143/3143190.png" style="width:22px;height:22px"></div><div><div class="stat-value">${cache.tasks.length}</div><div class="stat-label">${I18N.t('admin.stat_tasks')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon orange"><img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:22px;height:22px"></div><div><div class="stat-value">${totalCompleted}</div><div class="stat-label">${I18N.t('admin.stat_solved')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon pink"><img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:22px;height:22px"></div><div><div class="stat-value">${totalPoints}</div><div class="stat-label">${I18N.t('admin.stat_points')}</div></div></div>
+    </div>
+
+    <h2 class="section-title" style="margin-top:30px">${I18N.t('admin.quick_actions')}</h2>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      ${user.role === 'admin' ? `<button class="btn btn-lg" onclick="switchTab('users');setTimeout(openUserForm,100)">${I18N.t('admin.add_account')}</button>` : ''}
+      <button class="btn btn-lg btn-secondary" onclick="switchTab('tasks');setTimeout(openTaskForm,100)">${I18N.t('admin.add_task')}</button>
+      <button class="btn btn-lg btn-success" onclick="switchTab('modules');setTimeout(openModuleForm,100)">${I18N.t('admin.add_module')}</button>
+    </div>
+  `;
+}
+
+function renderUsers() {
+  if (user.role !== 'admin') {
+    document.getElementById('tab').innerHTML = `
+      <h1>Пользователи</h1>
+      <div class="card" style="padding:24px;margin-top:14px">
+        <p>${I18N.t('admin.users_only_admin')}</p>
+      </div>`;
+    return;
+  }
+  document.getElementById('tab').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.users">Пользователи</h1>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="API.exportDownload('users','csv')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965335.png" alt=""> <span data-i18n="common.export">Экспорт</span></button>
+        <button class="btn btn-ghost btn-sm" onclick="openImport('users')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965300.png" alt=""> <span data-i18n="common.import">Импорт</span></button>
+        <button class="btn" onclick="openUserForm()">Создать аккаунт</button>
+      </div>
+    </div>
+    <p style="color:#64748b;margin-bottom:14px">Пароли хранятся на сервере в виде bcrypt-хешей и не показываются.</p>
+    <table class="table">
+      <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Возраст</th><th>Группа</th><th>Языки</th><th>Действия</th></tr></thead>
+      <tbody>
+        ${cache.users.map(u => `
+          <tr>
+            <td><b>${escapeHtml(u.name)}</b></td>
+            <td><code>${escapeHtml(u.login)}</code></td>
+            <td><span class="badge badge-${u.role==='admin'?'danger':u.role==='teacher'?'warning':'info'}">${u.role}</span></td>
+            <td>${u.age || '—'}</td>
+            <td>${KURSOR_DB.GROUPS[u.group]?.name || '—'}</td>
+            <td>${(u.languages||[]).map(l=>KURSOR_DB.LANGS[l]?.icon ? `<img src="${KURSOR_DB.LANGS[l].icon}" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px;margin-right:2px">` : '').join('') || '—'}</td>
+            <td>
+              <button class="btn btn-ghost" title="Редактировать" onclick="openUserForm('${u.id}')"><img src="https://cdn-icons-png.flaticon.com/512/1159/1159633.png" style="width:18px;height:18px;vertical-align:-3px"></button>
+              ${u.id !== user.id ? `<button class="btn btn-ghost" title="Удалить" style="color:#ef4444" onclick="removeUser('${u.id}')"><img src="https://cdn-icons-png.flaticon.com/512/3221/3221897.png" style="width:18px;height:18px;vertical-align:-3px"></button>` : ''}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function openUserForm(id) {
+  const u = id ? cache.users.find(x => x.id === id) : { role:'student', age:10, group:2, languages:[] };
+  const langs = Object.entries(KURSOR_DB.LANGS);
+
+  // Загружаем текущие привязки родитель→дети (для редактируемого родителя)
+  let parentChildIds = [];
+  if (id && u && u.role === 'parent') {
+    try { parentChildIds = await API.getParentChildren(id); } catch(e) { /* игнорируем */ }
+  }
+
+  const students = cache.users.filter(x => x.role === 'student');
+  // Имена уже привязанных детей — берём из общего кэша пользователей (он уже загружен)
+  selectedChildren = parentChildIds
+    .map(cid => students.find(s => s.id === cid))
+    .filter(Boolean)
+    .map(s => ({ id: s.id, name: s.name, login: s.login }));
+
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id ? 'Редактировать' : 'Создать'} пользователя</h2>
+    <div class="form-group"><label>Имя</label><input class="form-input" id="f_name" value="${escapeHtml(u.name||'')}" placeholder="Алия Серикова"></div>
+    <div class="form-group"><label>Логин</label><input class="form-input" id="f_login" value="${escapeHtml(u.login||'')}" placeholder="aliya"></div>
+    <div class="form-group">
+      <label>Пароль ${id ? '<small style="color:#64748b">(оставь пустым, чтобы не менять)</small>' : ''}</label>
+      <input class="form-input" id="f_password" type="text" value="" placeholder="${id ? 'не менять' : 'минимум 4 символа'}">
+    </div>
+    <div class="form-group"><label>Роль</label>
+      <select class="form-input" id="f_role" onchange="toggleStudentFields()">
+        <option value="student" ${u.role==='student'?'selected':''}>Ученик</option>
+        <option value="teacher" ${u.role==='teacher'?'selected':''}>Учитель</option>
+        <option value="assistant" ${u.role==='assistant'?'selected':''}>Ассистент</option>
+        <option value="parent" ${u.role==='parent'?'selected':''}>Родитель</option>
+        <option value="admin" ${u.role==='admin'?'selected':''}>Администратор</option>
+      </select>
+    </div>
+    <div class="form-group" id="studentFields">
+      <label>Возраст</label><input class="form-input" id="f_age" type="number" value="${u.age||10}" min="6" max="18">
+      <label style="margin-top:10px">Группа</label>
+      <select class="form-input" id="f_group">
+        <option value="1" ${u.group==1?'selected':''}>Группа 1 (6–8 лет)</option>
+        <option value="2" ${u.group==2?'selected':''}>Группа 2 (9–11 лет)</option>
+        <option value="3" ${u.group==3?'selected':''}>Группа 3 (12–16 лет)</option>
+      </select>
+      <label style="margin-top:10px">Языки / технологии:</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+        ${langs.map(([k,l]) => `
+          <label class="filter-chip" style="cursor:pointer;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" class="f_lang" value="${k}" ${(u.languages||[]).includes(k)?'checked':''}>
+            ${l.icon ? `<img src="${l.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px">` : ''} ${l.name}
+          </label>`).join('')}
+      </div>
+      <label style="margin-top:10px">Прикреплённый учитель (опционально)</label>
+      <select class="form-input" id="f_teacher">
+        <option value="">— не назначен —</option>
+        ${cache.users.filter(x => x.role === 'teacher').map(t =>
+          `<option value="${t.id}" ${u.teacher_id===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="parentFields" style="display:none">
+      <label style="font-weight:600;display:block;margin-bottom:6px">Дети (привязать существующий аккаунт ученика)</label>
+      <div id="selectedChildrenList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+      <div style="position:relative">
+        <input class="form-input" id="f_child_search" type="text" placeholder="Начните вводить имя ученика…" autocomplete="off">
+        <div id="childSearchResults" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);max-height:220px;overflow-y:auto;z-index:20"></div>
+      </div>
+      <p style="color:#64748b;font-size:12px;margin-top:6px">Можно привязать только уже существующий аккаунт ученика. Найдите его по имени или логину.</p>
+    </div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;margin-top:8px;min-height:18px"></div>
+    <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-success" onclick="saveUser('${id||''}')">Сохранить</button>
+    </div>
+  `;
+  document.getElementById('modal').classList.add('active');
+  renderSelectedChildren();
+  setupChildSearch();
+  toggleStudentFields();
+}
+
+let selectedChildren = []; // [{id, name, login}] — дети, привязанные к текущему редактируемому родителю
+let childSearchTimer = null;
+
+function renderSelectedChildren() {
+  const box = document.getElementById('selectedChildrenList');
+  if (!box) return;
+  box.innerHTML = selectedChildren.length === 0
+    ? '<p style="color:#94a3b8;font-size:13px;margin:0">Пока ни один ребёнок не привязан</p>'
+    : selectedChildren.map(c => `
+        <span class="filter-chip active" style="cursor:default;display:inline-flex;align-items:center;gap:6px">
+          ${escapeHtml(c.name)} <span style="color:#cbd5e1;font-size:12px">${escapeHtml(c.login)}</span>
+          <button type="button" onclick="removeSelectedChild('${c.id}')" style="background:none;border:none;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 0 0 2px">×</button>
+        </span>`).join('');
+}
+
+function removeSelectedChild(id) {
+  selectedChildren = selectedChildren.filter(c => c.id !== id);
+  renderSelectedChildren();
+}
+
+function addSelectedChild(child) {
+  if (!selectedChildren.find(c => c.id === child.id)) selectedChildren.push(child);
+  renderSelectedChildren();
+  const input = document.getElementById('f_child_search');
+  const results = document.getElementById('childSearchResults');
+  if (input) input.value = '';
+  if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+}
+
+function setupChildSearch() {
+  const input = document.getElementById('f_child_search');
+  const results = document.getElementById('childSearchResults');
+  if (!input || !results) return;
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(childSearchTimer);
+    if (!q) { results.style.display = 'none'; results.innerHTML = ''; return; }
+    childSearchTimer = setTimeout(async () => {
+      let found = [];
+      try { found = await API.searchStudents(q); } catch (e) { found = []; }
+      found = found.filter(s => !selectedChildren.find(c => c.id === s.id));
+      results.innerHTML = found.length === 0
+        ? '<div style="padding:10px;color:#94a3b8;font-size:13px">Ничего не найдено</div>'
+        : found.map(s => `
+            <div class="child-search-row" data-id="${s.id}" data-name="${escapeHtml(s.name)}" data-login="${escapeHtml(s.login)}"
+                 style="padding:8px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:8px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background=''">
+              <span>${escapeHtml(s.name)}</span>
+              <span style="color:#94a3b8;font-size:12px">${escapeHtml(s.login)}</span>
+            </div>`).join('');
+      results.style.display = 'block';
+      results.querySelectorAll('.child-search-row').forEach(row => {
+        row.addEventListener('click', () => {
+          addSelectedChild({ id: row.dataset.id, name: row.dataset.name, login: row.dataset.login });
+        });
+      });
+    }, 250);
+  });
+}
+// Один статический слушатель на весь документ — закрывает выпадающий список поиска
+// при клике вне него. Ищет актуальные элементы каждый раз, чтобы не плодить
+// дублирующиеся подписки при каждом открытии модалки.
+document.addEventListener('click', (e) => {
+  const results = document.getElementById('childSearchResults');
+  const input = document.getElementById('f_child_search');
+  if (results && input && results.style.display !== 'none' && !results.contains(e.target) && e.target !== input) {
+    results.style.display = 'none';
+  }
+});
+
+async function saveUser(id) {
+  const langs = Array.from(document.querySelectorAll('.f_lang:checked')).map(c => c.value);
+  const data = {
+    name: document.getElementById('f_name').value.trim(),
+    login: document.getElementById('f_login').value.trim(),
+    role: document.getElementById('f_role').value,
+    age: parseInt(document.getElementById('f_age').value) || 0,
+    group: parseInt(document.getElementById('f_group').value) || 0,
+    languages: langs,
+    teacher_id: document.getElementById('f_teacher').value || null,
+  };
+  const pwd = document.getElementById('f_password').value;
+  if (pwd) data.password = pwd;
+  const err = document.getElementById('modalErr');
+  err.textContent = '';
+  if (!data.name || !data.login) { err.textContent = 'Введи имя и логин'; return; }
+  if (!id && !pwd) { err.textContent = 'Пароль обязателен при создании'; return; }
+  try {
+    let savedId = id;
+    if (id) await API.updateUser(id, data);
+    else { const created = await API.createUser(data); savedId = created.id; }
+
+    // Сохраняем привязку родитель → дети (только существующие аккаунты учеников,
+    // выбранные через поиск по имени)
+    if (data.role === 'parent' && savedId) {
+      const childIds = selectedChildren.map(c => c.id);
+      await API.setParentChildren(savedId, childIds);
+    }
+
+    closeModal();
+    await render();
+    showToast('<img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:22px;height:22px"> Сохранено','success');
+  } catch (e) { err.textContent = e.message; }
+}
+
+async function removeUser(id) {
+  if (!confirm('Удалить пользователя? Прогресс ученика тоже удалится.')) return;
+  try { await API.deleteUser(id); await render(); showToast('Удалено','success'); }
+  catch (e) { alert(e.message); }
+}
+
+function toggleStudentFields() {
+  const role = document.getElementById('f_role').value;
+  const sf  = document.getElementById('studentFields');
+  const pf  = document.getElementById('parentFields');
+  if (sf)  sf.style.display  = (role === 'student') ? '' : 'none';
+  if (pf)  pf.style.display  = (role === 'parent')  ? '' : 'none';
+}
+
+function renderModules() {
+  document.getElementById('tab').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.modules">Модули и темы</h1>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="API.exportDownload('modules','csv')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965335.png" alt=""> <span data-i18n="common.export">Экспорт</span></button>
+        ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openImport('modules')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965300.png" alt=""> <span data-i18n="common.import">Импорт</span></button>` : ''}
+        <button class="btn" onclick="openModuleForm()">${I18N.t('admin.add_module')}</button>
+      </div>
+    </div>
+    <table class="table">
+      <thead><tr><th>ID</th><th>Язык</th><th>Название</th><th>Видео</th><th>Действия</th></tr></thead>
+      <tbody>
+        ${cache.modules.map(m => {
+          const lang = KURSOR_DB.LANGS[m.lang];
+          return `
+            <tr>
+              <td><code>${escapeHtml(m.id)}</code></td>
+              <td>${lang ? `<span class="lang-badge ${lang.class}">${lang.icon ? `<img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px">` : ''} ${lang.name}</span>` : m.lang}</td>
+              <td><b>${escapeHtml(m.title)}</b><div style="font-size:12px;color:#64748b">${escapeHtml((m.description||'').slice(0,80))}</div></td>
+              <td>${m.video ? '<img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:22px;height:22px">' : '—'}</td>
+              <td>
+                <button class="btn btn-ghost" title="Редактировать" onclick="openModuleForm('${m.id}')"><img src="https://cdn-icons-png.flaticon.com/512/1159/1159633.png" style="width:18px;height:18px;vertical-align:-3px"></button>
+                ${user.role==='admin' ? `<button class="btn btn-ghost" title="Удалить" style="color:#ef4444" onclick="removeModule('${m.id}')"><img src="https://cdn-icons-png.flaticon.com/512/3221/3221897.png" style="width:18px;height:18px;vertical-align:-3px"></button>` : ''}
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function openModuleForm(id) {
+  const m = id ? cache.modules.find(x => x.id === id) : { lang:'python', title:'', description:'', video:'', explanation:'' };
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id ? 'Редактировать' : 'Создать'} модуль</h2>
+    <div class="form-group"><label>ID (уникальный, латиницей)</label><input class="form-input" id="m_id" value="${escapeHtml(m.id||'')}" ${id?'readonly':''}></div>
+    <div class="form-group"><label>Язык / технология</label>
+      <select class="form-input" id="m_lang">
+        ${Object.entries(KURSOR_DB.LANGS).map(([k,l]) => `<option value="${k}" ${m.lang===k?'selected':''}>${l.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Название модуля</label><input class="form-input" id="m_title" value="${escapeHtml(m.title||'')}"></div>
+    <div class="form-group"><label>Короткое описание</label><textarea class="form-input" id="m_desc" rows="2">${escapeHtml(m.description||'')}</textarea></div>
+    <div class="form-group"><label>YouTube (embed-формат)</label><input class="form-input" id="m_video" value="${escapeHtml(m.video||'')}" placeholder="https://www.youtube.com/embed/..."></div>
+    <div class="form-group"><label>Объяснение (HTML)</label>
+      <textarea class="form-input" id="m_expl" rows="10" style="font-family:Fira Code,monospace;font-size:13px">${escapeHtml(m.explanation||'')}</textarea>
+    </div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-success" onclick="saveModule('${id||''}')">Сохранить</button>
+    </div>
+  `;
+  document.getElementById('modal').classList.add('active');
+}
+
+async function saveModule(id) {
+  const data = {
+    id: document.getElementById('m_id').value.trim() || ('mod_'+Date.now()),
+    lang: document.getElementById('m_lang').value,
+    title: document.getElementById('m_title').value.trim(),
+    description: document.getElementById('m_desc').value.trim(),
+    video: document.getElementById('m_video').value.trim(),
+    explanation: document.getElementById('m_expl').value,
+  };
+  const err = document.getElementById('modalErr');
+  if (!data.title) { err.textContent = 'Введи название'; return; }
+  try {
+    if (id) await API.updateModule(id, data);
+    else await API.createModule(data);
+    closeModal(); await render(); showToast('<img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:22px;height:22px"> Сохранено','success');
+  } catch (e) { err.textContent = e.message; }
+}
+
+async function removeModule(id) {
+  if (!confirm('Удалить модуль? Связанные задачи останутся, но потеряют модуль.')) return;
+  try { await API.deleteModule(id); await render(); }
+  catch (e) { alert(e.message); }
+}
+
+function renderTasks() {
+  document.getElementById('tab').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1>${I18N.t('admin.task_tasks')} (${cache.tasks.length})</h1>
+      <button class="btn" onclick="openTaskForm()">${I18N.t('admin.add_task')}</button>
+    </div>
+    <input class="form-input" id="taskSearch" placeholder="Поиск по названию..." style="margin-bottom:14px" oninput="filterTasksTable()">
+    <table class="table" id="tasksTable">
+      <thead><tr><th>ID</th><th>Тип</th><th>Модуль</th><th>Название</th><th>Сложность</th><th>Действия</th></tr></thead>
+      <tbody>
+        ${cache.tasks.map(t => {
+          const m = cache.modules.find(m => m.id === t.module);
+          const lang = m ? KURSOR_DB.LANGS[m.lang] : null;
+          const typeLabel = {
+            quiz:'Тест', fill:'Пропуск', order:'Порядок',
+            code:'Код Python', java:'Код Java', cpp:'Код C++',
+            project:'Проект',
+            scratch:'Интерактив (Scratch)',
+            htmlcss:'Интерактив (HTML)',
+            blockly:'Интерактив (Blockly)'
+          };
+          return `
+            <tr data-search="${escapeHtml((t.title + ' ' + (m?.title||'') + ' ' + (lang?.name||'')).toLowerCase())}">
+              <td>${t.id}</td>
+              <td>${typeLabel[t.type] || t.type}</td>
+              <td>${lang ? `<span class="lang-badge ${lang.class}"><img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"></span>` : ''} ${m ? escapeHtml(m.title) : '<span style="color:red">нет модуля</span>'}</td>
+              <td><b>${escapeHtml(t.title)}</b></td>
+              <td>${'★'.repeat(t.difficulty||1)}</td>
+              <td>
+                <button class="btn btn-ghost" title="Редактировать" onclick="openTaskForm(${t.id})"><img src="https://cdn-icons-png.flaticon.com/512/1159/1159633.png" style="width:18px;height:18px;vertical-align:-3px"></button>
+                <button class="btn btn-ghost" title="Удалить" style="color:#ef4444" onclick="removeTask(${t.id})"><img src="https://cdn-icons-png.flaticon.com/512/3221/3221897.png" style="width:18px;height:18px;vertical-align:-3px"></button>
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function filterTasksTable() {
+  const q = document.getElementById('taskSearch').value.toLowerCase();
+  document.querySelectorAll('#tasksTable tbody tr').forEach(tr => {
+    tr.style.display = tr.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+
+function openTaskForm(id) {
+  const t = id ? cache.tasks.find(x => x.id === id) : { type:'quiz', difficulty:1, module: cache.modules[0]?.id || '' };
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id ? 'Редактировать' : 'Создать'} задачу</h2>
+    <div class="form-group"><label>Модуль</label>
+      <select class="form-input" id="t_module">
+        ${cache.modules.map(m => {
+          const lang = KURSOR_DB.LANGS[m.lang];
+          // Браузеры не рендерят <img> внутри <option> — оставляем только текст.
+          return `<option value="${m.id}" ${t.module===m.id?'selected':''}>${escapeHtml(m.title)}</option>`;
+        }).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Тип задачи</label>
+      <select class="form-input" id="t_type" onchange="updateTaskTypeFields()">
+        <option value="quiz" ${t.type==='quiz'?'selected':''}>Тест (выбор из 4)</option>
+        <option value="fill" ${t.type==='fill'?'selected':''}>Заполни пропуск</option>
+        <option value="order" ${t.type==='order'?'selected':''}>Расставь по порядку</option>
+        <option value="code" ${t.type==='code'?'selected':''}>Напиши код (Python)</option>
+        <option value="java" ${t.type==='java'?'selected':''}>Напиши код (Java) — авто-проверка</option>
+        <option value="cpp" ${t.type==='cpp'?'selected':''}>Напиши код (C++) — авто-проверка</option>
+        <option value="project" ${t.type==='project'?'selected':''}>Мини-проект</option>
+        <option value="scratch" ${t.type==='scratch'?'selected':''}>Интерактивная задача (Scratch / TurboWarp)</option>
+        <option value="htmlcss" ${t.type==='htmlcss'?'selected':''}>Интерактивная задача (HTML / CSS)</option>
+        <option value="blockly" ${t.type==='blockly'?'selected':''}>Интерактивная задача (Blockly)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Сложность (1-3)</label><input class="form-input" id="t_diff" type="number" min="1" max="3" value="${t.difficulty||1}"></div>
+    <div class="form-group"><label>Название</label><input class="form-input" id="t_title" value="${escapeHtml(t.title||'')}"></div>
+    <div class="form-group"><label>Условие задачи</label><textarea class="form-input" id="t_desc" rows="3">${escapeHtml(t.description||'')}</textarea></div>
+    <div class="form-group"><label>Подсказка / объяснение</label><textarea class="form-input" id="t_explain" rows="2">${escapeHtml(t.explain||'')}</textarea></div>
+    <div id="typeFields"></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-success" onclick="saveTask(${id||'null'})">Сохранить</button>
+    </div>
+  `;
+  window._editTask = t;
+  updateTaskTypeFields();
+  document.getElementById('modal').classList.add('active');
+}
+
+function updateTaskTypeFields() {
+  const type = document.getElementById('t_type').value;
+  const t = window._editTask || {};
+  let html = '';
+  if (type === 'quiz') {
+    const opts = t.options || ['','','',''];
+    html = `<label>Варианты ответов (4 шт.) — отметь правильный:</label>
+      ${[0,1,2,3].map(i => `
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+          <input type="radio" name="t_correct" value="${i}" ${t.answer===i?'checked':''} style="width:20px;height:20px">
+          <input class="form-input t_option" value="${escapeHtml(opts[i]||'')}" placeholder="Вариант ${String.fromCharCode(65+i)}">
+        </div>`).join('')}`;
+  } else if (type === 'fill') {
+    html = `<label>Правильный ответ (точное слово/число)</label>
+      <input class="form-input" id="t_answer" value="${escapeHtml(t.answer||'')}">`;
+  } else if (type === 'order') {
+    html = `<label>Строки в ПРАВИЛЬНОМ порядке (каждая на новой строке)</label>
+      <textarea class="form-input" id="t_items" rows="6" style="font-family:Fira Code,monospace">${escapeHtml((t.items||[]).join('\n'))}</textarea>`;
+  } else if (type === 'code') {
+    html = `
+      <label>Ожидаемый вывод (что должно вывести print)</label>
+      <textarea class="form-input" id="t_expected" rows="3" style="font-family:Fira Code,monospace">${escapeHtml(t.expectedOutput||'')}</textarea>
+      <label style="margin-top:10px">Стартовый код (необязательно)</label>
+      <textarea class="form-input" id="t_starter" rows="4" style="font-family:Fira Code,monospace">${escapeHtml(t.starter||'')}</textarea>`;
+  } else if (type === 'project') {
+    html = `<p style="color:#64748b;font-size:14px">Для проектов ученик загружает текст/ссылку, учитель проверяет вручную.</p>`;
+  } else if (type === 'scratch') {
+    html = `
+      <label>ID проекта Scratch (необязательно)</label>
+      <input class="form-input" id="t_scratch_id" value="${escapeHtml(t.scratchProjectId||'')}" placeholder="Например: 123456789 — оставь пустым для пустого редактора">
+      <p style="color:#64748b;font-size:13px;margin-top:6px">Ученик открывает TurboWarp прямо в задаче, делает проект и описывает что сделал. Учитель проверяет вручную.</p>`;
+  } else if (type === 'htmlcss') {
+    const defHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    /* твои стили */
+  </style>
+</head>
+<body>
+  <h1>Привет!</h1>
+</body>
+</html>`;
+    html = `
+      <label>Стартовый HTML/CSS код</label>
+      <textarea class="form-input" id="t_starter" rows="6" style="font-family:Fira Code,monospace;font-size:13px">${escapeHtml(t.starter||defHtml)}</textarea>
+      <label style="margin-top:10px">Ожидаемый результат (описание для ученика, необязательно)</label>
+      <textarea class="form-input" id="t_expected" rows="2">${escapeHtml(t.expectedOutput||'')}</textarea>`;
+  } else if (type === 'blockly') {
+    html = `
+      <label>Ожидаемый JavaScript-код (необязательно — для автопроверки)</label>
+      <textarea class="form-input" id="t_expected" rows="3" style="font-family:Fira Code,monospace;font-size:13px">${escapeHtml(t.expectedOutput||'')}</textarea>
+      <p style="color:#64748b;font-size:13px;margin-top:6px">Ученик составляет программу из блоков Blockly. Можно проверять автоматически или вручную.</p>`;
+  } else if (type === 'java' || type === 'cpp') {
+    const langLabel = type === 'java' ? 'Java' : 'C++';
+    const defStarter = type === 'java'
+      ? 'import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        // твой код\n    }\n}\n'
+      : '#include <iostream>\nusing namespace std;\n\nint main() {\n    // твой код\n    return 0;\n}\n';
+    html = `
+      <label>Ожидаемый вывод программы (stdout)</label>
+      <textarea class="form-input" id="t_expected" rows="3" style="font-family:Fira Code,monospace">${escapeHtml(t.expectedOutput||'')}</textarea>
+      <label style="margin-top:10px">Ввод (stdin, необязательно)</label>
+      <textarea class="form-input" id="t_stdin" rows="2" style="font-family:Fira Code,monospace">${escapeHtml(t.stdin||'')}</textarea>
+      <label style="margin-top:10px">Стартовый код ${langLabel} (необязательно)</label>
+      <textarea class="form-input" id="t_starter" rows="6" style="font-family:Fira Code,monospace;font-size:13px">${escapeHtml(t.starter||defStarter)}</textarea>
+      <p style="color:#64748b;font-size:13px;margin-top:6px">Код компилируется и запускается на бесплатном публичном сервисе Piston (https://emkc.org). Проверка — сравнение stdout с ожидаемым.</p>`;
+  }
+  document.getElementById('typeFields').innerHTML = html;
+}
+
+async function saveTask(id) {
+  const type = document.getElementById('t_type').value;
+  const data = {
+    type,
+    module: document.getElementById('t_module').value,
+    difficulty: parseInt(document.getElementById('t_diff').value) || 1,
+    title: document.getElementById('t_title').value.trim(),
+    description: document.getElementById('t_desc').value.trim(),
+    explain: document.getElementById('t_explain').value.trim(),
+  };
+  const err = document.getElementById('modalErr');
+  if (!data.title || !data.description) { err.textContent = 'Введи название и условие'; return; }
+  if (type === 'quiz') {
+    data.options = Array.from(document.querySelectorAll('.t_option')).map(i => i.value.trim());
+    const r = document.querySelector('input[name=t_correct]:checked');
+    if (!r) { err.textContent = 'Отметь правильный вариант'; return; }
+    data.answer = parseInt(r.value);
+  } else if (type === 'fill') {
+    data.answer = document.getElementById('t_answer').value.trim();
+    if (!data.answer) { err.textContent = 'Введи правильный ответ'; return; }
+  } else if (type === 'order') {
+    data.items = document.getElementById('t_items').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if (data.items.length < 2) { err.textContent = 'Минимум 2 строки'; return; }
+  } else if (type === 'code') {
+    data.expectedOutput = document.getElementById('t_expected').value;
+    data.starter = document.getElementById('t_starter').value;
+  } else if (type === 'scratch') {
+    data.scratchProjectId = document.getElementById('t_scratch_id').value.trim();
+  } else if (type === 'htmlcss') {
+    data.starter = document.getElementById('t_starter').value;
+    data.expectedOutput = document.getElementById('t_expected').value;
+  } else if (type === 'blockly') {
+    data.expectedOutput = document.getElementById('t_expected').value;
+  } else if (type === 'java' || type === 'cpp') {
+    data.expectedOutput = document.getElementById('t_expected').value;
+    data.starter = document.getElementById('t_starter').value;
+    data.stdin = document.getElementById('t_stdin').value;
+  }
+
+  try {
+    if (id && id !== 'null') await API.updateTask(id, data);
+    else await API.createTask(data);
+    closeModal(); await render(); showToast('<img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:22px;height:22px"> Сохранено','success');
+  } catch (e) { err.textContent = e.message; }
+}
+
+async function removeTask(id) {
+  if (!confirm('Удалить задачу?')) return;
+  try { await API.deleteTask(id); await render(); }
+  catch (e) { alert(e.message); }
+}
+
+/* ============================================================
+   НОВЫЕ РАЗДЕЛЫ: материалы, доступ, CRM, права, журнал, ДЗ, уведомления
+   ============================================================ */
+const tabEl = () => document.getElementById('tab');
+// fmtDate / fmtDateTime / toDate — берём из app.js (window.fmtDate и т.д.)
+// Локальный псевдоним _toDate для совместимости внутри этого файла
+const _toDate = window.toDate;
+const _byId = (arr, id, f='id') => arr.find(x => x[f] === id);
+function moduleTitle(id) { const m = _byId(cache.modules, id); return m ? m.title : id; }
+function userName(id) { const u = _byId(cache.users, id); return u ? u.name : (id || '—'); }
+
+// ---------- Импорт (общая модалка) ----------
+function openImport(dataset) {
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${I18N.t('common.import')}: ${escapeHtml(dataset)}</h2>
+    <p style="color:#64748b;font-size:14px">Вставь данные в формате CSV или JSON. Первая строка CSV — заголовки колонок.</p>
+    <textarea class="form-input" id="imp_data" rows="10" style="font-family:Fira Code,monospace;font-size:13px" placeholder="name,login,role&#10;Иван,ivan,student"></textarea>
+    <div id="imp_preview" style="margin-top:10px"></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px;margin-top:8px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-secondary" onclick="runImport('${dataset}',true)">Проверить</button>
+      <button class="btn btn-success" onclick="runImport('${dataset}',false)" data-i18n="common.import">Импорт</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+}
+function parseImportInput() {
+  const raw = document.getElementById('imp_data').value.trim();
+  if (!raw) throw new Error('Пусто');
+  if (raw[0] === '[' || raw[0] === '{') { return { json: JSON.parse(raw) }; }
+  return { csv: raw };
+}
+async function runImport(dataset, dryRun) {
+  const err = document.getElementById('modalErr');
+  err.textContent = '';
+  try {
+    const payload = parseImportInput();
+    const r = await API.importData(dataset, payload, dryRun);
+    if (dryRun) {
+      document.getElementById('imp_preview').innerHTML =
+        `<div class="card" style="padding:12px">Всего строк: <b>${r.total}</b> · Новых: <b>${r.toCreate}</b> · Обновлений: <b>${r.toUpdate}</b>` +
+        (r.errors && r.errors.length ? `<div style="color:#ef4444;margin-top:6px">Ошибок: ${r.errors.length}<br>${r.errors.slice(0,5).map(e=>escapeHtml(JSON.stringify(e))).join('<br>')}</div>` : '') + `</div>`;
+    } else {
+      closeModal(); showToast(I18N.t('common.saved'),'success'); _baseLoaded=false; await render();
+    }
+  } catch (e) { err.textContent = e.message; }
+}
+
+// ---------- Материалы ----------
+async function renderMaterials() {
+  const mats = await API.getMaterials();
+  const canWrite = isAdmin || (userPerms && userPerms.edit_materials);
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.materials">Материалы</h1>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="API.exportDownload('materials','csv')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965335.png" alt=""> <span data-i18n="common.export">Экспорт</span></button>
+        ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openImport('materials')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965300.png" alt=""> <span data-i18n="common.import">Импорт</span></button>` : ''}
+        ${canWrite ? `<button class="btn" onclick="openMaterialForm()">${I18N.t('common.add')}</button>` : ''}
+      </div>
+    </div>
+    <table class="table"><thead><tr>
+      <th data-i18n="common.title">Название</th><th data-i18n="mat.course">Курс</th><th data-i18n="mat.type">Тип</th><th data-i18n="mat.link">Ссылка</th><th data-i18n="common.actions">Действия</th>
+    </tr></thead><tbody>
+      ${mats.length ? mats.map(m => `<tr>
+        <td><b>${escapeHtml(m.title)}</b></td>
+        <td>${escapeHtml(moduleTitle(m.courseId))}</td>
+        <td>${escapeHtml(m.type||'—')}</td>
+        <td>${isUrl(m.content) ? `<a href="${escapeHtml(m.content)}" target="_blank">${I18N.t('common.open')}</a>` : (m.content ? `<span style="color:#64748b">${escapeHtml(m.content.slice(0,40))}…</span>` : '—')}</td>
+        <td>${canWrite ? `<button class="btn btn-ghost" onclick="openMaterialForm('${m.id}')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/1159/1159633.png"></button>
+          <button class="btn btn-ghost" style="color:#ef4444" onclick="removeMaterial('${m.id}')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/3221/3221897.png"></button>` : '—'}</td>
+      </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(tabEl());
+  window._mats = mats;
+}
+function isUrl(s) { return typeof s === 'string' && /^https?:\/\//i.test(s.trim()); }
+function openMaterialForm(id) {
+  const m = id ? _byId(window._mats||[], id) : { title:'', courseId: cache.modules[0]?.id||'', type:'presentation', content:'' };
+  const TYPES = [['presentation',I18N.t('mat.t_presentation')],['task',I18N.t('mat.t_task')],['text',I18N.t('mat.t_text')],['file',I18N.t('mat.t_file')]];
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id ? I18N.t('mat.edit') : I18N.t('mat.create')}</h2>
+    <div class="form-group"><label>${I18N.t('mat.name')}</label><input class="form-input" id="mt_title" value="${escapeHtml(m.title||'')}"></div>
+    <div class="form-group"><label>${I18N.t('mat.course')}</label><select class="form-input" id="mt_course">
+      ${cache.modules.map(mm => `<option value="${mm.id}" ${m.courseId===mm.id?'selected':''}>${escapeHtml(mm.title)}</option>`).join('')}
+    </select></div>
+    <div class="form-group"><label>${I18N.t('mat.type')}</label><select class="form-input" id="mt_type">
+      ${TYPES.map(([v,l])=>`<option value="${v}" ${m.type===v?'selected':''}>${l}</option>`).join('')}
+    </select></div>
+    <div class="form-group"><label>${I18N.t('mat.link_or_text')}</label>
+      <textarea class="form-input" id="mt_content" rows="4" placeholder="https://...">${escapeHtml(m.content||'')}</textarea></div>
+    <div class="form-group">
+      <label>${I18N.t('mat.or_upload')}</label>
+      <input class="form-input" id="mt_file" type="file"
+             accept=".pdf,.ppt,.pptx,.xls,.xlsx,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt,.zip">
+      <div style="font-size:12px;color:#64748b;margin-top:4px">${I18N.t('mat.file_hint')}${isUrl(m.content) ? ` <a href="${escapeHtml(m.content)}" target="_blank">${I18N.t('mat.current_file')}</a>` : ''}</div>
+    </div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveMaterial('${id||''}')" data-i18n="common.save">Сохранить</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveMaterial(id) {
+  const data = {
+    title: document.getElementById('mt_title').value.trim(),
+    courseId: document.getElementById('mt_course').value,
+    type: document.getElementById('mt_type').value,
+    content: document.getElementById('mt_content').value.trim(),
+  };
+  const err = document.getElementById('modalErr');
+  if (!data.title) { err.textContent = I18N.t('common.error'); return; }
+  // Если выбран файл — читаем его в base64 dataUrl и отправляем
+  const fileInput = document.getElementById('mt_file');
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  if (file) {
+    if (file.size > 50 * 1024 * 1024) { err.textContent = 'Файл больше 50 МБ'; return; }
+    err.textContent = 'Загрузка файла…';
+    try {
+      data.dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(new Error('Не удалось прочитать файл'));
+        r.readAsDataURL(file);
+      });
+      data.fileName = file.name;
+      if (data.type === 'text') data.type = 'file'; // файл не может быть типом «текст»
+    } catch (e) { err.textContent = e.message; return; }
+  }
+  try {
+    if (id) await API.updateMaterial(id, data); else await API.createMaterial(data);
+    closeModal(); await render(); showToast(I18N.t('common.saved'),'success');
+  } catch (e) { err.textContent = e.message; }
+}
+async function removeMaterial(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteMaterial(id); await render(); } catch (e) { alert(e.message); }
+}
+
+// ---------- Доступ учителей к курсам ----------
+async function renderAccess() {
+  const list = await API.getCourseAccess();
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.access">Доступ к курсам</h1>
+      <button class="btn" onclick="openAccessForm()">${I18N.t('common.add')}</button>
+    </div>
+    <p style="color:#64748b;margin-bottom:14px">Учитель видит и редактирует материалы курса, пока действует доступ. Закрытие доступа не удаляет материалы.</p>
+    <table class="table"><thead><tr><th>Учитель</th><th data-i18n="mat.course">Курс</th><th data-i18n="mat.expires">Доступ до</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${list.length ? list.map(a => {
+      const expired = a.expiresAt && a.expiresAt < Date.now();
+      return `<tr>
+        <td>${escapeHtml(userName(a.teacherId))}</td>
+        <td>${escapeHtml(moduleTitle(a.courseId))}</td>
+        <td><span class="badge badge-${expired?'danger':'info'}">${fmtDate(a.expiresAt)}</span></td>
+        <td><button class="btn btn-ghost btn-sm" onclick="openAccessForm('${a.id}')">${I18N.t('common.edit')}</button>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeAccess('${a.id}')">${I18N.t('common.delete')}</button></td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="4" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(tabEl());
+  window._access = list;
+}
+function openAccessForm(id) {
+  const a = id ? _byId(window._access||[], id) : null;
+  const teachers = cache.users.filter(u => u.role === 'teacher' || u.role === 'assistant');
+  const defExp = a ? new Date(a.expiresAt).toISOString().slice(0,10) : new Date(Date.now()+90*864e5).toISOString().slice(0,10);
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id ? 'Изменить' : 'Выдать'} доступ</h2>
+    <div class="form-group"><label>Учитель</label><select class="form-input" id="ac_teacher" ${id?'disabled':''}>
+      ${teachers.map(t=>`<option value="${t.id}" ${a&&a.teacherId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}
+    </select></div>
+    <div class="form-group"><label>Курс</label><select class="form-input" id="ac_course" ${id?'disabled':''}>
+      ${cache.modules.map(m=>`<option value="${m.id}" ${a&&a.courseId===m.id?'selected':''}>${escapeHtml(m.title)}</option>`).join('')}
+    </select></div>
+    <div class="form-group"><label>Доступ до</label><input class="form-input" id="ac_exp" type="date" value="${defExp}"></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveAccess('${id||''}')" data-i18n="common.save">Сохранить</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveAccess(id) {
+  const expiresAt = new Date(document.getElementById('ac_exp').value).getTime();
+  const err = document.getElementById('modalErr');
+  try {
+    if (id) await API.updateCourseAccess(id, { expiresAt });
+    else await API.createCourseAccess({
+      teacherId: document.getElementById('ac_teacher').value,
+      courseId: document.getElementById('ac_course').value,
+      expiresAt,
+    });
+    closeModal(); await render(); showToast(I18N.t('common.saved'),'success');
+  } catch (e) { err.textContent = e.message; }
+}
+async function removeAccess(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteCourseAccess(id); await render(); } catch (e) { alert(e.message); }
+}
+
+// ---------- Филиалы ----------
+async function renderBranches() {
+  const list = await API.getBranches();
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.branches">Филиалы</h1>
+      <button class="btn" onclick="openBranchForm()">${I18N.t('common.add')}</button>
+    </div>
+    <table class="table"><thead><tr><th data-i18n="common.name">Название</th><th data-i18n="common.address">Адрес</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${list.length ? list.map(b=>`<tr>
+      <td><b>${escapeHtml(b.name)}</b></td><td>${escapeHtml(b.address||'—')}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick='openBranchForm(${JSON.stringify(b.id)})'>${I18N.t('common.edit')}</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeBranch('${b.id}')">${I18N.t('common.delete')}</button></td>
+    </tr>`).join('') : `<tr><td colspan="3" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(tabEl());
+  window._branches = list;
+}
+function openBranchForm(id) {
+  const b = id ? _byId(window._branches||[], id) : { name:'', address:'' };
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id?'Редактировать':'Создать'} филиал</h2>
+    <div class="form-group"><label>Название</label><input class="form-input" id="br_name" value="${escapeHtml(b.name||'')}"></div>
+    <div class="form-group"><label>Адрес</label><input class="form-input" id="br_addr" value="${escapeHtml(b.address||'')}"></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveBranch('${id||''}')" data-i18n="common.save">Сохранить</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveBranch(id) {
+  const data = { name: document.getElementById('br_name').value.trim(), address: document.getElementById('br_addr').value.trim() };
+  const err = document.getElementById('modalErr');
+  if (!data.name) { err.textContent = I18N.t('common.error'); return; }
+  try { if (id) await API.updateBranch(id, data); else await API.createBranch(data);
+    closeModal(); await render(); showToast(I18N.t('common.saved'),'success'); } catch (e) { err.textContent = e.message; }
+}
+async function removeBranch(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteBranch(id); await render(); } catch (e) { alert(e.message); }
+}
+
+// ---------- Тарифы (цена в тенге + комментарий) ----------
+async function renderTariffs() {
+  const list = await API.getTariffs();
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.tariffs">Тарифы</h1>
+      <button class="btn" onclick="openTariffForm()">${I18N.t('common.add')}</button>
+    </div>
+    <table class="table"><thead><tr>
+      <th data-i18n="common.name">Название</th><th data-i18n="tariff.lessons">Занятий</th><th data-i18n="tariff.price_kzt">Цена, ₸</th><th data-i18n="tariff.duration">Срок</th><th data-i18n="common.comment">Комментарий</th><th data-i18n="common.actions">Действия</th>
+    </tr></thead><tbody>
+    ${list.length ? list.map(t=>`<tr>
+      <td><b>${escapeHtml(t.name)}</b></td>
+      <td>${t.visitsCount}</td>
+      <td>${(t.price||0).toLocaleString('ru-RU')} ₸</td>
+      <td>${t.durationDays} дн.</td>
+      <td style="color:#64748b">${escapeHtml(t.comment||'—')}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openTariffForm('${t.id}')">${I18N.t('common.edit')}</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeTariff('${t.id}')">${I18N.t('common.delete')}</button></td>
+    </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(tabEl());
+  window._tariffs = list;
+}
+function openTariffForm(id) {
+  const t = id ? _byId(window._tariffs||[], id) : { name:'', visitsCount:8, price:0, durationDays:30, comment:'', extraLessonsSeparate:false };
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id?'Редактировать':'Создать'} тариф</h2>
+    <div class="form-group"><label>Название</label><input class="form-input" id="tf_name" value="${escapeHtml(t.name||'')}"></div>
+    <div class="form-group"><label data-i18n="tariff.lessons">Занятий</label><input class="form-input" id="tf_visits" type="number" min="0" value="${t.visitsCount||0}"></div>
+    <div class="form-group"><label data-i18n="tariff.price_kzt">Цена, ₸</label><input class="form-input" id="tf_price" type="number" min="0" step="100" value="${t.price||0}"></div>
+    <div class="form-group"><label data-i18n="tariff.duration">Срок (дней)</label><input class="form-input" id="tf_days" type="number" min="0" value="${t.durationDays||30}"></div>
+    <div class="form-group"><label data-i18n="common.comment">Комментарий</label><textarea class="form-input" id="tf_comment" rows="2" placeholder="Например: 2 занятия в неделю">${escapeHtml(t.comment||'')}</textarea></div>
+    <label class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="tf_extra" ${t.extraLessonsSeparate?'checked':''}> <span data-i18n="tariff.extra_separate">Доп. занятия оплачиваются отдельно</span></label>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveTariff('${id||''}')" data-i18n="common.save">Сохранить</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveTariff(id) {
+  const data = {
+    name: document.getElementById('tf_name').value.trim(),
+    visitsCount: parseInt(document.getElementById('tf_visits').value) || 0,
+    price: parseInt(document.getElementById('tf_price').value) || 0,
+    durationDays: parseInt(document.getElementById('tf_days').value) || 0,
+    comment: document.getElementById('tf_comment').value.trim(),
+    extraLessonsSeparate: document.getElementById('tf_extra').checked,
+  };
+  const err = document.getElementById('modalErr');
+  if (!data.name) { err.textContent = I18N.t('common.error'); return; }
+  try { if (id) await API.updateTariff(id, data); else await API.createTariff(data);
+    closeModal(); await render(); showToast(I18N.t('common.saved'),'success'); } catch (e) { err.textContent = e.message; }
+}
+async function removeTariff(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteTariff(id); await render(); } catch (e) { alert(e.message); }
+}
+
+// ---------- Группы ----------
+async function renderGroups() {
+  const list = await API.getGroups();
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.groups">Группы</h1>
+      ${isAdmin ? `<button class="btn" onclick="openGroupForm()">${I18N.t('common.add')}</button>` : ''}
+    </div>
+    <table class="table"><thead><tr><th data-i18n="common.name">Название</th><th data-i18n="crm.branch">Филиал</th><th data-i18n="admin.teacher_col">Преподаватель</th><th data-i18n="admin.students_count">Учеников</th><th data-i18n="admin.lesson_type_col">Тип</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${list.length ? list.map(g=>`<tr>
+      <td><b>${escapeHtml(g.name)}</b></td>
+      <td>${escapeHtml(g.branchName||'—')}</td>
+      <td>${escapeHtml(g.teacherName||'—')}</td>
+      <td>${g.memberCount ?? 0}</td>
+      <td><span class="badge badge-info">${g.lessonKind==='extra'?I18N.t('admin.type_extra'):I18N.t('admin.type_main')}</span></td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openGroupDetail('${g.id}')">${I18N.t('common.open')}</button>
+        ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openGroupForm('${g.id}')">${I18N.t('common.edit')}</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroup('${g.id}')">${I18N.t('common.delete')}</button>` : ''}</td>
+    </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(tabEl());
+  window._groups = list;
+}
+function openGroupForm(id) {
+  const g = id ? _byId(window._groups||[], id) : { name:'', branchId:(window._branches&&window._branches[0]?.id)||'', teacherId:'', assistantId:'', courseId:'', lessonKind:'main', status:'active' };
+  const teachers = cache.users.filter(u=>u.role==='teacher');
+  const assistants = cache.users.filter(u=>u.role==='assistant');
+  const branches = window._branches || [];
+  const ensureBranches = branches.length ? Promise.resolve(branches) : API.getBranches();
+  Promise.resolve(ensureBranches).then(brs => {
+    window._branches = brs;
+    document.getElementById('modalContent').innerHTML = `
+      <h2>${id?'Редактировать':'Создать'} группу</h2>
+      <div class="form-group"><label>Название</label><input class="form-input" id="g_name" value="${escapeHtml(g.name||'')}"></div>
+      <div class="form-group"><label>Филиал</label><select class="form-input" id="g_branch">
+        ${brs.map(b=>`<option value="${b.id}" ${g.branchId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Курс</label><select class="form-input" id="g_course">
+        <option value="">— не указан —</option>
+        ${cache.modules.map(m=>`<option value="${m.id}" ${g.courseId===m.id?'selected':''}>${escapeHtml(m.title)}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Преподаватель</label><select class="form-input" id="g_teacher">
+        <option value="">—</option>${teachers.map(t=>`<option value="${t.id}" ${g.teacherId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Ассистент</label><select class="form-input" id="g_assistant">
+        <option value="">—</option>${assistants.map(t=>`<option value="${t.id}" ${g.assistantId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label>${I18N.t('admin.lesson_type_col')}</label><select class="form-input" id="g_kind">
+        <option value="main" ${g.lessonKind==='main'?'selected':''}>${I18N.t('admin.type_main')}</option>
+        <option value="extra" ${g.lessonKind==='extra'?'selected':''}>${I18N.t('admin.type_extra')}</option></select></div>
+      <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+        <button class="btn btn-success" onclick="saveGroup('${id||''}')" data-i18n="common.save">Сохранить</button>
+      </div>`;
+    document.getElementById('modal').classList.add('active');
+    I18N.applyI18n(document.getElementById('modalContent'));
+  });
+}
+async function saveGroup(id) {
+  const data = {
+    name: document.getElementById('g_name').value.trim(),
+    branchId: document.getElementById('g_branch').value,
+    courseId: document.getElementById('g_course').value || null,
+    teacherId: document.getElementById('g_teacher').value || null,
+    assistantId: document.getElementById('g_assistant').value || null,
+    lessonKind: document.getElementById('g_kind').value,
+  };
+  const err = document.getElementById('modalErr');
+  if (!data.name || !data.branchId) { err.textContent = I18N.t('common.error'); return; }
+  try { if (id) await API.updateGroup(id, data); else await API.createGroup(data);
+    closeModal(); await render(); showToast(I18N.t('common.saved'),'success'); } catch (e) { err.textContent = e.message; }
+}
+async function removeGroup(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteGroup(id); await render(); } catch (e) { alert(e.message); }
+}
+async function openGroupDetail(id) {
+  const g = _byId(window._groups||[], id) || await API.getGroup(id);
+  const [members, schedule] = await Promise.all([API.getMembers(id), API.getSchedule(id)]);
+  const students = cache.users.filter(u=>u.role==='student');
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${escapeHtml(g.name)}</h2>
+    <h3 class="section-title" style="margin-top:8px">Ученики (${members.length})</h3>
+    <div style="display:flex;gap:8px;margin:8px 0">
+      <select class="form-input" id="gm_student" style="flex:1">
+        ${students.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select>
+      <button class="btn btn-sm" onclick="addGroupMember('${id}')">${I18N.t('common.add')}</button>
+    </div>
+    <div id="gm_list">${members.map(m=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef2f7">
+      <span>${escapeHtml(userName(m.studentId))}</span>
+      <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroupMember('${id}','${m.id}')">${I18N.t('common.delete')}</button></div>`).join('') || `<div style="color:#64748b">${I18N.t('common.none')}</div>`}</div>
+    <h3 class="section-title" style="margin-top:16px">Расписание</h3>
+    <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
+      <select class="form-input" id="sc_day" style="flex:1;min-width:120px">
+        ${[[1,'Пн'],[2,'Вт'],[3,'Ср'],[4,'Чт'],[5,'Пт'],[6,'Сб'],[0,'Вс']].map(([v,d])=>`<option value="${v}">${d}</option>`).join('')}</select>
+      <input class="form-input" id="sc_time" type="time" value="16:00" style="width:120px">
+      <input class="form-input" id="sc_dur" type="number" min="15" step="15" value="60" title="Длительность, мин" style="width:90px">
+      <button class="btn btn-sm" onclick="addGroupSchedule('${id}')">${I18N.t('common.add')}</button>
+    </div>
+    <div id="sc_list">${schedule.map(s=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef2f7">
+      <span>${['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][s.weekday]||s.weekday} · ${escapeHtml(s.startTime||'')} (${s.durationMin||60} мин)</span>
+      <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroupSchedule('${id}','${s.id}')">${I18N.t('common.delete')}</button></div>`).join('') || `<div style="color:#64748b">${I18N.t('common.none')}</div>`}</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.close">Закрыть</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function addGroupMember(gid) {
+  const studentId = document.getElementById('gm_student').value;
+  try { await API.addMember(gid, { studentId }); _baseLoaded=false; openGroupDetail(gid); } catch (e) { alert(e.message); }
+}
+async function removeGroupMember(gid, mid) {
+  try { await API.removeMember(gid, mid); openGroupDetail(gid); } catch (e) { alert(e.message); }
+}
+async function addGroupSchedule(gid) {
+  const weekday = parseInt(document.getElementById('sc_day').value);
+  const startTime = document.getElementById('sc_time').value;
+  const durationMin = parseInt(document.getElementById('sc_dur').value) || 60;
+  try { await API.addSchedule(gid, { weekday, startTime, durationMin }); openGroupDetail(gid); } catch (e) { alert(e.message); }
+}
+async function removeGroupSchedule(gid, sid) {
+  try { await API.deleteSchedule(gid, sid); openGroupDetail(gid); } catch (e) { alert(e.message); }
+}
+
+// ---------- Клиенты (CRM ученики) ----------
+async function renderClients() {
+  const [list, tariffs, branches] = await Promise.all([API.getCrmStudents(), API.getTariffs(), API.getBranches()]);
+  window._tariffs = tariffs; window._branches = branches;
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 data-i18n="admin.clients">Клиенты (CRM)</h1>
+      <button class="btn" onclick="openClientForm()">${I18N.t('common.add')}</button>
+    </div>
+    <input class="form-input" id="clSearch" placeholder="${I18N.t('common.search')}" style="margin-bottom:14px" oninput="filterClients()">
+    <table class="table" id="clTable"><thead><tr>
+      <th data-i18n="crm.fullname">ФИО</th><th data-i18n="crm.tariff">Тариф</th><th data-i18n="crm.visits_left">Осталось</th><th data-i18n="common.status">Статус</th><th data-i18n="crm.parent_phone">Тел. родителя</th><th data-i18n="common.actions">Действия</th>
+    </tr></thead><tbody>
+    ${list.length ? list.map(c=>{
+      const tariff = _byId(tariffs, c.tariffId);
+      return `<tr data-search="${escapeHtml((c.fullName||'').toLowerCase())}">
+        <td><b>${escapeHtml(c.fullName||userName(c.userId))}</b></td>
+        <td>${escapeHtml(tariff?tariff.name:'—')}</td>
+        <td>${c.visitsLeft ?? 0}</td>
+        <td><span class="badge badge-${c.status==='active'?'success':c.status==='frozen'?'warning':'danger'}">${I18N.t('crm.status_'+(c.status||'inactive'))}</span></td>
+        <td>${escapeHtml(c.parentPhone||'—')}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="openClientForm('${c.userId}')">${I18N.t('common.edit')}</button>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeClient('${c.userId}')">${I18N.t('common.delete')}</button></td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(tabEl());
+  window._clients = list;
+}
+function filterClients() {
+  const q = document.getElementById('clSearch').value.toLowerCase();
+  document.querySelectorAll('#clTable tbody tr').forEach(tr => {
+    if (!tr.dataset.search) return;
+    tr.style.display = tr.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+function openClientForm(id) {
+  const c = id ? _byId(window._clients||[], id, 'userId') : null;
+  const students = cache.users.filter(u=>u.role==='student');
+  const tariffs = window._tariffs || [];
+  const branches = window._branches || [];
+  const managers = cache.users.filter(u=>u.role==='admin'||u.role==='teacher');
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${id?'Карточка клиента':'Новый клиент'}</h2>
+    ${id ? `<input type="hidden" id="cl_user" value="${c.userId}">` : `
+    <div class="form-group"><label>Ученик (аккаунт)</label><select class="form-input" id="cl_user">
+      ${students.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}</select></div>`}
+    <div class="form-group"><label data-i18n="crm.fullname">ФИО</label><input class="form-input" id="cl_fullname" value="${escapeHtml(c?.fullName||'')}"></div>
+    <div class="form-group"><label data-i18n="crm.branch">Филиал</label><select class="form-input" id="cl_branch">
+      <option value="">—</option>${branches.map(b=>`<option value="${b.id}" ${c&&c.branchId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label data-i18n="crm.tariff">Тариф</label><select class="form-input" id="cl_tariff">
+      <option value="">—</option>${tariffs.map(t=>`<option value="${t.id}" ${c&&c.tariffId===t.id?'selected':''}>${escapeHtml(t.name)} (${t.visitsCount} зан.)</option>`).join('')}</select></div>
+    <div class="form-group"><label data-i18n="common.status">Статус</label><select class="form-input" id="cl_status">
+      ${['active','frozen','inactive'].map(s=>`<option value="${s}" ${c&&c.status===s?'selected':''}>${I18N.t('crm.status_'+s)}</option>`).join('')}</select></div>
+    <div class="form-group"><label data-i18n="crm.manager">Ответственный</label><select class="form-input" id="cl_manager">
+      <option value="">—</option>${managers.map(m=>`<option value="${m.id}" ${c&&c.responsibleManagerId===m.id?'selected':''}>${escapeHtml(m.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label data-i18n="crm.parent_name">Имя родителя</label><input class="form-input" id="cl_parent_name" value="${escapeHtml(c?.parentName||'')}"></div>
+    <div class="form-group"><label data-i18n="crm.parent_phone">Телефон родителя</label>
+      <input class="form-input" id="cl_parent_phone" value="${escapeHtml(c?.parentPhone||'')}" placeholder="+7 777 123 45 67" oninput="previewNormPhone(this)">
+      <small id="cl_phone_preview" style="color:#64748b;font-size:12px"></small>
+    </div>
+    <div class="form-group"><label data-i18n="crm.birth_date">Дата рождения</label><input class="form-input" id="cl_birth" type="date" value="${escapeHtml(c?.birthDate||'')}"></div>
+    <div class="form-group"><label data-i18n="crm.document">Документ</label><input class="form-input" id="cl_doc" value="${escapeHtml(c?.documentId||'')}"></div>
+    <label class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="cl_video" ${c&&c.videoConsent?'checked':''}> <span data-i18n="crm.video_consent">Согласие на видеосъёмку</span></label>
+    <div class="form-group"><label data-i18n="common.comment">Комментарий</label><textarea class="form-input" id="cl_comment" rows="2">${escapeHtml(c?.comment||'')}</textarea></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveClient('${id||''}')" data-i18n="common.save">Сохранить</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveClient(id) {
+  const data = {
+    userId: document.getElementById('cl_user').value,
+    fullName: document.getElementById('cl_fullname').value.trim(),
+    branchId: document.getElementById('cl_branch').value || null,
+    tariffId: document.getElementById('cl_tariff').value || null,
+    status: document.getElementById('cl_status').value,
+    responsibleManagerId: document.getElementById('cl_manager').value || null,
+    parentName: document.getElementById('cl_parent_name').value.trim(),
+    parentPhone: document.getElementById('cl_parent_phone').value.trim(),
+    birthDate: document.getElementById('cl_birth').value || null,
+    documentId: document.getElementById('cl_doc').value.trim(),
+    videoConsent: document.getElementById('cl_video').checked,
+    comment: document.getElementById('cl_comment').value.trim(),
+  };
+  // Если выбран тариф — отметим дату выдачи абонемента, чтобы сервер рассчитал остаток занятий
+  if (data.tariffId) data.subscriptionIssuedAt = Date.now();
+  const err = document.getElementById('modalErr');
+  if (!data.userId || !data.fullName) { err.textContent = I18N.t('common.error'); return; }
+  try {
+    if (id) await API.updateCrmStudent(id, data); else await API.createCrmStudent(data);
+    closeModal(); await render(); showToast(I18N.t('common.saved'),'success');
+  } catch (e) { err.textContent = e.message; }
+}
+async function removeClient(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteCrmStudent(id); await render(); } catch (e) { alert(e.message); }
+}
+
+// ---------- Права преподавателей ----------
+async function renderPermissions() {
+  const keys = await API.getPermissionKeys();
+  const teachers = cache.users.filter(u=>u.role==='teacher'||u.role==='assistant');
+  tabEl().innerHTML = `
+    <h1 data-i18n="admin.permissions">Права доступа</h1>
+    <p style="color:#64748b;margin:6px 0 16px">${I18N.t('admin.perm_intro')}</p>
+    <div class="form-group" style="max-width:360px"><select class="form-input" id="pm_teacher" onchange="loadPerms()">
+      <option value="">${I18N.t('admin.perm_select')}</option>
+      ${teachers.map(t=>`<option value="${t.id}">${escapeHtml(t.name)} (${t.role})</option>`).join('')}
+    </select></div>
+    <div id="pm_box"></div>`;
+  window._permKeys = keys;
+  I18N.applyI18n(tabEl());
+}
+async function loadPerms() {
+  const tid = document.getElementById('pm_teacher').value;
+  const box = document.getElementById('pm_box');
+  if (!tid) { box.innerHTML = ''; return; }
+  const perms = await API.getPermissions(tid);
+  const labels = {
+    edit_materials:'Редактировать материалы', manage_tasks:'Управлять задачами',
+    see_subscriptions:'Видеть абонементы/оплаты', conduct_lessons:'Проводить занятия',
+    upload_artifacts:'Загружать материалы занятий', write_feedback:'Писать обратную связь',
+    manage_whatsapp:'Отправлять WhatsApp-напоминания (по своим группам)',
+  };
+  // Нормализуем _permKeys: массив объектов {key,label} или строк
+  // Если _permKeys ещё не загружены (async renderPermissions не завершился),
+  // используем локальный словарь labels как запасной вариант.
+  const rawKeys = Array.isArray(window._permKeys) && window._permKeys.length > 0 ? window._permKeys : [];
+  const normKeys = rawKeys.length
+    ? rawKeys.map(k => {
+        if (typeof k === 'object' && k !== null) {
+          const key = String(k.key || '');
+          const lbl = (k.label && typeof k.label === 'string') ? k.label : (labels[key] || key);
+          return { key, lbl };
+        }
+        return { key: String(k), lbl: labels[String(k)] || String(k) };
+      })
+    : Object.keys(labels).map(k => ({ key: k, lbl: labels[k] }));
+  box.innerHTML = `<div class="card" style="padding:16px;max-width:480px">
+    ${normKeys.filter(n => n.key).map(({ key, lbl }) => `
+      <label style="display:flex;align-items:center;gap:10px;padding:8px 0">
+        <input type="checkbox" class="pm_check" data-key="${key}" ${perms[key]?'checked':''} style="width:18px;height:18px">
+        <span>${lbl}</span>
+      </label>`).join('')}
+    <div style="display:flex;justify-content:flex-end;margin-top:10px">
+      <button class="btn btn-success" onclick="savePerms('${tid}')" data-i18n="common.save">Сохранить</button>
+    </div>
+  </div>`;
+  I18N.applyI18n(box);
+}
+async function savePerms(tid) {
+  const data = {};
+  document.querySelectorAll('.pm_check').forEach(c => data[c.dataset.key] = c.checked);
+  try { await API.setPermissions(tid, data); showToast(I18N.t('common.saved'),'success'); } catch (e) { alert(e.message); }
+}
+
+// ---------- Календарь занятий (недельный/дневной вид) ----------
+const CAL = { start: 8, end: 22, hourPx: 56 }; // окно дня 08:00–22:00
+let _cal = { ref: null, view: 'week', branchId: '', branches: [], events: [] };
+
+function _ymd(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function _mondayOf(d){ const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const off=(x.getDay()+6)%7; x.setDate(x.getDate()-off); return x; }
+function _addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function _minsOf(hhmm){ const [h,m]=String(hhmm||'0:0').split(':').map(Number); return (h||0)*60+(m||0); }
+function _locale(){ return I18N.lang==='kk' ? 'kk-KZ' : 'ru-RU'; }
+
+async function renderCalendar() {
+  if (!_cal.ref) _cal.ref = new Date();
+  try { if (!_cal.branches.length) _cal.branches = await API.getBranches(); } catch { _cal.branches = []; }
+
+  const isDay = _cal.view === 'day';
+  const days = isDay
+    ? [new Date(_cal.ref.getFullYear(), _cal.ref.getMonth(), _cal.ref.getDate())]
+    : Array.from({length:7}, (_,i)=>_addDays(_mondayOf(_cal.ref), i));
+  const from = _ymd(days[0]), to = _ymd(days[days.length-1]);
+
+  // Заголовок диапазона
+  const rangeLabel = isDay
+    ? days[0].toLocaleDateString(_locale(), { day:'numeric', month:'long', year:'numeric', weekday:'long' })
+    : `${days[0].toLocaleDateString(_locale(),{day:'numeric',month:'long'})} – ${days[6].toLocaleDateString(_locale(),{day:'numeric',month:'long',year:'numeric'})}`;
+
+  tabEl().innerHTML = `
+    <div class="cal-toolbar">
+      <div class="cal-nav">
+        <button class="btn btn-ghost btn-sm" onclick="calShift(-1)">‹</button>
+        <button class="btn btn-ghost btn-sm" onclick="calToday()" data-i18n="cal.today">Сегодня</button>
+        <button class="btn btn-ghost btn-sm" onclick="calShift(1)">›</button>
+      </div>
+      <div class="cal-range">${escapeHtml(rangeLabel)}</div>
+      <div class="cal-right">
+        <select class="form-input cal-branch" onchange="calSetBranch(this.value)">
+          <option value="">${I18N.t('cal.all_branches')}</option>
+          ${_cal.branches.map(b=>`<option value="${b.id}" ${_cal.branchId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+        </select>
+        <div class="cal-viewswitch">
+          <button class="cal-vbtn ${_cal.view==='week'?'active':''}" onclick="calSetView('week')" data-i18n="cal.week">Неделя</button>
+          <button class="cal-vbtn ${_cal.view==='day'?'active':''}" onclick="calSetView('day')" data-i18n="cal.day">День</button>
+        </div>
+      </div>
+    </div>
+    <div id="calBody" class="cal-loading">${I18N.t('common.loading')}</div>`;
+  I18N.applyI18n(tabEl());
+
+  let events = [];
+  try {
+    events = await API.getCalendar(`from=${from}&to=${to}` + (_cal.branchId ? `&branch_id=${encodeURIComponent(_cal.branchId)}` : ''));
+  } catch (e) {
+    document.getElementById('calBody').innerHTML = `<div style="color:#ef4444;padding:20px">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  _cal.events = events;
+  document.getElementById('calBody').outerHTML = calGridHtml(days, events, isDay);
+  I18N.applyI18n(tabEl());
+}
+
+function calGridHtml(days, events, isDay) {
+  const hours = [];
+  for (let h = CAL.start; h <= CAL.end; h++) hours.push(h);
+  const gridH = (CAL.end - CAL.start) * CAL.hourPx;
+  const todayYmd = _ymd(new Date());
+
+  // Колонка с часами
+  const timeCol = `<div class="cal-timecol" style="height:${gridH}px">
+    ${hours.map(h=>`<div class="cal-hour" style="height:${CAL.hourPx}px"><span>${String(h).padStart(2,'0')}:00</span></div>`).join('')}
+  </div>`;
+
+  const byDay = {};
+  for (const e of events) (byDay[e.date] = byDay[e.date] || []).push(e);
+
+  const empty = events.length ? '' : `<div class="cal-empty">${I18N.t('cal.empty')}</div>`;
+  return `<div id="calBody" class="cal-wrap ${isDay?'day':''}">
+    <div class="cal-grid">
+      <div class="cal-corner"></div>
+      ${days.map(d=>{const y=_ymd(d);return `<div class="cal-colhdr ${y===todayYmd?'today':''}">
+        <span>${d.toLocaleDateString(_locale(),{weekday:'short'})}</span>
+        <b>${d.getDate()}.${String(d.getMonth()+1).padStart(2,'0')}</b></div>`;}).join('')}
+    </div>
+    <div class="cal-scroll">
+      <div class="cal-grid cal-body-grid">
+        ${timeCol}
+        ${days.map(d=>{
+          const ymd=_ymd(d);
+          const list=(byDay[ymd]||[]).slice().sort((a,b)=>_minsOf(a.startTime)-_minsOf(b.startTime));
+          const lanes=_packLanes(list);
+          return `<div class="cal-daycol ${ymd===todayYmd?'today':''}">
+            <div class="cal-daygrid" style="height:${gridH}px">
+              ${hours.map(()=>`<div class="cal-cellline" style="height:${CAL.hourPx}px"></div>`).join('')}
+              ${list.map((e,i)=>calBlockHtml(e,lanes[i])).join('')}
+            </div></div>`;
+        }).join('')}
+      </div>
+    </div>
+    ${empty}</div>`;
+}
+
+// Простое размещение по «полосам» при пересечении по времени
+function _packLanes(list) {
+  const lanes = []; // массив времён окончания в каждой полосе
+  const out = [];
+  for (const e of list) {
+    const start = _minsOf(e.startTime), end = start + (e.durationMin || 60);
+    let lane = lanes.findIndex(endAt => start >= endAt);
+    if (lane === -1) { lane = lanes.length; lanes.push(end); } else lanes[lane] = end;
+    out.push({ lane });
+  }
+  const total = Math.max(1, lanes.length);
+  return out.map(o => ({ lane: o.lane, total }));
+}
+
+function calBlockHtml(e, lane) {
+  const start = e.startTime != null ? _minsOf(e.startTime) : CAL.start*60;
+  const top = Math.max(0, (start - CAL.start*60) / 60 * CAL.hourPx);
+  const h = Math.max(28, (e.durationMin || 60) / 60 * CAL.hourPx - 3);
+  const widthPct = 100 / (lane.total || 1);
+  const leftPct = widthPct * (lane.lane || 0);
+  const endMin = start + (e.durationMin || 60);
+  const timeStr = e.startTime != null
+    ? `${e.startTime}–${String(Math.floor(endMin/60)).padStart(2,'0')}:${String(endMin%60).padStart(2,'0')}`
+    : '';
+  const kind = e.lessonKind === 'extra' ? I18N.t('cal.kind_extra') : I18N.t('cal.kind_main');
+  const cls = e.conducted ? 'conducted' : 'planned';
+  const status = e.conducted
+    ? `✓ ${e.presentCount} ${I18N.t('cal.present')}`
+    : I18N.t('cal.conduct');
+  const teachers = [e.teacherName, e.assistantName].filter(Boolean).join(', ');
+  const onclick = e.conducted
+    ? `openAttendance('${e.sessionId}','${e.groupId}')`
+    : `conductSlot('${e.groupId}','${e.date}')`;
+  return `<div class="cal-block ${cls} kind-${e.lessonKind}" onclick="${onclick}"
+      style="top:${top}px;height:${h}px;left:calc(${leftPct}% + 2px);width:calc(${widthPct}% - 4px)"
+      title="${escapeHtml(e.groupName)} ${timeStr}">
+    <div class="cal-b-time">${timeStr} · ${kind}</div>
+    <div class="cal-b-title">${escapeHtml(e.groupName)}</div>
+    ${teachers ? `<div class="cal-b-sub">${escapeHtml(teachers)}</div>` : ''}
+    <div class="cal-b-status">${status}</div>
+  </div>`;
+}
+
+function calShift(dir) {
+  _cal.ref = _addDays(_cal.ref || new Date(), (_cal.view==='day'?1:7) * dir);
+  renderCalendar();
+}
+function calToday() { _cal.ref = new Date(); renderCalendar(); }
+function calSetView(v) { _cal.view = v; renderCalendar(); }
+function calSetBranch(b) { _cal.branchId = b; renderCalendar(); }
+
+// Клик по пустому слоту: создаём занятие на эту дату и открываем проведение
+async function conductSlot(groupId, ymd) {
+  try {
+    const [y,m,d] = ymd.split('-').map(Number);
+    const ms = new Date(y, m-1, d, 0, 0, 0, 0).getTime();
+    const s = await API.createSession({ groupId, date: ms, topic: '' });
+    await renderCalendar();
+    openAttendance(s.id, groupId);
+  } catch (e) { alert(e.message); }
+}
+
+// ---------- Журнал занятий ----------
+async function renderSessions() {
+  const groups = await API.getGroups();
+  window._groups = groups;
+  tabEl().innerHTML = `
+    <h1 data-i18n="admin.sessions">Журнал занятий</h1>
+    <div class="form-group" style="max-width:360px;margin-top:10px"><select class="form-input" id="ss_group" onchange="loadSessions()">
+      <option value="">${I18N.t('admin.sessions_select_group')}</option>
+      ${groups.map(g=>`<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('')}
+    </select></div>
+    <div id="ss_box"></div>`;
+  I18N.applyI18n(tabEl());
+}
+async function loadSessions() {
+  const gid = document.getElementById('ss_group').value;
+  const box = document.getElementById('ss_box');
+  if (!gid) { box.innerHTML=''; return; }
+  const sessions = await API.getSessions('group_id=' + encodeURIComponent(gid));
+  box.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn" onclick="openSessionForm('${gid}')">${I18N.t('session.conduct')}</button>
+    </div>
+    <table class="table"><thead><tr><th data-i18n="common.date">Дата</th><th data-i18n="session.topic">Тема</th><th data-i18n="session.present_count">Присутствовало</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${sessions.length ? sessions.map(s=>`<tr>
+      <td>${fmtDate(s.date)}</td><td>${escapeHtml(s.topic||'—')}</td><td>${s.presentCount ?? 0}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openAttendance('${s.id}','${gid}')">${I18N.t('session.attendance')}</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeSession('${s.id}')">${I18N.t('common.delete')}</button></td>
+    </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(box);
+}
+function openSessionForm(gid) {
+  document.getElementById('modalContent').innerHTML = `
+    <h2 data-i18n="session.conduct">Провести занятие</h2>
+    <div class="form-group"><label data-i18n="common.date">Дата</label><input class="form-input" id="se_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="form-group"><label data-i18n="session.topic">Тема</label><input class="form-input" id="se_topic"></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveSession('${gid}')" data-i18n="common.create">Создать</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveSession(gid) {
+  const data = { groupId: gid, date: new Date(document.getElementById('se_date').value).getTime(), topic: document.getElementById('se_topic').value.trim() };
+  const err = document.getElementById('modalErr');
+  try { const s = await API.createSession(data); closeModal(); await loadSessions(); openAttendance(s.id, gid); }
+  catch (e) { err.textContent = e.message; }
+}
+async function removeSession(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteSession(id); await loadSessions(); } catch (e) { alert(e.message); }
+}
+// Состояние текущего открытого занятия (для дозагрузки артефактов по строкам)
+let _lesson = { sessionId: null, groupId: null, artifacts: [], missing: [] };
+
+async function openAttendance(sessionId, groupId) {
+  const [existing, members, artifacts] = await Promise.all([
+    API.getSessionAttendance(sessionId),
+    groupId ? API.getMembers(groupId) : Promise.resolve([]),
+    API.getArtifacts('lesson_session_id=' + encodeURIComponent(sessionId)).catch(() => []),
+  ]);
+  const existMap = {};
+  (existing || []).forEach(r => { existMap[r.studentId] = r.status; });
+  // полный список = состав группы ∪ уже отмеченные
+  const roster = [];
+  const seen = new Set();
+  (members || []).forEach(m => { roster.push({ studentId: m.studentId, name: m.name || userName(m.studentId) }); seen.add(m.studentId); });
+  (existing || []).forEach(r => { if (!seen.has(r.studentId)) { roster.push({ studentId: r.studentId, name: r.name || userName(r.studentId) }); seen.add(r.studentId); } });
+
+  _lesson = { sessionId, groupId, artifacts: artifacts || [], missing: [] };
+
+  document.getElementById('modalContent').innerHTML = `
+    <h2 data-i18n="session.conduct">Проведение занятия</h2>
+    <p style="color:#64748b;font-size:13px">Отметка «${I18N.t('session.present')}» списывает одно занятие у активного абонемента. Возле каждого ученика можно добавить его работу (скрин/файл с описанием) и видеоотчёт.</p>
+    <div id="att_list">${roster.length ? roster.map(r=>lessonRowHtml(r, existMap[r.studentId] || 'present')).join('')
+      : `<div style="color:#64748b">${I18N.t('common.none')} — в группе нет учеников</div>`}</div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.close">Закрыть</button>
+      <button class="btn btn-success" onclick="saveAttendance('${sessionId}')" data-i18n="session.save_attendance">Сохранить посещаемость</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+
+// Разметка строки одного ученика в окне проведения занятия
+function lessonRowHtml(r, st) {
+  const arts = _lesson.artifacts.filter(a => a.studentId === r.studentId);
+  return `<div class="lesson-row" data-row="${r.studentId}" style="padding:10px 0;border-bottom:1px solid #eef2f7">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="font-weight:600">${escapeHtml(r.name)}</span>
+      <select class="form-input att_sel" data-student="${r.studentId}" style="width:170px">
+        <option value="present" ${st==='present'?'selected':''}>${I18N.t('session.present')}</option>
+        <option value="absent" ${st==='absent'?'selected':''}>${I18N.t('session.absent')}</option>
+        <option value="late" ${st==='late'?'selected':''}>${I18N.t('session.late')}</option>
+        <option value="excused" ${st==='excused'?'selected':''}>${I18N.t('session.excused')}</option>
+      </select>
+    </div>
+    <div class="art_list" data-student="${r.studentId}" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
+      ${arts.map(artChipHtml).join('')}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      <input class="form-input art_desc" data-student="${r.studentId}" placeholder="${I18N.t('session.work_desc')}" style="flex:1;min-width:160px;font-size:13px">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('wf_${r.studentId}').click()">📎 ${I18N.t('session.add_work')}</button>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('vf_${r.studentId}').click()">🎬 ${I18N.t('session.add_video')}</button>
+      <input id="wf_${r.studentId}" type="file" style="display:none" accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip" onchange="uploadArtifact('${r.studentId}','work',this)">
+      <input id="vf_${r.studentId}" type="file" style="display:none" accept="video/*" onchange="uploadArtifact('${r.studentId}','video',this)">
+    </div>
+  </div>`;
+}
+
+function artChipHtml(a) {
+  const icon = a.type === 'video' ? '🎬' : a.type === 'screenshot' ? '🖼' : a.type === 'link' ? '🔗' : '📄';
+  const label = escapeHtml(a.title || ({video:'Видеоотчёт',screenshot:'Скрин работы',file:'Файл',link:'Ссылка'}[a.type] || a.type));
+  const inner = a.url
+    ? `<a href="${escapeHtml(a.url)}" target="_blank" style="text-decoration:none">${icon} ${label}</a>`
+    : `<span style="color:#94a3b8">${icon} ${escapeHtml(a.unavailable || label)}</span>`;
+  return `<span class="art-chip" style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border-radius:8px;padding:4px 8px;font-size:12px">
+    ${inner}
+    <span style="cursor:pointer;color:#ef4444;font-weight:700" title="${I18N.t('common.delete')}" onclick="removeArtifact('${a.id}')">×</span>
+  </span>`;
+}
+
+// Загрузка работы/видео ученика. kind: 'work' | 'video'
+async function uploadArtifact(studentId, kind, inputEl) {
+  const file = inputEl.files && inputEl.files[0];
+  if (!file) return;
+  const err = document.getElementById('modalErr');
+  if (file.size > 50 * 1024 * 1024) { err.textContent = 'Файл больше 50 МБ'; inputEl.value=''; return; }
+  const descEl = document.querySelector(`.art_desc[data-student="${studentId}"]`);
+  const desc = descEl ? descEl.value.trim() : '';
+  const type = kind === 'video' ? 'video' : (file.type.startsWith('image/') ? 'screenshot' : 'file');
+  err.textContent = I18N.t('session.uploading');
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(new Error('Не удалось прочитать файл'));
+      r.readAsDataURL(file);
+    });
+    const art = await API.createArtifact({
+      lessonSessionId: _lesson.sessionId, studentId, type,
+      title: desc || null, dataUrl,
+    });
+    _lesson.artifacts.push(art);
+    refreshArtList(studentId);
+    clearMissingForStudent(studentId);
+    if (descEl) descEl.value = '';
+    err.textContent = '';
+    showToast(I18N.t('common.saved'), 'success');
+  } catch (e) { err.textContent = e.message; }
+  finally { inputEl.value = ''; }
+}
+
+async function removeArtifact(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try {
+    await API.deleteArtifact(id);
+    const art = _lesson.artifacts.find(a => a.id === id);
+    _lesson.artifacts = _lesson.artifacts.filter(a => a.id !== id);
+    if (art) refreshArtList(art.studentId);
+  } catch (e) { document.getElementById('modalErr').textContent = e.message; }
+}
+
+function refreshArtList(studentId) {
+  const box = document.querySelector(`.art_list[data-student="${studentId}"]`);
+  if (!box) return;
+  const arts = _lesson.artifacts.filter(a => a.studentId === studentId);
+  box.innerHTML = arts.map(artChipHtml).join('');
+}
+
+async function saveAttendance(sessionId) {
+  const records = Array.from(document.querySelectorAll('.att_sel')).map(s => ({ studentId: s.dataset.student, status: s.value }));
+  try {
+    const resp = await API.saveAttendance({ lessonSessionId: sessionId, records });
+    const missing = resp && resp.missingReports || [];
+    renderMissingReportWarning(missing);
+    if (missing.length === 0) { closeModal(); }
+    showToast(I18N.t('common.saved'), missing.length ? 'warning' : 'success');
+  }
+  catch (e) { document.getElementById('modalErr').textContent = e.message; }
+}
+
+// Подсветить строки учеников, которым не загружен отчёт, и показать предупреждение красным.
+// Модалка при этом не закрывается — чтобы можно было сразу прикрепить нужный файл.
+function renderMissingReportWarning(missing) {
+  _lesson.missing = missing || [];
+  document.querySelectorAll('.lesson-row').forEach(el => el.classList.remove('lesson-row-missing'));
+  let banner = document.getElementById('missingReportBanner');
+  if (!_lesson.missing.length) {
+    if (banner) banner.remove();
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'missingReportBanner';
+    const list = document.getElementById('att_list');
+    list.parentNode.insertBefore(banner, list);
+  }
+  banner.style.cssText = 'background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-weight:700;font-size:13px;margin-bottom:10px';
+  banner.innerHTML = `⚠️ ${I18N.t('session.missing_report_warning')} ${_lesson.missing.map(m => escapeHtml(m.name)).join(', ')}`;
+  _lesson.missing.forEach(m => {
+    const row = document.querySelector(`.lesson-row[data-row="${m.studentId}"]`);
+    if (row) row.classList.add('lesson-row-missing');
+  });
+}
+
+// Снять предупреждение для конкретного ученика сразу после загрузки ему работы/видео,
+// не дожидаясь повторного нажатия «Сохранить посещаемость».
+function clearMissingForStudent(studentId) {
+  if (!_lesson.missing || !_lesson.missing.length) return;
+  if (!_lesson.missing.some(m => m.studentId === studentId)) return;
+  renderMissingReportWarning(_lesson.missing.filter(m => m.studentId !== studentId));
+}
+
+// ---------- Домашние задания (привязаны к занятиям) ----------
+async function renderHomeworkAdmin() {
+  const groups = await API.getGroups();
+  window._groups = groups;
+  tabEl().innerHTML = `
+    <h1 data-i18n="admin.homework">Домашние задания</h1>
+    <p style="color:#64748b;margin:6px 0 14px">${I18N.t('admin.hw_intro')}</p>
+    <div class="form-group" style="max-width:360px"><select class="form-input" id="hw_group" onchange="loadHw()">
+      <option value="">${I18N.t('admin.select_group')}</option>
+      ${groups.map(g=>`<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('')}
+    </select></div>
+    <div id="hw_box"></div>`;
+  I18N.applyI18n(tabEl());
+}
+async function loadHw() {
+  const gid = document.getElementById('hw_group').value;
+  const box = document.getElementById('hw_box');
+  if (!gid) { box.innerHTML=''; return; }
+  const [sessions, list] = await Promise.all([
+    API.getSessions('group_id=' + encodeURIComponent(gid)),
+    API.getHomework('group_id=' + encodeURIComponent(gid)),
+  ]);
+  window._hwSessions = sessions;
+  box.innerHTML = `
+    <h3 class="section-title" data-i18n="session.group_sessions">Занятия группы</h3>
+    <table class="table"><thead><tr><th data-i18n="common.date">Дата</th><th data-i18n="session.topic">Тема</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${sessions.length ? sessions.map(s=>`<tr><td>${fmtDate(s.date)}</td><td>${escapeHtml(s.topic||'—')}</td>
+      <td><button class="btn btn-sm" onclick="openHwForm('${s.id}')">${I18N.t('hw.add')}</button></td></tr>`).join('')
+      : `<tr><td colspan="3" style="text-align:center;color:#64748b">${I18N.t('common.none')} — ${I18N.t('admin.no_sessions')}</td></tr>`}
+    </tbody></table>
+    <h3 class="section-title" style="margin-top:18px" data-i18n="session.assigned_hw">Назначенные ДЗ</h3>
+    <table class="table"><thead><tr><th data-i18n="admin.hw_module">Модуль</th><th data-i18n="admin.hw_tasks_count">Задач</th><th data-i18n="admin.hw_deadline">Срок</th><th data-i18n="admin.hw_session">Занятие</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${list.length ? list.map(h=>`<tr>
+      <td>${escapeHtml(h.moduleTitle||'—')}</td>
+      <td>${(h.taskIds||[]).length}</td>
+      <td>${fmtDate(h.dueDate)}</td>
+      <td>${fmtDate(h.sessionDate)}</td>
+      <td><button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeHw('${h.id}')">${I18N.t('common.delete')}</button></td>
+    </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table>`;
+  I18N.applyI18n(box);
+}
+function openHwForm(sessionId) {
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${I18N.t('admin.homework')}</h2>
+    <div class="form-group"><label>${I18N.t('hw.module_opt')}</label><select class="form-input" id="hwf_module">
+      <option value="">${I18N.t('hw.not_set')}</option>
+      ${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml(m.title)}</option>`).join('')}</select></div>
+    <div class="form-group"><label>${I18N.t('hw.task_ids')}</label><input class="form-input" id="hwf_tasks" placeholder="${I18N.t('hw.task_ids_ph')}"></div>
+    <div class="form-group"><label>${I18N.t('hw.due_opt')}</label><input class="form-input" id="hwf_due" type="date"></div>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.cancel">Отмена</button>
+      <button class="btn btn-success" onclick="saveHw('${sessionId}')" data-i18n="common.create">Создать</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+  I18N.applyI18n(document.getElementById('modalContent'));
+}
+async function saveHw(sessionId) {
+  const taskIds = document.getElementById('hwf_tasks').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const moduleId = document.getElementById('hwf_module').value || null;
+  const dueRaw = document.getElementById('hwf_due').value;
+  const data = { lessonSessionId: sessionId, moduleId, taskIds, dueDate: dueRaw ? new Date(dueRaw).getTime() : null };
+  const err = document.getElementById('modalErr');
+  if (!moduleId && !taskIds.length) { err.textContent = I18N.t('hw.need_module_or_tasks'); return; }
+  try { await API.createHomework(data); closeModal(); await loadHw(); showToast(I18N.t('common.saved'),'success'); }
+  catch (e) { err.textContent = e.message; }
+}
+async function removeHw(id) {
+  if (!confirm(I18N.t('common.confirm_delete'))) return;
+  try { await API.deleteHomework(id); await loadHw(); } catch (e) { alert(e.message); }
+}
+
+// ---------- WhatsApp рассылка ----------
+const WA_VARS = `<small style="color:#64748b;display:block;margin-top:4px">
+  Доступные переменные: <code>{{parentName}}</code> <code>{{studentName}}</code>
+  <code>{{groupName}}</code> <code>{{time}}</code> <code>{{date}}</code> <code>{{weekday}}</code> <code>{{address}}</code>
+</small>`;
+
+const WA_STATE_INFO = {
+  authorized:      { color:'#22c55e', dot:'🟢', label:'Подключено',        hint:'WhatsApp привязан, можно отправлять сообщения.' },
+  notAuthorized:   { color:'#f59e0b', dot:'🟡', label:'Не авторизован',    hint:'Откройте Green API → отсканируйте QR-код или подключите по номеру телефона.' },
+  blocked:         { color:'#ef4444', dot:'🔴', label:'Заблокирован',      hint:'Инстанс заблокирован Green API. Проверьте личный кабинет green-api.com.' },
+  sleepMode:       { color:'#f59e0b', dot:'🟡', label:'Спящий режим',      hint:'Откройте инстанс в Green API, чтобы разбудить его.' },
+  starting:        { color:'#64748b', dot:'⏳', label:'Запускается…',      hint:'Инстанс ещё инициализируется, обычно занимает 1–5 минут.' },
+  not_configured:  { color:'#64748b', dot:'⚪', label:'Не настроено',      hint:'Введите Instance ID и Token в настройках ниже.' },
+  error:           { color:'#ef4444', dot:'🔴', label:'Ошибка проверки',   hint:'Не удалось получить статус. Проверьте Instance ID/Token.' },
+};
+function waStateInfo(state) {
+  return WA_STATE_INFO[state] || { color:'#64748b', dot:'⚪', label: state || 'Неизвестно', hint:'' };
+}
+
+let _waMeta = null; // { isAdmin, canManageSettings, canManageTemplates, canSendTest, groups }
+
+async function renderWhatsapp() {
+  const meta = await API.getWaMeta();
+  _waMeta = meta;
+  const promises = [API.getWaTemplates(), API.getWaLog(), API.getWaState()];
+  if (meta.canManageSettings) promises.push(API.getWaSettings());
+  const [templates, log, state, cfg] = await Promise.all(promises);
+  window._waTemplates = templates;
+
+  const stateInfo = waStateInfo(state.state);
+  const groups = meta.groups || [];
+
+  tabEl().innerHTML = `
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <h1 style="margin:0">📱 WhatsApp напоминания</h1>
+    ${!meta.isAdmin ? `<span class="badge" style="background:var(--surface-1);color:#64748b">Доступны только ваши группы</span>` : ''}
+  </div>
+
+  <!-- Статус подключения -->
+  <div class="card" id="wa_state_card" style="padding:16px 20px;margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-left:4px solid ${stateInfo.color}">
+    <div id="wa_state_dot" style="font-size:24px">${stateInfo.dot}</div>
+    <div style="flex:1;min-width:200px">
+      <b id="wa_state_label" style="color:${stateInfo.color}">${stateInfo.label}</b>
+      <div id="wa_state_hint" style="color:#64748b;font-size:13px;margin-top:2px">${stateInfo.hint || ''}</div>
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="refreshWaState()">↻ Обновить статус</button>
+    ${meta.canManageSettings ? `<a class="btn btn-ghost btn-sm" href="https://my.green-api.com" target="_blank" rel="noopener">Открыть Green API ↗</a>` : ''}
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px" id="wa_grid">
+
+    <!-- Левая колонка -->
+    <div style="display:flex;flex-direction:column;gap:20px">
+
+      <!-- Отправить напоминания вручную -->
+      <div class="card" style="padding:20px">
+        <h2 style="margin:0 0 4px;font-size:16px;font-weight:700">🚀 Отправить напоминания</h2>
+        <p style="color:#64748b;font-size:13px;margin:0 0 14px">Сообщение уйдёт родителям выбранных групп прямо сейчас (повторная отправка за сутки блокируется автоматически).</p>
+
+        <div class="form-group">
+          <label>За какой день напомнить</label>
+          <select class="form-input" id="wa_force_days">
+            ${[0,1,2,3].map(d=>`<option value="${d}" ${d===1?'selected':''}>${d===0?'Сегодняшнее занятие':d===1?'Завтрашнее занятие':'Занятие через '+d+' дня'}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <label style="margin-bottom:0">Группы</label>
+            ${groups.length>1 ? `<a href="#" onclick="waToggleAllGroups();return false" style="font-size:12px">выбрать/снять все</a>` : ''}
+          </div>
+          ${groups.length ? `
+            <div style="max-height:180px;overflow-y:auto;border:1px solid var(--border-color,#e2e8f0);border-radius:8px;padding:8px;margin-top:6px">
+              ${groups.map(g=>`
+                <label style="display:flex;align-items:center;gap:8px;padding:5px 4px">
+                  <input type="checkbox" class="wa_group_check" value="${g.id}" checked>
+                  <span>${escapeHtml(g.name)}</span>
+                </label>`).join('')}
+            </div>
+          ` : `<p style="color:#64748b;font-size:13px;margin-top:6px">${meta.isAdmin ? 'Нет активных групп.' : 'За вами не закреплено ни одной активной группы — обратитесь к администратору.'}</p>`}
+        </div>
+
+        <button class="btn btn-success" style="width:100%" ${!groups.length?'disabled':''} onclick="waSendNow()">Отправить сейчас</button>
+        <div id="wa_manual_msg" style="margin-top:8px;min-height:18px;font-size:13px"></div>
+      </div>
+
+      ${meta.canManageSettings ? `
+      <!-- Настройки Green API + автоматика (только admin) -->
+      <div class="card" style="padding:20px">
+        <h2 style="margin:0 0 16px;font-size:16px;font-weight:700">⚙️ Подключение и автоматика</h2>
+        <div class="form-group">
+          <label>Instance ID</label>
+          <input class="form-input" id="wa_iid" placeholder="1234567890" value="${escapeHtml(cfg.instanceId||'')}">
+        </div>
+        <div class="form-group">
+          <label>API Token</label>
+          <input class="form-input" id="wa_tok" type="password" placeholder="••••••••••••" value="${escapeHtml(cfg.apiToken||'')}">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label>Время автозапуска</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="form-input" id="wa_hr" type="number" min="0" max="23" value="${cfg.sendHour??18}" style="width:64px">
+              <span>:</span>
+              <input class="form-input" id="wa_min" type="number" min="0" max="59" value="${cfg.sendMinute??0}" style="width:64px">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>За сколько дней</label>
+            <select class="form-input" id="wa_days">
+              ${[0,1,2,3].map(d=>`<option value="${d}" ${(cfg.daysAhead??1)===d?'selected':''}>${d===0?'В день занятия':d===1?'За 1 день':d+' дня'}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:6px 0 14px">
+          <input type="checkbox" id="wa_active" ${cfg.sendOnlyActive!==false?'checked':''}> Только активные ученики
+        </label>
+        <label class="card" style="display:flex;align-items:center;gap:10px;padding:12px;margin-bottom:14px;background:var(--surface-1)">
+          <input type="checkbox" id="wa_enabled" ${cfg.enabled?'checked':''} style="width:18px;height:18px">
+          <span>
+            <b>Автоматическая ежедневная рассылка</b>
+            <div style="color:#64748b;font-size:12px">Сервер сам проверит время и отправит напоминания всем активным группам</div>
+          </span>
+        </label>
+        <button class="btn btn-success" onclick="saveWaSettings()" style="width:100%">Сохранить настройки</button>
+        <div id="wa_cfg_msg" style="margin-top:8px;min-height:18px;font-size:13px"></div>
+      </div>
+
+      <!-- Тест-отправка (только admin) -->
+      <div class="card" style="padding:20px">
+        <h2 style="margin:0 0 4px;font-size:16px;font-weight:700">🧪 Тестовое сообщение</h2>
+        <p style="color:#64748b;font-size:13px;margin:0 0 14px">Проверить, что подключение реально работает — отправит на любой номер, минуя группы и расписание.</p>
+        <div class="form-group">
+          <label>Номер телефона</label>
+          <input class="form-input" id="wa_test_phone" placeholder="+7 777 123 45 67">
+        </div>
+        <div class="form-group">
+          <label>Сообщение</label>
+          <textarea class="form-input" id="wa_test_msg" rows="2">Тест WhatsApp-рассылки из KURSOR 🎓</textarea>
+        </div>
+        <button class="btn btn-outline" onclick="waSendTest()" style="width:100%">Отправить тест</button>
+        <div id="wa_test_msg_result" style="margin-top:8px;min-height:18px;font-size:13px"></div>
+      </div>
+      ` : ''}
+    </div>
+
+    <!-- Правая колонка: шаблоны + лог -->
+    <div style="display:flex;flex-direction:column;gap:20px">
+
+      <!-- Шаблоны -->
+      <div class="card" style="padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h2 style="margin:0;font-size:16px;font-weight:700">📝 Шаблоны сообщений</h2>
+          ${meta.canManageTemplates ? `<button class="btn btn-sm" onclick="openWaTplForm()">+ Добавить</button>` : ''}
+        </div>
+        <div id="wa_tpl_list">
+          ${templates.length ? templates.map(t=>`
+            <div class="card" style="padding:12px;margin-bottom:8px;background:var(--surface-1)">
+              <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+                <div style="flex:1">
+                  <b>${escapeHtml(t.name)}</b>${t.isDefault?' <span class="badge badge-success" style="font-size:11px">По умолч.</span>':''}
+                  <div style="color:#64748b;font-size:12px;margin-top:4px;white-space:pre-wrap">${escapeHtml(t.body.length>140?t.body.slice(0,140)+'…':t.body)}</div>
+                </div>
+                ${meta.canManageTemplates ? `
+                <div style="display:flex;gap:6px;flex-shrink:0">
+                  <button class="btn btn-ghost btn-sm" onclick="openWaTplForm('${t.id}')">✏️</button>
+                  ${!t.isDefault?`<button class="btn btn-ghost btn-sm" onclick="setDefaultTpl('${t.id}')">⭐</button>`:''}
+                  <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="deleteWaTpl('${t.id}')">🗑</button>
+                </div>` : ''}
+              </div>
+            </div>
+          `).join('') : '<p style="color:#64748b;font-size:13px">Нет шаблонов.</p>'}
+        </div>
+        ${!meta.canManageTemplates ? `<p style="color:#64748b;font-size:12px;margin-top:8px">Шаблоны настраивает администратор.</p>` : ''}
+      </div>
+
+      <!-- Лог -->
+      <div class="card" style="padding:20px;flex:1">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h2 style="margin:0;font-size:16px;font-weight:700">📋 Лог отправок</h2>
+          ${!meta.isAdmin ? `<span style="color:#64748b;font-size:12px">только ваши группы</span>` : ''}
+        </div>
+        ${log.length ? `
+        <div style="max-height:380px;overflow-y:auto">
+          <table class="table" style="font-size:12px">
+            <thead><tr><th>Время</th><th>Ученик</th><th>Группа</th><th>Телефон</th><th>Статус</th></tr></thead>
+            <tbody>
+              ${log.map(l=>`<tr>
+                <td style="white-space:nowrap">${fmtDateTime(l.sentAt)}</td>
+                <td>${escapeHtml(l.studentName||'?')}</td>
+                <td>${escapeHtml(l.groupName||'—')}</td>
+                <td>${escapeHtml(l.phone||'')}</td>
+                <td>${l.status==='ok'
+                  ?'<span class="badge badge-success">✓ OK</span>'
+                  :`<span class="badge badge-danger" title="${escapeHtml(l.error||'')}">✗ Ошибка</span>`}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : '<p style="color:#64748b;font-size:13px">Отправок пока нет.</p>'}
+      </div>
+
+    </div>
+  </div>
+  <style>
+    @media (max-width: 900px) { #wa_grid { grid-template-columns: 1fr !important; } }
+  </style>`;
+}
+
+function waToggleAllGroups() {
+  const boxes = document.querySelectorAll('.wa_group_check');
+  const allChecked = Array.from(boxes).every(b => b.checked);
+  boxes.forEach(b => b.checked = !allChecked);
+}
+
+async function refreshWaState() {
+  const card = document.getElementById('wa_state_card');
+  if (card) card.style.opacity = '0.6';
+  try {
+    const state = await API.getWaState();
+    const info = waStateInfo(state.state);
+    card.style.borderLeftColor = info.color;
+    document.getElementById('wa_state_dot').textContent = info.dot;
+    const label = document.getElementById('wa_state_label');
+    label.textContent = info.label;
+    label.style.color = info.color;
+    document.getElementById('wa_state_hint').textContent = info.hint || '';
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (card) card.style.opacity = '1';
+  }
+}
+
+async function saveWaSettings() {
+  const data = {
+    enabled:        document.getElementById('wa_enabled').checked,
+    instanceId:     document.getElementById('wa_iid').value.trim(),
+    apiToken:       document.getElementById('wa_tok').value.trim(),
+    sendHour:       parseInt(document.getElementById('wa_hr').value),
+    sendMinute:     parseInt(document.getElementById('wa_min').value),
+    daysAhead:      parseInt(document.getElementById('wa_days').value),
+    sendOnlyActive: document.getElementById('wa_active').checked,
+  };
+  const msg = document.getElementById('wa_cfg_msg');
+  try {
+    await API.saveWaSettings(data);
+    msg.style.color = '#22c55e';
+    msg.textContent = '✓ Настройки сохранены';
+    setTimeout(() => { refreshWaState(); }, 800);
+    setTimeout(() => msg.textContent = '', 3000);
+  } catch(e) {
+    msg.style.color = '#ef4444';
+    msg.textContent = '✗ ' + e.message;
+  }
+}
+
+async function waSendTest() {
+  const phone = document.getElementById('wa_test_phone').value.trim();
+  const message = document.getElementById('wa_test_msg').value.trim();
+  const msg = document.getElementById('wa_test_msg_result');
+  if (!phone) { msg.style.color='#ef4444'; msg.textContent='Введите номер телефона'; return; }
+  msg.style.color = '#64748b'; msg.textContent = 'Отправка…';
+  try {
+    const r = await API.waTest({ phone, message });
+    msg.style.color = '#22c55e';
+    msg.textContent = `✓ Отправлено на ${r.phone}`;
+  } catch(e) {
+    msg.style.color = '#ef4444';
+    msg.textContent = '✗ ' + e.message;
+  }
+}
+
+async function waSendNow() {
+  const days = parseInt(document.getElementById('wa_force_days').value);
+  const groupIds = Array.from(document.querySelectorAll('.wa_group_check:checked')).map(c => c.value);
+  const msg = document.getElementById('wa_manual_msg');
+  if (!groupIds.length) { msg.style.color='#ef4444'; msg.textContent='Выберите хотя бы одну группу'; return; }
+  msg.style.color = '#64748b'; msg.textContent = 'Отправляется…';
+  try {
+    const r = await API.waSendNow({ daysAhead: days, groupIds });
+    if (r.skipped) {
+      msg.style.color = '#f59e0b';
+      msg.textContent = r.reason === 'no_groups'
+        ? 'За вами не закреплено активных групп.'
+        : 'Рассылка отключена администратором.';
+    } else {
+      msg.style.color = '#22c55e';
+      msg.textContent = `✓ Отправлено: ${r.sent}, ошибок: ${r.failed}, пропущено: ${r.skipped}`;
+    }
+    setTimeout(() => render(), 1500); // обновим лог
+  } catch(e) {
+    msg.style.color = '#ef4444';
+    msg.textContent = '✗ ' + e.message;
+  }
+}
+
+function openWaTplForm(id) {
+  const t = id ? (window._waTemplates||[]).find(x=>x.id===id) : null;
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${t ? 'Редактировать шаблон' : 'Новый шаблон'}</h2>
+    <div class="form-group">
+      <label>Название шаблона</label>
+      <input class="form-input" id="wt_name" value="${escapeHtml(t?.name||'')}">
+    </div>
+    <div class="form-group">
+      <label>Текст сообщения</label>
+      <textarea class="form-input" id="wt_body" rows="6">${escapeHtml(t?.body||'')}</textarea>
+      ${WA_VARS}
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+      <input type="checkbox" id="wt_default" ${t?.isDefault?'checked':''}> Использовать по умолчанию
+    </label>
+    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-success" onclick="saveWaTpl('${id||''}')">Сохранить</button>
+    </div>`;
+  document.getElementById('modal').classList.add('active');
+}
+
+async function saveWaTpl(id) {
+  const data = {
+    name:      document.getElementById('wt_name').value.trim(),
+    body:      document.getElementById('wt_body').value.trim(),
+    isDefault: document.getElementById('wt_default').checked,
+  };
+  const err = document.getElementById('modalErr');
+  if (!data.name || !data.body) { err.textContent = 'Заполните название и текст'; return; }
+  try {
+    if (id) await API.updateWaTemplate(id, data); else await API.createWaTemplate(data);
+    closeModal(); await render(); showToast('Шаблон сохранён', 'success');
+  } catch(e) { err.textContent = e.message; }
+}
+
+async function setDefaultTpl(id) {
+  try { await API.updateWaTemplate(id, { isDefault: true }); await render(); } catch(e) { alert(e.message); }
+}
+
+async function deleteWaTpl(id) {
+  if (!confirm('Удалить шаблон?')) return;
+  try { await API.deleteWaTemplate(id); await render(); } catch(e) { alert(e.message); }
+}
+
+function previewNormPhone(input) {
+  const preview = document.getElementById('cl_phone_preview');
+  if (!preview) return;
+  const raw = input.value.trim();
+  if (!raw) { preview.textContent = ''; return; }
+  let d = raw.replace(/\D/g,'');
+  if (d.startsWith('8') && d.length===11) d='7'+d.slice(1);
+  if (d.length===10) d='7'+d;
+  const ok = d.length>=11 && d.length<=15;
+  preview.textContent = ok ? `→ +${d} (готово для WhatsApp)` : '⚠ Нестандартный номер';
+  preview.style.color = ok ? '#22c55e' : '#f59e0b';
+}
+
+// ---------- Уведомления ----------
+async function renderNotificationsTab() {
+  const { items } = await API.getNotifications();
+  tabEl().innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h1 data-i18n="admin.notifications">Уведомления</h1>
+      <button class="btn btn-ghost btn-sm" onclick="markAllNotif();setTimeout(()=>render(),200)">${I18N.t('notif.mark_all')}</button>
+    </div>
+    ${items.length ? `<div class="card" style="padding:0">${items.map(n=>`
+      <a href="${n.link||'#'}" onclick="markNotif('${n.id}')" class="notif-item ${n.read?'':'unread'} ${n.type==='missing_report'?'urgent':''}" style="border-bottom:1px solid #eef2f7">
+        <div class="notif-text">${n.type==='missing_report'?'⚠️ ':''}${escapeHtml(n.text)}</div>
+        <div class="notif-time">${fmtDateTime(n.createdAt)}</div>
+      </a>`).join('')}</div>` : `<div class="card" style="padding:24px;text-align:center;color:#64748b">${I18N.t('notif.empty')}</div>`}`;
+  I18N.applyI18n(tabEl());
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('active'); }
+document.getElementById('modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
+</script>
+</body>
+</html>

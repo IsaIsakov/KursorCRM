@@ -1,0 +1,21 @@
+{
+  "moduleId": "python_variables",
+  "lang": "python",
+  "title": "Переменные в Python",
+  "description": "Что такое переменные и как им давать имена.",
+  "intro": [
+    { "title": "Что такое переменная?", "emoji": "📦", "body": "<p>Переменная — <b>коробочка с именем</b>. Создаём так: <code>имя = значение</code></p>", "code": "age = 10\nname = \"Айгуль\"" },
+    { "title": "Зачем они нужны?", "emoji": "💡", "body": "<p>Чтобы код был понятнее. Поменяешь число — и вся программа поменяется!</p>", "code": "price = 100\ntotal = price * 3\nprint(total)" },
+    { "title": "Правила имён", "emoji": "✨", "body": "<ul><li>Буквы, цифры (не в начале), <code>_</code></li><li>Без пробелов: <code>my_age</code></li><li>Имя должно что-то значить</li></ul>" }
+  ],
+  "miniTask": {
+    "type": "quiz", "title": "Проверь себя", "description": "Какая запись правильная?",
+    "options": ["10 = age", "age = 10", "age == 10", "age := 10"],
+    "answer": 1, "explain": "Слева от = всегда имя, справа — значение.", "points": 5
+  },
+  "tasks": [
+    { "type": "fill", "difficulty": 1, "title": "Создай переменную", "description": "Какой знак между именем и значением? (year ___ 2025)", "answer": "=", "explain": "Одиночный = для присвоения." },
+    { "type": "code", "difficulty": 2, "title": "Сумма двух чисел", "description": "Создай a=7, b=3, выведи сумму.", "starter": "a = \nb = \nprint()", "expectedOutput": "10", "explain": "print(a + b)" },
+    { "type": "quiz", "difficulty": 2, "title": "Лучшее имя", "description": "Какое имя самое понятное для возраста?", "options": ["x","y2","student_age","переменная1"], "answer": 2, "explain": "student_age описывает смысл." }
+  ]
+}

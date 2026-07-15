@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><title>Кабинет учителя — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .live-dot {
+    display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;
+    box-shadow:0 0 0 0 rgba(16,185,129,0.6);animation:livePulse 1.6s infinite;
+    margin-right:6px;vertical-align:middle;
+  }
+  .live-dot.offline { background:#ef4444; animation:none; box-shadow:none; }
+  @keyframes livePulse {
+    0% { box-shadow:0 0 0 0 rgba(16,185,129,0.6); }
+    70% { box-shadow:0 0 0 12px rgba(16,185,129,0); }
+    100% { box-shadow:0 0 0 0 rgba(16,185,129,0); }
+  }
+  .row-flash { animation: rowFlash 1.5s ease-out; }
+  @keyframes rowFlash {
+    0% { background:#fef9c3; }
+    100% { background:transparent; }
+  }
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<div class="container"><div id="content">Загружаем…</div></div>
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['teacher','admin','assistant']);
+let state = { students: [], tasks: [], modules: [], progressById: {} };
+
+if (user) init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('teacher'); I18N.applyI18n(document.getElementById('nav'));
+  I18N.applyI18n();
+  try {
+    const [students, tasks, modules, allProgress] = await Promise.all([
+      API.getStudents(), API.getTasks(), API.getModules(), API.getAllProgress(),
+    ]);
+    state.students = students;
+    state.tasks = tasks;
+    state.modules = modules;
+    state.progressById = Object.fromEntries(allProgress.map(p => [p.userId, p]));
+    render();
+    connectLive();
+    loadTeacherExtras();
+  } catch (err) {
+    document.getElementById('content').innerHTML =
+      `<div class="card" style="padding:30px;text-align:center;color:#ef4444">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function render() {
+  const { students, tasks, progressById } = state;
+
+  document.getElementById('content').innerHTML = `
+    <div class="welcome-banner">
+      <img src="${KURSOR_DB.MASCOT.sitting}" class="mascot-md" alt="">
+      <div>
+        <h1>Здравствуйте, ${escapeHtml(user.name)}</h1>
+        <p>
+          <span id="liveIndicator"><span class="live-dot offline"></span><span id="liveLabel">подключаемся…</span></span>
+          · Прогресс учеников обновляется в реальном времени.
+        </p>
+      </div>
+    </div>
+    <h2 class="section-title">Все ученики (${students.length})</h2>
+    <table class="table" id="studentsTable">
+      <thead><tr>
+        <th>Имя</th><th>Логин</th><th>Группа</th><th>Языки</th>
+        <th>Очки</th><th>Streak</th><th>Решено</th><th>Проекты на проверку</th>
+      </tr></thead>
+      <tbody>
+        ${students.map(s => renderRow(s, progressById[s.id], tasks)).join('')
+          || '<tr><td colspan="8" style="text-align:center;color:#64748b;padding:30px">Учеников нет. Создайте через админ-панель.</td></tr>'}
+      </tbody>
+    </table>
+
+    <div id="teacherExtras"></div>
+  `;
+}
+
+function renderRow(s, p, tasks) {
+  p = p || { points:0, streak:0, tasks:{}, badges:[] };
+  const projectSubmissions = Object.entries(p.tasks).filter(([id, pr]) => {
+    const t = tasks.find(t => t.id === parseInt(id));
+    return t && t.type === 'project' && pr.submission;
+  });
+  const done = Object.values(p.tasks).filter(t => t.status === 'done').length;
+  return `
+    <tr style="cursor:pointer" data-student="${s.id}" onclick="showStudent('${s.id}')">
+      <td><b>${escapeHtml(s.name)}</b></td>
+      <td><code>${escapeHtml(s.login)}</code></td>
+      <td>${KURSOR_DB.GROUPS[s.group]?.name || '—'}</td>
+      <td>${(s.languages || []).map(l => KURSOR_DB.LANGS[l]?.icon ? `<img src="${KURSOR_DB.LANGS[l].icon}" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px;margin-right:2px" title="${escapeHtml(KURSOR_DB.LANGS[l].name||'')}">` : '').join('') || '—'}</td>
+      <td data-points><img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.points}</td>
+      <td data-streak><img src="https://cdn-icons-png.flaticon.com/512/785/785116.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.streak}</td>
+      <td data-done><img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:14px;height:14px;vertical-align:-2px"> ${done}</td>
+      <td data-projects>${projectSubmissions.length ? `<span class="badge badge-warning">${projectSubmissions.length}</span>` : '—'}</td>
+    </tr>`;
+}
+
+function showStudent(id) {
+  const s = state.students.find(u => u.id === id);
+  if (!s) return;
+  const p = state.progressById[id] || { points:0, streak:0, tasks:{}, badges:[] };
+  const submissions = Object.entries(p.tasks).filter(([tid, pr]) => {
+    const t = state.tasks.find(t => t.id === parseInt(tid));
+    return t && t.type === 'project' && pr.submission;
+  });
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay active';
+  modal.innerHTML = `
+    <div class="modal">
+      <h2>${escapeHtml(s.name)}</h2>
+      <p>Логин: <code>${escapeHtml(s.login)}</code> · Возраст: ${s.age} · Группа: ${KURSOR_DB.GROUPS[s.group]?.name || '—'}</p>
+      <p style="margin-top:10px"><b>Языки:</b> ${(s.languages || []).map(l => KURSOR_DB.LANGS[l]?.name).join(', ') || '—'}</p>
+      <div style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap">
+        <div><b style="font-size:20px"><img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.points}</b><br>очков</div>
+        <div><b style="font-size:20px"><img src="https://cdn-icons-png.flaticon.com/512/785/785116.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.streak}</b><br>streak</div>
+        <div><b style="font-size:20px">${Object.values(p.tasks).filter(t=>t.status==='done').length}</b><br>задач</div>
+      </div>
+      ${submissions.length ? `
+        <h3 style="margin-top:20px">Проекты на проверку</h3>
+        ${submissions.map(([tid, pr]) => {
+          const t = state.tasks.find(t => t.id === parseInt(tid));
+          return `
+            <div style="background:#f8fafc;padding:12px;border-radius:8px;margin-top:10px">
+              <b>${escapeHtml(t.title)}</b>
+              <div style="margin-top:6px;white-space:pre-wrap;font-size:14px">${escapeHtml(pr.submission)}</div>
+              <div style="margin-top:8px;font-size:12px;color:#64748b">Сдано: ${fmtDateTime(pr.completedAt, I18N.lang==='kk'?'kk-KZ':'ru-RU')}</div>
+            </div>`;
+        }).join('')}
+      ` : ''}
+      <div style="margin-top:20px;text-align:right">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+}
+
+// ===== Real-time: WebSocket =====
+function connectLive() {
+  const ws = API.connectWS(handleWsMessage);
+  if (!ws) return;
+  ws.addEventListener('open', () => setLive(true));
+  ws.addEventListener('close', () => {
+    setLive(false);
+    setTimeout(connectLive, 3000);
+  });
+  ws.addEventListener('error', () => setLive(false));
+}
+
+function setLive(online) {
+  const el = document.getElementById('liveIndicator');
+  if (!el) return;
+  el.innerHTML = `<span class="live-dot ${online?'':'offline'}"></span><span>${online?'live':'офлайн'}</span>`;
+}
+
+function handleWsMessage(msg) {
+  if (msg.type === 'progress') {
+    state.progressById[msg.studentId] = msg.progress;
+    updateRow(msg.studentId);
+  }
+}
+
+function updateRow(studentId) {
+  const tr = document.querySelector(`tr[data-student="${studentId}"]`);
+  const s = state.students.find(u => u.id === studentId);
+  if (!tr || !s) return;
+  const p = state.progressById[studentId];
+  const done = Object.values(p.tasks).filter(t => t.status === 'done').length;
+  const projectSubs = Object.entries(p.tasks).filter(([id, pr]) => {
+    const t = state.tasks.find(t => t.id === parseInt(id));
+    return t && t.type === 'project' && pr.submission;
+  });
+  tr.querySelector('[data-points]').innerHTML = `<img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.points}`;
+  tr.querySelector('[data-streak]').innerHTML = `<img src="https://cdn-icons-png.flaticon.com/512/785/785116.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.streak}`;
+  tr.querySelector('[data-done]').innerHTML   = `<img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:14px;height:14px;vertical-align:-2px"> ${done}`;
+  tr.querySelector('[data-projects]').innerHTML = projectSubs.length
+    ? `<span class="badge badge-warning">${projectSubs.length}</span>` : '—';
+  tr.classList.remove('row-flash');
+  void tr.offsetWidth;
+  tr.classList.add('row-flash');
+}
+// ===== Доп. разделы кабинета учителя =====
+async function loadTeacherExtras() {
+  const box = document.getElementById('teacherExtras');
+  if (!box) return;
+  let groups = [], materials = [], access = [];
+  try { groups = await API.getGroups(); } catch {}
+  try { materials = await API.getMaterials(); } catch {}
+  try { access = await API.getCourseAccess(); } catch {}
+
+  const myAccess = access.filter(a => a.teacherId === user.id || isAdminRole());
+  box.innerHTML = `
+    <h2 class="section-title" style="margin-top:32px">${I18N.t('admin.groups')}</h2>
+    ${groups.length ? `<div class="stats-grid">
+      ${groups.map(g => `<div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b>${escapeHtml(g.name)}</b>
+          <span class="badge badge-info">${g.memberCount ?? 0}</span>
+        </div>
+        <div style="font-size:13px;color:#64748b;margin:6px 0">${escapeHtml(g.branchName||'')}</div>
+        <a class="btn btn-sm" href="/admin/index.html">${I18N.t('session.conduct')}</a>
+      </div>`).join('')}
+    </div>` : `<div class="card" style="padding:20px;text-align:center;color:#64748b">${I18N.t('common.none')}</div>`}
+
+    <h2 class="section-title" style="margin-top:32px">${I18N.t('mat.title')}</h2>
+    ${materials.length ? `<div class="card" style="padding:0;overflow:hidden"><table class="table" style="box-shadow:none">
+      <thead><tr><th>${I18N.t('common.title')}</th><th>${I18N.t('mat.course')}</th><th>${I18N.t('mat.link')}</th></tr></thead>
+      <tbody>${materials.map(m => `<tr>
+        <td><b>${escapeHtml(m.title)}</b></td>
+        <td>${escapeHtml(moduleTitleT(m.courseId))}</td>
+        <td>${(m.content && /^https?:\/\//i.test(m.content)) ? `<a href="${escapeHtml(m.content)}" target="_blank">${I18N.t('common.open')}</a>` : '—'}</td>
+      </tr>`).join('')}</tbody></table></div>`
+      : `<div class="card" style="padding:20px;text-align:center;color:#64748b">${I18N.t('common.none')}</div>`}
+    ${myAccess.length ? `<p style="font-size:13px;color:#64748b;margin-top:8px">${I18N.t('mat.expires')}: ${myAccess.map(a => moduleTitleT(a.courseId)+' — '+fmtDate(a.expiresAt)).join('; ')}</p>` : ''}
+
+    <h2 class="section-title" style="margin-top:32px">${I18N.t('fb.title')}</h2>
+    <div class="card" style="padding:16px">
+      <div class="form-group"><label>${I18N.t('crm.fullname')}</label>
+        <select class="form-input" id="fb_student">
+          ${state.students.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>${I18N.t('fb.write')}</label>
+        <textarea class="form-input" id="fb_text" rows="3"></textarea></div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="checkbox" id="fb_internal"> <span>${I18N.t('fb.internal')}</span></label>
+      <div style="text-align:right"><button class="btn btn-success" onclick="submitFeedback()">${I18N.t('common.save')}</button></div>
+    </div>
+  `;
+}
+function isAdminRole() { return user.role === 'admin'; }
+function moduleTitleT(id) { const m = state.modules.find(x => x.id === id); return m ? m.title : (id||'—'); }
+async function submitFeedback() {
+  const studentId = document.getElementById('fb_student').value;
+  const text = document.getElementById('fb_text').value.trim();
+  const isInternal = document.getElementById('fb_internal').checked;
+  if (!text) return;
+  try {
+    await API.createFeedback({ studentId, text, type: 'general', isInternal });
+    document.getElementById('fb_text').value = '';
+    showToast(I18N.t('common.saved'), 'success');
+  } catch (e) { showToast(e.message, 'error'); }
+}
+</script>
+</body>
+</html>

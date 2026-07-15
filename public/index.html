@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>КУРСОР — Школа программирования</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="login-page">
+  <div class="login-box">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><span id="langSlot"></span></div>
+    <img src="https://salamalekum.sirv.com/_1_1.png.webp" alt="Курсор" class="logo">
+    <img class="mascot-lg" src="/uploads/mascot/happy.png" alt="Маскот КУРСОР" style="display:block;margin:0 auto 8px">
+    <h1 data-i18n="dash.greeting">Привет!</h1>
+    <p data-i18n="auth.title">Войди и начнём программировать!</p>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label data-i18n="auth.login_ph">Логин</label>
+        <input class="form-input" type="text" id="login" placeholder="твой логин" data-i18n-ph="auth.login_ph" required autofocus autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label data-i18n="auth.password_ph">Пароль</label>
+        <input class="form-input" type="password" id="password" placeholder="пароль" data-i18n-ph="auth.password_ph" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-lg" id="submitBtn" style="width:100%" data-i18n="auth.signin">Войти</button>
+    </form>
+
+    <p style="margin-top:18px;font-size:13px;color:#64748b;text-align:center">
+      Нет аккаунта? Попроси администратора создать его для тебя.
+    </p>
+
+    <div id="msg" style="margin-top:14px;color:#ef4444;font-weight:700;text-align:center"></div>
+  </div>
+</div>
+
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script>
+document.getElementById('langSlot').innerHTML = I18N.switcherHtml();
+
+(function () {
+  const u = API.getCurrentUser();
+  if (u && API.getToken()) redirectByRole(u.role);
+})();
+
+function redirectByRole(role) {
+  if (role === 'admin') location.href = '/admin/index.html';
+  else if (role === 'teacher' || role === 'assistant') location.href = '/pages/teacher.html';
+  else if (role === 'parent') location.href = '/pages/parent.html';
+  else location.href = '/pages/dashboard.html';
+}
+
+document.getElementById('loginForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const login = document.getElementById('login').value.trim();
+  const password = document.getElementById('password').value;
+  const msg = document.getElementById('msg');
+  const btn = document.getElementById('submitBtn');
+  msg.textContent = '';
+  btn.disabled = true; btn.textContent = I18N.t('common.loading');
+  try {
+    const user = await API.login(login, password);
+    redirectByRole(user.role);
+  } catch (err) {
+    msg.textContent = err.message || I18N.t('auth.error');
+    btn.disabled = false; btn.textContent = I18N.t('auth.signin');
+  }
+});
+</script>
+</body>
+</html>

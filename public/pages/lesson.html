@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><title>Урок — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .lesson-wrap { max-width: 820px; margin: 0 auto; }
+  .lesson-steps { display:flex; gap:6px; margin: 14px 0 24px; }
+  .lesson-steps .step { flex:1; height:6px; border-radius:3px; background:#e2e8f0; transition:background .3s; }
+  .lesson-steps .step.active { background: linear-gradient(90deg,#4f6bff,#7c3aed); }
+  .lesson-steps .step.done   { background: #10b981; }
+  .intro-card { background:#fff; border-radius:20px; padding:32px; box-shadow:0 6px 28px rgba(15,23,42,0.06); min-height:320px; display:flex; flex-direction:column; animation:slideIn .35s ease-out; word-wrap: break-word; overflow-wrap: break-word; }
+  @keyframes slideIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+  .intro-icon { width:80px; height:80px; margin-bottom:14px; }
+  .intro-card h1 { font-size:28px; margin:0 0 14px; color:#0f172a; line-height:1.2; word-wrap: break-word; }
+  .intro-body { font-size:17px; line-height:1.75; color:#334155; max-width:62ch; }
+  .intro-body > *:first-child { margin-top: 0; }
+  .intro-body > *:last-child  { margin-bottom: 0; }
+  .intro-body p { margin: 0 0 14px; }
+  .intro-body h2, .intro-body h3, .intro-body h4 { margin: 22px 0 10px; color:#0f172a; line-height:1.3; }
+  .intro-body h3 { font-size: 20px; }
+  .intro-body h4 { font-size: 17px; color:#2d3fa8; }
+  .intro-body ul, .intro-body ol { margin: 8px 0 14px; padding-left: 24px; }
+  .intro-body li { margin: 6px 0; padding-left: 4px; }
+  .intro-body li::marker { color:#4f6bff; }
+  .intro-body b, .intro-body strong { color:#0f172a; font-weight:700; }
+  .intro-body code { background:#eef4ff; color:#2d3fa8; padding:2px 7px; border-radius:5px; font-family:"Fira Code",monospace; font-size:14px; word-break: break-word; }
+  .intro-body pre { background:#0f172a; color:#a7f3d0; padding:14px 18px; border-radius:10px; font-family:"Fira Code",monospace; font-size:13.5px; line-height:1.55; margin:14px 0; white-space:pre-wrap; word-break:break-word; overflow-x:auto; }
+  .intro-body pre code { background: transparent; color: inherit; padding: 0; }
+  .intro-body img { max-width: 100%; height: auto; border-radius: 10px; margin: 12px 0; display: block; }
+  .intro-body blockquote { border-left: 4px solid #4f6bff; background:#eef4ff; padding:12px 16px; border-radius:0 10px 10px 0; margin:14px 0; color:#334155; }
+  .intro-body a { color:#3d56e0; text-decoration: underline; }
+  .intro-body hr { border:0; border-top:1px solid #e2e8f0; margin:18px 0; }
+  .code-block { background:#0f172a; color:#a7f3d0; padding:14px 18px; border-radius:10px; font-family:"Fira Code",monospace; font-size:14px; margin-top:14px; white-space:pre-wrap; overflow-x:auto; }
+  .video-embed { margin-top:14px; position:relative; padding-bottom:56.25%; height:0; overflow:hidden; border-radius:10px; }
+  .video-embed iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  .intro-image { margin-top:14px; max-width:100%; border-radius:10px; }
+  .intro-controls { display:flex; justify-content:space-between; align-items:center; margin-top:auto; padding-top:22px; gap:10px; flex-wrap:wrap; }
+  .step-info { color:#64748b; font-size:13px; }
+  .mini-card { background:linear-gradient(135deg,#fff7e0,#ffe5b4); border-radius:20px; padding:28px; box-shadow:0 6px 28px rgba(255,181,71,0.18); word-wrap: break-word; }
+  .mini-card h2 { margin:10px 0 6px; color:#5c3a07; line-height:1.3; }
+  .mini-card p { line-height:1.6; }
+  .main-task { display:flex; align-items:center; gap:14px; background:#fff; border-radius:14px; padding:14px 18px; margin-bottom:10px; box-shadow:0 4px 14px rgba(15,23,42,0.05); cursor:pointer; transition:transform .15s; }
+  .main-task:hover { transform: translateX(4px); }
+  .main-task.done { opacity:0.7; }
+  .mt-num { width:36px; height:36px; border-radius:50%; background:#eef4ff; color:#3d56e0; display:flex; align-items:center; justify-content:center; font-weight:800; flex-shrink:0; }
+  .main-task.done .mt-num { background:#dcfce7; color:#15803d; }
+  .lesson-hero { display:flex; gap:24px; align-items:center; background:linear-gradient(135deg,#4f6bff,#2d3fa8); color:white; padding:24px 28px; border-radius:24px; margin-bottom:18px; }
+  .lesson-hero h1 { color:white; margin:4px 0 6px; font-size:24px; }
+  .lesson-hero p  { color:rgba(255,255,255,0.92); margin:0; font-size:15px; }
+  @media (max-width:640px) {
+    .lesson-hero { flex-direction:column; text-align:center; padding:20px; }
+    .lesson-hero h1 { font-size:20px; }
+    .lesson-hero p { font-size:14px; }
+    .lesson-hero .mascot-md { width:90px !important; height:90px !important; }
+    .intro-card, .mini-card { padding:20px !important; }
+    .intro-card h1 { font-size:22px; }
+    .intro-body { font-size:15px; line-height:1.65; }
+    .intro-controls { gap:8px; }
+    .intro-controls .btn, .intro-controls .btn-lg { padding:10px 16px; font-size:14px; flex:1; justify-content:center; }
+    .step-info { width:100%; text-align:center; order:3; }
+    .main-task { padding:12px 14px; gap:10px; }
+    .mt-num { width:30px; height:30px; font-size:14px; }
+    .lesson-wrap { max-width:100%; }
+  }
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<div class="container"><div class="lesson-wrap"><div id="content">Загружаем урок…</div></div></div>
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['student','teacher','admin']);
+const moduleId = getQueryParam('id');
+let lesson = null, stage = 'intro', introIdx = 0;
+let miniState = { selected: null, order: [] };
+
+if (!moduleId) document.getElementById('content').innerHTML = '<div class="card">Не указан id модуля</div>';
+else init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('catalog'); I18N.applyI18n(document.getElementById('nav'));
+  try {
+    lesson = await API.getLesson(moduleId);
+    if (lesson.progress) {
+      introIdx = Math.min(lesson.progress.introStep || 0, Math.max(0, (lesson.intro.length || 1) - 1));
+      if (lesson.progress.introDone && !lesson.progress.miniDone && lesson.miniTask) stage = 'mini';
+      else if (lesson.progress.miniDone || (lesson.progress.introDone && !lesson.miniTask)) stage = 'tasks';
+    }
+    render();
+  } catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card" style="padding:30px;color:#ef4444;text-align:center">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function progressBarHTML() {
+  const total = lesson.intro.length + (lesson.miniTask ? 1 : 0) + 1;
+  let cur = stage === 'intro' ? introIdx : (stage === 'mini' ? lesson.intro.length : total - 1);
+  let html = '<div class="lesson-steps">';
+  for (let i = 0; i < total; i++) {
+    const cls = i < cur ? 'done' : (i === cur ? 'active' : '');
+    html += `<div class="step ${cls}"></div>`;
+  }
+  return html + '</div>';
+}
+
+function headerHTML() {
+  const lang = KURSOR_DB.LANGS[lesson.lang];
+  return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <a href="/pages/catalog.html" class="btn btn-ghost" style="padding:4px 10px">← К каталогу</a>
+      ${lang ? `<span class="lang-badge ${lang.class}" style="display:inline-flex;align-items:center;gap:6px">
+        <img class="ic ic-16" src="${lang.icon||''}" alt=""> ${lang.name}</span>` : ''}
+    </div>
+    <div class="lesson-hero">
+      <img class="mascot-md" src="${KURSOR_DB.MASCOT.explain}" alt="Маскот КУРСОР">
+      <div style="flex:1">
+        <h1>${escapeHtml(lesson.title)}</h1>
+        <p>${escapeHtml(lesson.description)}</p>
+      </div>
+    </div>
+    ${progressBarHTML()}`;
+}
+
+function render() {
+  if (stage === 'intro') renderIntro();
+  else if (stage === 'mini') renderMini();
+  else renderTasks();
+}
+
+function renderIntro() {
+  if (!lesson.intro.length) { stage = lesson.miniTask ? 'mini' : 'tasks'; render(); return; }
+  const slide = lesson.intro[introIdx];
+  const total = lesson.intro.length;
+  const isLast = introIdx === total - 1;
+
+  document.getElementById('content').innerHTML = `
+    ${headerHTML()}
+    <div class="intro-card">
+      <span class="section-tag tag-theory">Теория · экран ${introIdx+1} из ${total}</span>
+      <h1>${escapeHtml(slide.title || '')}</h1>
+      <div class="intro-body">${slide.body || ''}</div>
+      ${slide.code ? `<div class="code-block">${escapeHtml(slide.code)}</div>` : ''}
+      ${slide.image ? `<img class="intro-image" src="${escapeHtml(slide.image)}" alt="">` : ''}
+      ${slide.video ? `<div class="video-embed"><iframe src="${escapeHtml(slide.video)}" allowfullscreen></iframe></div>` : ''}
+      <div class="intro-controls">
+        <button class="btn btn-outline" onclick="prevIntro()" ${introIdx === 0 ? 'disabled' : ''}>Назад</button>
+        <span class="step-info">Экран ${introIdx + 1} из ${total}</span>
+        <button class="btn btn-lg" onclick="nextIntro()">${isLast ? (lesson.miniTask ? 'К проверке' : 'К задачам') : 'Далее'}</button>
+      </div>
+    </div>`;
+}
+
+function nextIntro() {
+  const total = lesson.intro.length;
+  // Раньше было .catch(() => {}) — тихо глотали ошибку, в результате прогресс по уроку
+  // мог не сохраниться, и никто об этом не узнавал. Теперь — логируем и показываем тост.
+  if (user.role === 'student') {
+    API.setIntroStep(moduleId, introIdx, total).catch((e) => {
+      console.error('setIntroStep failed:', e);
+      try {
+        const el = document.createElement('div');
+        el.textContent = 'Шаг урока не сохранён: ' + (e && e.message ? e.message : 'ошибка сети');
+        el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.15)';
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 5000);
+      } catch {}
+    });
+  }
+  if (introIdx < total - 1) { introIdx++; render(); }
+  else { stage = lesson.miniTask ? 'mini' : 'tasks'; render(); }
+}
+function prevIntro() { if (introIdx > 0) { introIdx--; render(); } }
+
+function renderMini() {
+  const m = lesson.miniTask;
+  if (!m) { stage = 'tasks'; render(); return; }
+  const already = lesson.progress && lesson.progress.miniDone;
+  let solver = '';
+  if (m.type === 'quiz') {
+    solver = `<div class="quiz-options" id="miniOpts">${(m.options||[]).map((o,i) => `
+      <div class="quiz-option" data-idx="${i}"><div class="option-letter">${String.fromCharCode(65+i)}</div><div>${escapeHtml(o)}</div></div>`).join('')}</div>`;
+  } else if (m.type === 'fill') {
+    solver = `<input type="text" class="form-input" id="miniFill" placeholder="твой ответ" autofocus>`;
+  } else if (m.type === 'order') {
+    miniState.order = [...(m.items||[])].sort(() => Math.random() - 0.5);
+    solver = `<div class="drag-area" id="miniDrag"></div>`;
+  } else if (m.type === 'code') {
+    solver = `<textarea class="code-input" id="miniCode" spellcheck="false">${escapeHtml(m.starter || '')}</textarea>
+      <p style="font-size:13px;color:#64748b;margin-top:6px">Ожидаемый вывод: <code>${escapeHtml(m.expectedOutput||'')}</code></p>`;
+  }
+  document.getElementById('content').innerHTML = `
+    ${headerHTML()}
+    <div class="mini-card">
+      <span class="section-tag tag-task"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" alt=""> Мини-задача</span>
+      <h2>${escapeHtml(m.title || 'Проверь себя')}</h2>
+      <p style="margin:0 0 14px;color:#475569">${escapeHtml(m.description || '')}</p>
+      ${solver}
+      <div id="miniFeedback" style="margin-top:14px"></div>
+      <div style="margin-top:18px;display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="stage='intro';introIdx=Math.max(0,lesson.intro.length-1);render()">К теории</button>
+        <div style="display:flex;gap:10px">
+          ${already ? `<button class="btn btn-outline" onclick="stage='tasks';render()">Пропустить</button>` : ''}
+          <button class="btn btn-lg btn-success" id="miniSubmit">Проверить</button>
+        </div>
+      </div>
+    </div>`;
+  if (m.type === 'quiz') {
+    document.querySelectorAll('#miniOpts .quiz-option').forEach(opt => {
+      opt.onclick = () => {
+        document.querySelectorAll('#miniOpts .quiz-option').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        miniState.selected = parseInt(opt.dataset.idx);
+      };
+    });
+  } else if (m.type === 'order') renderMiniDrag();
+  document.getElementById('miniSubmit').onclick = submitMini;
+}
+
+function renderMiniDrag() {
+  const area = document.getElementById('miniDrag');
+  area.innerHTML = miniState.order.map((it,i) => `<div class="drag-item" draggable="true" data-idx="${i}">${escapeHtml(it)}</div>`).join('');
+  let dragged = null;
+  area.querySelectorAll('.drag-item').forEach(el => {
+    el.ondragstart = () => { dragged = parseInt(el.dataset.idx); el.style.opacity='0.4'; };
+    el.ondragend = () => { el.style.opacity='1'; };
+    el.ondragover = e => { e.preventDefault(); el.classList.add('over'); };
+    el.ondragleave = () => el.classList.remove('over');
+    el.ondrop = e => {
+      e.preventDefault(); el.classList.remove('over');
+      const t = parseInt(el.dataset.idx);
+      if (dragged !== null && dragged !== t) {
+        const arr = miniState.order;
+        const [m] = arr.splice(dragged, 1); arr.splice(t, 0, m);
+        renderMiniDrag();
+      }
+    };
+  });
+}
+
+async function submitMini() {
+  const m = lesson.miniTask;
+  let answer = null;
+  if (m.type === 'quiz') { if (miniState.selected === null) return showMiniFb(false, 'Выбери ответ!'); answer = miniState.selected; }
+  else if (m.type === 'fill') { answer = document.getElementById('miniFill').value.trim(); if (!answer) return showMiniFb(false, 'Введи ответ!'); }
+  else if (m.type === 'order') { answer = miniState.order; }
+  else if (m.type === 'code') { answer = document.getElementById('miniCode').value; }
+  try {
+    const r = await API.submitMiniTask(moduleId, answer);
+    if (r.correct) {
+      lesson.progress = { ...(lesson.progress||{}), miniDone: true };
+      showMiniFb(true, r.earned > 0 ? `Правильно! +${r.earned} очков` : 'Уже решено раньше');
+      fireConfetti();
+      setTimeout(() => { stage = 'tasks'; render(); }, 1300);
+    } else {
+      showMiniFb(false, r.explain ? `Не совсем. ${r.explain}` : 'Попробуй ещё раз!');
+    }
+  } catch (e) { showMiniFb(false, e.message); }
+}
+
+function showMiniFb(ok, msg) {
+  document.getElementById('miniFeedback').innerHTML = `
+    <div class="feedback ${ok ? 'success' : 'error'}" style="margin:0">
+      <img class="mascot-sm" src="${ok ? KURSOR_DB.MASCOT.happy : KURSOR_DB.MASCOT.sad}" alt="Маскот">
+      <div style="font-size:15px">${msg}</div>
+    </div>`;
+}
+
+async function renderTasks() {
+  let myDone = {};
+  if (user.role === 'student') { try { const p = await API.getMyProgress(); myDone = p.tasks || {}; } catch {} }
+  const icons = {
+    quiz:  '<img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/3209/3209265.png" alt="">',
+    fill:  '<img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" alt="">',
+    order: '<img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/8090/8090669.png" alt="">',
+    code:  '<img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/1005/1005141.png" alt="">',
+    project:'<img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" alt="">'
+  };
+  const tasksHTML = (lesson.tasks || []).map((t, i) => {
+    const done = myDone[t.id] && myDone[t.id].status === 'done';
+    return `<div class="main-task ${done ? 'done' : ''}" onclick="location.href='/pages/task.html?id=${t.id}'">
+      <div class="mt-num">${done ? '✓' : (i+1)}</div>
+      <div style="flex:1"><b>${escapeHtml(t.title)}</b>
+        <div style="font-size:12px;color:#64748b">${icons[t.type]||''} ${escapeHtml(t.type)} · ${'★'.repeat(t.difficulty||1)}</div></div>
+      <span style="color:#94a3b8">→</span></div>`;
+  }).join('') || '<div style="color:#64748b;text-align:center;padding:30px">В этом модуле пока нет задач</div>';
+
+  document.getElementById('content').innerHTML = `
+    ${headerHTML()}
+    <div class="card" style="padding:24px">
+      <span class="section-tag tag-main"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/3132/3132693.png" alt=""> Основные задачи</span>
+      <h2 style="margin-top:0">Применяй знания</h2>
+      <p style="color:#64748b;margin-bottom:14px">Применяй знания! За каждую решённую задачу — очки. Подсказка снимает 5 очков.</p>
+      ${tasksHTML}
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="stage=lesson.miniTask?'mini':'intro';if(stage==='intro')introIdx=0;render()">Назад</button>
+      <a href="/pages/catalog.html" class="btn btn-outline">К каталогу</a>
+    </div>`;
+}
+</script>
+</body>
+</html>

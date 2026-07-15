@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <pattern id="grass-top" patternUnits="userSpaceOnUse" width="16" height="16">
+      <rect width="16" height="16" fill="#5BA83A"/>
+      <rect x="0" y="0" width="4" height="4" fill="#4F9C30"/>
+      <rect x="8" y="4" width="4" height="4" fill="#6FBD45"/>
+      <rect x="4" y="8" width="4" height="4" fill="#4F9C30"/>
+      <rect x="12" y="12" width="4" height="4" fill="#6FBD45"/>
+    </pattern>
+    <pattern id="dirt-front" patternUnits="userSpaceOnUse" width="16" height="16">
+      <rect width="16" height="16" fill="#8B5A2B"/>
+      <rect x="0" y="0" width="4" height="4" fill="#704522"/>
+      <rect x="8" y="0" width="4" height="4" fill="#A06A38"/>
+      <rect x="4" y="4" width="4" height="4" fill="#704522"/>
+      <rect x="12" y="8" width="4" height="4" fill="#A06A38"/>
+      <rect x="0" y="12" width="4" height="4" fill="#A06A38"/>
+    </pattern>
+    <pattern id="dirt-side" patternUnits="userSpaceOnUse" width="16" height="16">
+      <rect width="16" height="16" fill="#7A4E25"/>
+      <rect x="0" y="0" width="4" height="4" fill="#623F1E"/>
+      <rect x="8" y="0" width="4" height="4" fill="#8B5A2B"/>
+      <rect x="4" y="4" width="4" height="4" fill="#623F1E"/>
+      <rect x="12" y="8" width="4" height="4" fill="#8B5A2B"/>
+    </pattern>
+  </defs>
+  <polygon points="64,8 116,32 64,56 12,32" fill="url(#grass-top)" stroke="#2E5C1A" stroke-width="1.5" stroke-linejoin="round"/>
+  <polygon points="12,32 64,56 64,118 12,94" fill="url(#dirt-front)" stroke="#3A2510" stroke-width="1.5" stroke-linejoin="round"/>
+  <polygon points="64,56 116,32 116,94 64,118" fill="url(#dirt-side)" stroke="#3A2510" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M12,32 L20,40 L20,46 L12,38 Z M28,40 L36,46 L36,52 L28,46 Z M44,48 L52,54 L52,60 L44,54 Z M60,55 L64,57 L64,63 L60,61 Z" fill="#4F9C30"/>
+  <path d="M64,56 L72,52 L72,58 L64,62 Z M80,48 L88,44 L88,50 L80,54 Z M96,40 L104,36 L104,42 L96,46 Z" fill="#5BA83A"/>
+</svg>

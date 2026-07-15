@@ -1,0 +1,31 @@
+{
+  "_comment": "Универсальный JSON-шаблон урока KURSOR. Структура: 1) intro (2-3 экрана с 'Далее') → 2) miniTask → 3) tasks. Положи копию в data/lessons/, измени поля. moduleId связывает урок с модулем (создастся автоматически если нет). Универсально для Scratch, Python, HTML, Java и т.д.",
+  "moduleId": "example_lesson_1",
+  "lang": "python",
+  "title": "Название урока",
+  "description": "Короткий анонс одной строкой.",
+  "intro": [
+    { "title": "Экран 1 — введение", "emoji": "📦", "body": "<p>HTML: <b>жирный</b>, <code>код</code>, списки.</p>", "image": "", "video": "", "code": "" },
+    { "title": "Экран 2 — пример", "emoji": "💡", "body": "<p>Покажи пример.</p>", "video": "https://www.youtube.com/embed/VIDEO_ID", "code": "x = 5\nprint(x)" },
+    { "title": "Экран 3 — итог", "emoji": "✨", "body": "<p>Подытожь что запомнить.</p>" }
+  ],
+  "miniTask": {
+    "type": "quiz",
+    "title": "Проверь себя",
+    "description": "Один простой вопрос.",
+    "options": ["А", "Б", "В", "Г"],
+    "answer": 1,
+    "explain": "Короткое объяснение.",
+    "points": 5,
+    "_alternativeTypes": {
+      "fill":  { "type": "fill",  "answer": "правильное_слово" },
+      "order": { "type": "order", "items": ["шаг 1", "шаг 2", "шаг 3"] },
+      "code":  { "type": "code",  "starter": "# код", "expectedOutput": "вывод" }
+    }
+  },
+  "tasks": [
+    { "type": "quiz", "difficulty": 1, "title": "Задача №1", "description": "Условие.", "options": ["A","B","C","D"], "answer": 0, "explain": "Подсказка." },
+    { "type": "fill", "difficulty": 2, "title": "Задача №2", "description": "Что выведет <code>print(2+2)</code>?", "answer": "4", "explain": "Сложение." },
+    { "type": "code", "difficulty": 3, "title": "Задача №3", "description": "Выведи «Привет, мир!»", "starter": "# код\n", "expectedOutput": "Привет, мир!", "explain": "Используй print()." }
+  ]
+}

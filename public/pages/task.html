@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Задача — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="nav"></div>
+<div class="container"><div id="content">Загружаем…</div></div>
+
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['student','teacher','admin']);
+const taskId = parseInt(getQueryParam('id'));
+let state = { task: null, mod: null, lang: null, progress: null, hintUsed:false, selectedOption:null, dragOrder:[], submitted:false };
+
+if (user) init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('catalog'); I18N.applyI18n(document.getElementById('nav'));
+  try {
+    const [tasks, modules] = await Promise.all([API.getTasks(), API.getModules()]);
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) { document.getElementById('content').innerHTML = '<div class="card">Задача не найдена</div>'; return; }
+    const mod = modules.find(m => m.id === task.module);
+    const lang = mod ? KURSOR_DB.LANGS[mod.lang] : null;
+    let progress = null;
+    if (user.role === 'student') progress = await API.getMyProgress();
+    state = { ...state, task, mod, lang, progress };
+    render();
+  } catch (err) {
+    document.getElementById('content').innerHTML =
+      `<div class="card" style="padding:30px;text-align:center;color:#ef4444">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+const typeIcons = {
+  quiz:    '<img src="https://cdn-icons-png.flaticon.com/512/3143/3143190.png" style="width:16px;height:16px;vertical-align:-3px">',
+  fill:    '<img src="https://cdn-icons-png.flaticon.com/512/1250/1250615.png" style="width:16px;height:16px;vertical-align:-3px">',
+  order:   '<img src="https://cdn-icons-png.flaticon.com/512/10209/10209063.png" style="width:16px;height:16px;vertical-align:-3px">',
+  code:    '<img src="https://cdn-icons-png.flaticon.com/512/6062/6062646.png" style="width:16px;height:16px;vertical-align:-3px">',
+  project: '<img src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" style="width:16px;height:16px;vertical-align:-3px">',
+  scratch: '<img src="https://cdn-icons-png.flaticon.com/512/220/220112.png" style="width:16px;height:16px;vertical-align:-3px">',
+  htmlcss: '<img src="https://cdn-icons-png.flaticon.com/512/919/919827.png" style="width:16px;height:16px;vertical-align:-3px">',
+  blockly: '<img src="https://cdn-icons-png.flaticon.com/512/2103/2103658.png" style="width:16px;height:16px;vertical-align:-3px">',
+  java:    '<img src="/uploads/icons/java.svg" style="width:16px;height:16px;vertical-align:-3px">',
+  cpp:     '<img src="/uploads/icons/cpp.svg" style="width:16px;height:16px;vertical-align:-3px">',
+};
+const typeNames = {
+  quiz:'Тест с выбором', fill:'Заполни пропуск', order:'Расставь по порядку', code:'Напиши код (Python)', project:'Мини-проект',
+  scratch:'Интерактивная задача', htmlcss:'Интерактивная задача', blockly:'Интерактивная задача',
+  java:'Напиши код (Java)', cpp:'Напиши код (C++)'
+};
+const points = { quiz:10, fill:15, order:20, code:25, project:50, scratch:40, htmlcss:30, blockly:35, java:30, cpp:30 };
+
+function render() {
+  const { task, mod, lang } = state;
+
+  document.getElementById('content').innerHTML = `
+    <div style="margin-bottom:18px">
+      <a href="/pages/catalog.html" class="btn btn-ghost">← К каталогу</a>
+    </div>
+
+    <div class="task-layout">
+      <div class="task-info-panel">
+        ${lang ? `<span class="lang-badge ${lang.class}" style="margin-bottom:8px"><img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"> ${lang.name}</span>` : ''}
+        <h1 style="margin-bottom:6px">${escapeHtml(task.title)}</h1>
+        <div style="color:#64748b;font-size:14px;margin-bottom:14px;display:flex;align-items:center;gap:6px">
+          ${typeIcons[task.type]} ${typeNames[task.type]}
+          <span style="color:#cbd5e1">·</span>
+          <img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:14px;height:14px;vertical-align:-2px"> ${points[task.type]} очков
+          <span style="color:#cbd5e1">·</span>
+          ${'★'.repeat(task.difficulty||1)}
+        </div>
+
+        ${mod ? `
+        <div class="mascot-bubble">
+          <img src="${KURSOR_DB.MASCOT.explain}" alt="">
+          <div class="speech">
+            <b>Тема: ${escapeHtml(mod.title)}</b>
+            <div style="margin-top:8px">${mod.explanation || mod.description || ''}</div>
+            ${mod.video ? `<div class="video-embed"><iframe src="${mod.video}" allowfullscreen></iframe></div>` : ''}
+          </div>
+        </div>` : ''}
+
+        <div class="task-explanation">
+          <h4 style="display:flex;align-items:center;gap:6px"><img src="https://cdn-icons-png.flaticon.com/512/1087/1087927.png" style="width:18px;height:18px"> Задание</h4>
+          <p style="white-space:pre-wrap">${escapeHtml(task.description)}</p>
+        </div>
+
+        ${task.explain ? `
+        <div id="hintWrap">
+          <div class="hint-block locked" onclick="useHint()" style="display:flex;align-items:center;gap:8px">
+            <img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:16px;height:16px"> Открыть подсказку (−5 очков)
+          </div>
+        </div>` : ''}
+      </div>
+
+      <div class="solver-panel">
+        <h3 style="margin-bottom:12px">Твой ответ</h3>
+        ${renderSolver(task)}
+        <div id="feedback"></div>
+        <div style="margin-top:16px;display:flex;gap:10px">
+          <button class="btn btn-lg btn-success" id="checkBtn" onclick="checkAnswer()">Проверить</button>
+          <button class="btn btn-outline" onclick="location.reload()">Сбросить</button>
+        </div>
+      </div>
+    </div>
+  `;
+  attachInteractions(task);
+}
+
+function renderSolver(task) {
+  switch (task.type) {
+    case 'quiz':
+      return `
+        <div class="quiz-options" id="quizOpts">
+          ${(task.options||[]).map((o, i) => `
+            <div class="quiz-option" data-idx="${i}">
+              <div class="option-letter">${String.fromCharCode(65+i)}</div>
+              <div>${escapeHtml(o)}</div>
+            </div>`).join('')}
+        </div>`;
+    case 'fill':
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Введи правильное слово или число:</p>
+        <input type="text" class="form-input" id="fillInput" placeholder="твой ответ" autofocus>`;
+    case 'order':
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Перетащи строки в правильный порядок:</p>
+        <div class="drag-area" id="dragArea"></div>`;
+    case 'code':
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Напиши код. Что должно вывести:
+          <code style="display:block;background:#1e293b;color:#a7f3d0;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap">${escapeHtml(task.expectedOutput || '')}</code>
+        </p>
+        <textarea class="code-input" id="codeInput" spellcheck="false">${escapeHtml(task.starter || '')}</textarea>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <button class="btn btn-outline" onclick="runPython()" id="runBtn" style="display:flex;align-items:center;gap:6px"><img src="https://cdn-icons-png.flaticon.com/512/6062/6062646.png" style="width:16px;height:16px"> Запустить</button>
+          <span id="runStatus" style="color:#64748b;font-size:13px"></span>
+        </div>
+        <div id="runOutput" style="margin-top:10px"></div>`;
+    case 'project':
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Загрузи ссылку на проект, опиши что сделал или вставь скриншот:</p>
+        <textarea class="form-input" id="projectInput" rows="6" placeholder="Ссылка на Scratch, GitHub, описание…" style="font-family:inherit;resize:vertical"></textarea>
+        <p style="font-size:13px;color:#64748b;margin-top:10px">Учитель проверит твой проект и поставит оценку.</p>`;
+
+    case 'scratch': {
+      const tw = task.scratchProjectId
+        ? `https://turbowarp.org/${encodeURIComponent(task.scratchProjectId)}/editor`
+        : 'https://turbowarp.org/editor';
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Открой Scratch-редактор ниже (TurboWarp), собери проект по заданию, затем опиши что ты сделал:</p>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;background:#f8fafc">
+          <iframe id="scratchFrame" src="${tw}" style="width:100%;height:520px;border:0;display:block" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals" allowfullscreen></iframe>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn btn-outline" href="${tw}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px">
+            <img src="https://cdn-icons-png.flaticon.com/512/1828/1828817.png" style="width:16px;height:16px"> Открыть в новой вкладке
+          </a>
+          <button class="btn btn-ghost" type="button" onclick="document.getElementById('scratchFrame').src=document.getElementById('scratchFrame').src">↻ Перезапустить</button>
+        </div>
+        <p style="margin:14px 0 6px;color:#64748b">Опиши что ты сделал (ссылка на сохранённый проект, описание блоков и т.п.):</p>
+        <textarea class="form-input" id="scratchInput" rows="5" placeholder="Например: я добавил блок 'когда нажат флажок', цикл повторить 10 раз…" style="font-family:inherit;resize:vertical"></textarea>
+        <p style="font-size:13px;color:#64748b;margin-top:8px">Учитель проверит твой Scratch-проект и поставит оценку.</p>`;
+    }
+
+    case 'htmlcss': {
+      const starter = task.starter || '';
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Меняй код слева — превью справа обновляется автоматически:</p>
+        <div class="htmlcss-split" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch">
+          <textarea class="code-input" id="htmlInput" spellcheck="false" style="min-height:340px">${escapeHtml(starter)}</textarea>
+          <iframe id="htmlPreview" sandbox="allow-scripts" style="width:100%;min-height:340px;border:1px solid #e2e8f0;border-radius:10px;background:#fff"></iframe>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <button class="btn btn-outline" type="button" id="htmlRefreshBtn" style="display:inline-flex;align-items:center;gap:6px">
+            <img src="https://cdn-icons-png.flaticon.com/512/919/919827.png" style="width:16px;height:16px"> Обновить превью
+          </button>
+          <span style="color:#64748b;font-size:13px">Превью изолировано (sandbox).</span>
+        </div>
+        ${task.expectedOutput ? '' : '<p style="font-size:13px;color:#64748b;margin-top:10px">У этой задачи нет автопроверки — учитель оценит твою работу.</p>'}`;
+    }
+
+    case 'blockly': {
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Собери программу из блоков. Когда готов — нажми «Сгенерировать JavaScript».</p>
+        <div id="blocklyDiv" style="height:420px;width:100%;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc"></div>
+        <xml id="blocklyToolbox" style="display:none">
+          <category name="Logic" colour="#5C81A6">
+            <block type="controls_if"></block>
+            <block type="logic_compare"></block>
+            <block type="logic_operation"></block>
+            <block type="logic_negate"></block>
+            <block type="logic_boolean"></block>
+          </category>
+          <category name="Loops" colour="#5CA65C">
+            <block type="controls_repeat_ext"><value name="TIMES"><shadow type="math_number"><field name="NUM">10</field></shadow></value></block>
+            <block type="controls_whileUntil"></block>
+            <block type="controls_for"><value name="FROM"><shadow type="math_number"><field name="NUM">1</field></shadow></value><value name="TO"><shadow type="math_number"><field name="NUM">10</field></shadow></value><value name="BY"><shadow type="math_number"><field name="NUM">1</field></shadow></value></block>
+          </category>
+          <category name="Math" colour="#5C68A6">
+            <block type="math_number"></block>
+            <block type="math_arithmetic"></block>
+            <block type="math_single"></block>
+            <block type="math_modulo"></block>
+          </category>
+          <category name="Text" colour="#5CA68D">
+            <block type="text"></block>
+            <block type="text_print"></block>
+            <block type="text_join"></block>
+          </category>
+          <category name="Variables" colour="#A65C81" custom="VARIABLE"></category>
+        </xml>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-outline" type="button" id="genJsBtn" style="display:inline-flex;align-items:center;gap:6px">
+            <img src="https://cdn-icons-png.flaticon.com/512/5968/5968292.png" style="width:16px;height:16px"> Сгенерировать JavaScript
+          </button>
+          <span id="blocklyStatus" style="color:#64748b;font-size:13px"></span>
+        </div>
+        <pre id="blocklyOutput" style="background:#1e293b;color:#a7f3d0;padding:14px;border-radius:8px;font-family:Fira Code,monospace;white-space:pre-wrap;margin-top:10px;min-height:60px">// здесь появится сгенерированный код</pre>`;
+    }
+
+    case 'java':
+    case 'cpp': {
+      const langLabel = task.type === 'java' ? 'Java' : 'C++';
+      const defaultStarter = task.type === 'java'
+        ? 'import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        // твой код\n        System.out.println("Hello");\n    }\n}\n'
+        : '#include <iostream>\nusing namespace std;\n\nint main() {\n    // твой код\n    cout << "Hello" << endl;\n    return 0;\n}\n';
+      const starter = task.starter || defaultStarter;
+      return `
+        <p style="margin-bottom:10px;color:#64748b">Напиши код на <b>${langLabel}</b>. Что должна вывести программа:
+          <code style="display:block;background:#1e293b;color:#a7f3d0;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap">${escapeHtml(task.expectedOutput || '')}</code>
+        </p>
+        <textarea class="code-input" id="codeInput" spellcheck="false" style="min-height:280px">${escapeHtml(starter)}</textarea>
+        ${task.stdin ? `<label style="display:block;margin-top:10px;color:#64748b;font-size:13px">Ввод (stdin):</label><textarea class="code-input" id="stdinInput" spellcheck="false" style="min-height:60px">${escapeHtml(task.stdin)}</textarea>` : ''}
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-outline" onclick="runNative('${task.type}')" id="runBtn" style="display:flex;align-items:center;gap:6px"><img src="https://cdn-icons-png.flaticon.com/512/6062/6062646.png" style="width:16px;height:16px"> Запустить</button>
+          <span id="runStatus" style="color:#64748b;font-size:13px"></span>
+        </div>
+        <div id="runOutput" style="margin-top:10px"></div>`;
+    }
+  }
+}
+
+function attachInteractions(task) {
+  if (task.type === 'quiz') {
+    document.querySelectorAll('.quiz-option').forEach(opt => {
+      opt.onclick = () => {
+        document.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        state.selectedOption = parseInt(opt.dataset.idx);
+      };
+    });
+  }
+  if (task.type === 'order') {
+    const shuffled = [...(task.items||[])].map(v => ({v, r: Math.random()})).sort((a,b)=>a.r-b.r).map(o=>o.v);
+    state.dragOrder = shuffled.slice();
+    renderDrag();
+  }
+  if (task.type === 'htmlcss') {
+    const ta = document.getElementById('htmlInput');
+    const pv = document.getElementById('htmlPreview');
+    const refresh = () => { try { pv.srcdoc = ta.value; } catch(e){} };
+    ta.addEventListener('input', refresh);
+    const btn = document.getElementById('htmlRefreshBtn');
+    if (btn) btn.onclick = refresh;
+    refresh();
+  }
+  if (task.type === 'blockly') {
+    initBlockly(task);
+  }
+}
+
+let blocklyWorkspace = null;
+async function initBlockly(task) {
+  const status = document.getElementById('blocklyStatus');
+  if (status) status.textContent = 'Загружаю Blockly…';
+  if (!window.Blockly) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/blockly/blockly.min.js';
+      s.onload = resolve; s.onerror = () => reject(new Error('Не удалось загрузить Blockly'));
+      document.body.appendChild(s);
+    }).catch(err => { if (status) status.textContent = err.message; });
+  }
+  if (!window.Blockly) return;
+  const toolboxXml = document.getElementById('blocklyToolbox');
+  try {
+    blocklyWorkspace = Blockly.inject('blocklyDiv', { toolbox: toolboxXml, trashcan: true,
+      grid:{spacing:20,length:3,colour:'#e2e8f0',snap:true},
+      zoom:{controls:true,wheel:true,startScale:0.9,maxScale:2,minScale:0.5,scaleSpeed:1.1}
+    });
+    if (status) status.textContent = 'Готово — собирай!';
+  } catch (e) {
+    if (status) status.textContent = 'Ошибка инициализации: ' + e.message;
+    return;
+  }
+  const btn = document.getElementById('genJsBtn');
+  if (btn) btn.onclick = () => {
+    try {
+      const code = Blockly.JavaScript ? Blockly.JavaScript.workspaceToCode(blocklyWorkspace) : '';
+      document.getElementById('blocklyOutput').textContent = code || '// (пусто — добавь блоки)';
+      state.blocklyCode = code || '';
+    } catch (e) {
+      document.getElementById('blocklyOutput').textContent = '// Ошибка: ' + e.message;
+    }
+  };
+}
+
+function renderDrag() {
+  const area = document.getElementById('dragArea');
+  area.innerHTML = state.dragOrder.map((item, i) => `<div class="drag-item" draggable="true" data-idx="${i}">${escapeHtml(item)}</div>`).join('');
+  let draggedIdx = null;
+  area.querySelectorAll('.drag-item').forEach(el => {
+    el.ondragstart = () => { draggedIdx = parseInt(el.dataset.idx); el.style.opacity='0.4'; };
+    el.ondragend = () => { el.style.opacity='1'; document.querySelectorAll('.drag-item').forEach(x=>x.classList.remove('over')); };
+    el.ondragover = (e) => { e.preventDefault(); el.classList.add('over'); };
+    el.ondragleave = () => el.classList.remove('over');
+    el.ondrop = (e) => {
+      e.preventDefault();
+      const targetIdx = parseInt(el.dataset.idx);
+      if (draggedIdx !== null && draggedIdx !== targetIdx) {
+        const arr = state.dragOrder;
+        const [m] = arr.splice(draggedIdx, 1);
+        arr.splice(targetIdx, 0, m);
+        renderDrag();
+      }
+    };
+  });
+}
+
+function useHint() {
+  state.hintUsed = true;
+  document.getElementById('hintWrap').innerHTML = `
+    <div class="hint-block" style="display:flex;align-items:flex-start;gap:8px">
+      <img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:16px;height:16px;margin-top:2px">
+      <div><b>Подсказка:</b> ${escapeHtml(state.task.explain)}</div>
+    </div>`;
+}
+
+// ВНИМАНИЕ: раньше эти функции молча проглатывали ошибку (catch(e){console.error}),
+// в результате ученик видел «Правильно! +N очков» при реально провалившейся
+// записи прогресса. Теперь возвращаем результат, и вызывающий код покажет ошибку
+// вместо фальшивого успеха.
+async function recordCompleteSafe(taskId, pts, usedHint, submission) {
+  if (user.role !== 'student') return { ok: true };
+  try {
+    state.progress = await API.recordComplete(taskId, pts, usedHint, submission);
+    return { ok: true };
+  } catch (e) {
+    console.error('recordComplete failed:', e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+async function recordAttemptSafe(taskId) {
+  if (user.role !== 'student') return { ok: true };
+  try {
+    state.progress = await API.recordAttempt(taskId);
+    return { ok: true };
+  } catch (e) {
+    console.error('recordAttempt failed:', e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+async function checkAnswer() {
+  const task = state.task;
+  let correct = false, userAnswer = null;
+
+  switch (task.type) {
+    case 'quiz':
+      if (state.selectedOption === null) { showFeedback(false, 'Выбери ответ!'); return; }
+      userAnswer = state.selectedOption;
+      correct = userAnswer === task.answer;
+      document.querySelectorAll('.quiz-option').forEach((o, i) => {
+        if (i === task.answer) o.classList.add('correct');
+        else if (i === userAnswer && !correct) o.classList.add('wrong');
+      });
+      break;
+    case 'fill':
+      const fv = document.getElementById('fillInput').value.trim().toLowerCase();
+      if (!fv) { showFeedback(false, 'Введи ответ!'); return; }
+      correct = fv === String(task.answer).toLowerCase().trim();
+      userAnswer = fv;
+      break;
+    case 'order':
+      correct = JSON.stringify(state.dragOrder) === JSON.stringify(task.items);
+      userAnswer = state.dragOrder;
+      break;
+    case 'code':
+      await runPython(true);
+      return;
+    case 'java':
+    case 'cpp':
+      await runNative(task.type, true);
+      return;
+    case 'project': {
+      const pv = document.getElementById('projectInput').value.trim();
+      if (pv.length < 10) { showFeedback(false, 'Опиши подробнее (мин. 10 символов).'); return; }
+      const r = await recordCompleteSafe(task.id, points.project, state.hintUsed, pv);
+      if (!r.ok) { showFeedback(false, 'Ошибка сохранения: ' + r.error + '. Попробуй ещё раз.'); return; }
+      showFeedback(true, 'Проект отправлен учителю на проверку!');
+      fireConfetti();
+      return;
+    }
+    case 'scratch': {
+      const sv = document.getElementById('scratchInput').value.trim();
+      if (sv.length < 10) { showFeedback(false, 'Опиши свой Scratch-проект (мин. 10 символов).'); return; }
+      const r = await recordCompleteSafe(task.id, points.scratch, state.hintUsed, sv);
+      if (!r.ok) { showFeedback(false, 'Ошибка сохранения: ' + r.error + '. Попробуй ещё раз.'); return; }
+      showFeedback(true, 'Scratch-проект отправлен учителю на проверку! +' + points.scratch + ' очков (после подтверждения)');
+      fireConfetti();
+      return;
+    }
+    case 'htmlcss': {
+      const hv = document.getElementById('htmlInput').value;
+      const expected = (task.expectedOutput || '').trim();
+      if (expected) {
+        const norm = s => s.replace(/\s+/g, ' ').toLowerCase();
+        correct = norm(hv).includes(norm(expected));
+        userAnswer = hv;
+        await recordAttemptSafe(task.id);
+        if (correct) {
+          let pts = points.htmlcss; if (!state.hintUsed) pts += 5;
+          const r = await recordCompleteSafe(task.id, pts, state.hintUsed, hv);
+          if (!r.ok) { showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.'); return; }
+          showFeedback(true, `Отлично! Код содержит нужный фрагмент. +${pts} очков`);
+          fireConfetti();
+        } else {
+          showFeedback(false, task.explain ? `Пока не то. ${task.explain}` : 'Код пока не содержит нужного фрагмента.');
+        }
+      } else {
+        if (hv.trim().length < 5) { showFeedback(false, 'Напиши хоть немного кода.'); return; }
+        const r = await recordCompleteSafe(task.id, points.htmlcss, state.hintUsed, hv);
+        if (!r.ok) { showFeedback(false, 'Ошибка сохранения: ' + r.error + '. Попробуй ещё раз.'); return; }
+        showFeedback(true, 'Работа отправлена учителю на проверку!');
+        fireConfetti();
+      }
+      return;
+    }
+    case 'blockly': {
+      const bc = (state.blocklyCode || '').trim();
+      if (!bc) { showFeedback(false, 'Сначала нажми «Сгенерировать JavaScript».'); return; }
+      const expected = (task.expectedOutput || '').trim();
+      if (expected) {
+        const norm = s => s.replace(/\s+/g, ' ').toLowerCase();
+        correct = norm(bc).includes(norm(expected));
+        await recordAttemptSafe(task.id);
+        if (correct) {
+          let pts = points.blockly; if (!state.hintUsed) pts += 5;
+          const r = await recordCompleteSafe(task.id, pts, state.hintUsed, bc);
+          if (!r.ok) { showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.'); return; }
+          showFeedback(true, `Отлично! Блоки собраны верно. +${pts} очков`);
+          fireConfetti();
+        } else {
+          showFeedback(false, task.explain ? `Пока не то. ${task.explain}` : 'Сгенерированный код не содержит ожидаемой конструкции.');
+        }
+      } else {
+        const r = await recordCompleteSafe(task.id, points.blockly, state.hintUsed, bc);
+        if (!r.ok) { showFeedback(false, 'Ошибка сохранения: ' + r.error + '. Попробуй ещё раз.'); return; }
+        showFeedback(true, 'Решение отправлено учителю на проверку!');
+        fireConfetti();
+      }
+      return;
+    }
+  }
+
+  await recordAttemptSafe(task.id);
+
+  if (correct) {
+    let pts = points[task.type];
+    if (!state.hintUsed) pts += 5;
+    const r = await recordCompleteSafe(task.id, pts, state.hintUsed);
+    if (!r.ok) {
+      showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.');
+      return;
+    }
+    showFeedback(true, `Правильно! +${pts} очков${state.hintUsed ? '' : ' (бонус за решение без подсказки!)'}`);
+    fireConfetti();
+  } else {
+    showFeedback(false, task.explain ? `Не совсем. ${task.explain}` : 'Попробуй ещё раз!');
+  }
+}
+
+function showFeedback(success, msg) {
+  document.getElementById('feedback').innerHTML = `
+    <div class="feedback ${success ? 'success' : 'error'}">
+      <img class="mascot-sm" src="${success ? KURSOR_DB.MASCOT.happy : KURSOR_DB.MASCOT.sad}" alt="Маскот">
+      <div>
+        <div style="font-size:16px;margin-bottom:4px">${msg}</div>
+        ${success ? `<a href="/pages/catalog.html" class="btn btn-success" style="margin-top:8px">Ещё задачу!</a>` : ''}
+      </div>
+    </div>`;
+}
+
+let pyodide = null;
+async function loadPyodide_() {
+  if (pyodide) return pyodide;
+  document.getElementById('runStatus').textContent = 'Загружаю Python...';
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
+  document.body.appendChild(script);
+  await new Promise(r => script.onload = r);
+  pyodide = await loadPyodide();
+  document.getElementById('runStatus').textContent = '';
+  return pyodide;
+}
+
+async function runPython(autoCheck = false) {
+  const task = state.task;
+  const code = document.getElementById('codeInput').value;
+  const out = document.getElementById('runOutput');
+  document.getElementById('runStatus').textContent = 'Подготовка...';
+  try {
+    await loadPyodide_();
+    pyodide.setStdout({ batched: (s) => { window._pyOut += s + '\n'; } });
+    window._pyOut = '';
+    document.getElementById('runStatus').textContent = 'Выполняю...';
+    pyodide.runPython(code);
+    document.getElementById('runStatus').textContent = 'Готово';
+    const result = (window._pyOut || '').trim();
+    out.innerHTML = `<div style="background:#1e293b;color:#a7f3d0;padding:14px;border-radius:8px;font-family:Fira Code,monospace;white-space:pre-wrap">${escapeHtml(result || '(нет вывода)')}</div>`;
+
+    const expected = (task.expectedOutput || '').trim();
+    if (expected) {
+      const normalize = s => s.replace(/\r\n/g, '\n').trim();
+      const correct = normalize(result) === normalize(expected);
+      if (correct) {
+        let pts = 25; if (!state.hintUsed) pts += 5;
+        const r = await recordCompleteSafe(task.id, pts, state.hintUsed);
+        if (!r.ok) {
+          showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.');
+        } else {
+          showFeedback(true, `Идеально! Вывод совпадает. +${pts} очков`);
+          fireConfetti();
+        }
+      } else if (autoCheck) {
+        showFeedback(false, 'Вывод не совпадает с ожидаемым. Проверь логику.');
+      }
+    }
+  } catch (e) {
+    document.getElementById('runStatus').textContent = '';
+    out.innerHTML = `<div style="background:#fee2e2;color:#991b1b;padding:14px;border-radius:8px;font-family:Fira Code,monospace;white-space:pre-wrap">Ошибка: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+/* ===== Запуск кода на Java / C++ через публичный Piston API =====
+   https://github.com/engineer-man/piston — без ключа, бесплатно. */
+async function runNative(lang, autoCheck = false) {
+  const task = state.task;
+  const code = document.getElementById('codeInput').value;
+  const stdinEl = document.getElementById('stdinInput');
+  const stdin = stdinEl ? stdinEl.value : (task.stdin || '');
+  const out = document.getElementById('runOutput');
+  const statusEl = document.getElementById('runStatus');
+  const runBtn = document.getElementById('runBtn');
+  if (runBtn) runBtn.disabled = true;
+  statusEl.textContent = lang === 'java' ? 'Компилирую Java...' : 'Компилирую C++...';
+
+  const payload = lang === 'java'
+    ? { language: 'java', version: '15.0.2',
+        files: [{ name: 'Main.java', content: code }],
+        stdin }
+    : { language: 'cpp', version: '10.2.0',
+        files: [{ name: 'main.cpp', content: code }],
+        stdin };
+
+  try {
+    const resp = await fetch('https://emkc.org/api/v2/piston/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error('Сервис компиляции недоступен (HTTP ' + resp.status + ')');
+    const data = await resp.json();
+    const compileErr = data.compile && data.compile.stderr ? data.compile.stderr : '';
+    const runOut = (data.run && data.run.stdout) ? data.run.stdout : '';
+    const runErr = (data.run && data.run.stderr) ? data.run.stderr : '';
+
+    if (compileErr) {
+      statusEl.textContent = 'Ошибка компиляции';
+      out.innerHTML = `<div style="background:#fee2e2;color:#991b1b;padding:14px;border-radius:8px;font-family:Fira Code,monospace;white-space:pre-wrap">${escapeHtml(compileErr)}</div>`;
+      return;
+    }
+    statusEl.textContent = 'Готово';
+    const combined = (runOut + (runErr ? '\n' + runErr : '')).trim();
+    out.innerHTML = `<div style="background:#1e293b;color:#a7f3d0;padding:14px;border-radius:8px;font-family:Fira Code,monospace;white-space:pre-wrap">${escapeHtml(combined || '(нет вывода)')}</div>`;
+
+    const expected = (task.expectedOutput || '').trim();
+    if (expected) {
+      const normalize = s => s.replace(/\r\n/g, '\n').replace(/\s+$/g,'').trim();
+      await recordAttemptSafe(task.id);
+      const correct = normalize(runOut) === normalize(expected);
+      if (correct) {
+        let pts = points[lang]; if (!state.hintUsed) pts += 5;
+        const r = await recordCompleteSafe(task.id, pts, state.hintUsed, code);
+        if (!r.ok) {
+          showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.');
+        } else {
+          showFeedback(true, `Идеально! Вывод совпадает. +${pts} очков`);
+          fireConfetti();
+        }
+      } else if (autoCheck) {
+        showFeedback(false, 'Вывод не совпадает с ожидаемым. Сравни внимательно.');
+      }
+    }
+  } catch (e) {
+    statusEl.textContent = '';
+    out.innerHTML = `<div style="background:#fee2e2;color:#991b1b;padding:14px;border-radius:8px;font-family:Fira Code,monospace;white-space:pre-wrap">Ошибка: ${escapeHtml(e.message)}</div>`;
+  } finally {
+    if (runBtn) runBtn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

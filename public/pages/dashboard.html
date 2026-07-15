@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Главная — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="nav"></div>
+<div class="container"><div id="content">Загружаем…</div></div>
+
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['student']);
+if (user) init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('dashboard');
+  I18N.applyI18n(document.getElementById('nav'));
+  I18N.applyI18n();
+  try {
+    const [tasks, modules, progress] = await Promise.all([
+      API.getTasks(), API.getModules(), API.getMyProgress(),
+    ]);
+    let homework = [];
+    try { homework = await API.getMyHomework(); } catch (e) { console.warn('hw load', e.message); }
+    render(tasks, modules, progress, homework);
+  } catch (err) {
+    document.getElementById('content').innerHTML =
+      `<div class="card" style="padding:30px;text-align:center;color:#ef4444">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function render(tasks, modules, progress, homework) {
+  const availableTasks = tasks.filter(t => {
+    const m = modules.find(m => m.id === t.module);
+    if (!m) return false;
+    const lang = KURSOR_DB.LANGS[m.lang];
+    if (!lang) return false;
+    return lang.group === user.group || (user.languages || []).includes(m.lang);
+  });
+
+  const doneCount = Object.values(progress.tasks).filter(t => t.status === 'done').length;
+  const totalCount = availableTasks.length;
+  const progressPercent = totalCount ? Math.round(doneCount / totalCount * 100) : 0;
+
+  const recommended = availableTasks
+    .filter(t => !progress.tasks[t.id] || progress.tasks[t.id].status !== 'done')
+    .sort((a, b) => (a.difficulty || 1) - (b.difficulty || 1))
+    .slice(0, 3);
+
+  const langProgress = {};
+  (user.languages || []).forEach(l => {
+    const langTasks = tasks.filter(t => modules.find(m => m.id === t.module)?.lang === l);
+    const langDone = langTasks.filter(t => progress.tasks[t.id]?.status === 'done').length;
+    langProgress[l] = { total: langTasks.length, done: langDone };
+  });
+
+  document.getElementById('content').innerHTML = `
+    <div class="welcome-banner fade-in">
+      <img src="${KURSOR_DB.MASCOT.happy}" alt="Маскот КУРСОР" class="mascot-md">
+      <div style="flex:1">
+        <h1>${I18N.t('dash.greeting')}, ${escapeHtml(user.name)}!</h1>
+        <p>${I18N.t('dash.ready')}</p>
+        <div style="margin-top:14px;background:rgba(255,255,255,0.2);padding:12px 16px;border-radius:12px">
+          <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">
+            <span>${I18N.t('dash.my_progress')}</span><span><b>${doneCount}</b> / ${totalCount} ${I18N.t('dash.tasks_of')}</span>
+          </div>
+          <div class="progress-bar" style="background:rgba(255,255,255,0.3)"><div class="progress-fill" style="width:${progressPercent}%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-icon orange"><img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:22px;height:22px"></div><div><div class="stat-value">${progress.points}</div><div class="stat-label">${I18N.t('dash.points')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon pink"><img src="https://cdn-icons-png.flaticon.com/512/785/785116.png" style="width:22px;height:22px"></div><div><div class="stat-value">${progress.streak}</div><div class="stat-label">${I18N.t('dash.streak')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon green"><img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="width:22px;height:22px"></div><div><div class="stat-value">${doneCount}</div><div class="stat-label">${I18N.t('dash.solved')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon purple"><img src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" style="width:22px;height:22px"></div><div><div class="stat-value">${progress.badges.length}</div><div class="stat-label">${I18N.t('dash.badges')}</div></div></div>
+    </div>
+
+    <h2 class="section-title" data-i18n="dash.homework" style="margin-top:32px">${I18N.t('dash.homework')}</h2>
+    ${(homework && homework.length) ? `
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${homework.map(hw => {
+          const pct = hw.total ? Math.round(hw.done / hw.total * 100) : 0;
+          return `<div class="card" style="padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <div>
+                <b>${escapeHtml(hw.moduleTitle || I18N.t('dash.homework'))}</b>
+                <div style="font-size:12px;color:#64748b">${hw.dueDate ? ('до ' + fmtDate(hw.dueDate)) : ''}</div>
+              </div>
+              ${hw.allDone
+                ? `<span class="badge badge-success"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/190/190411.png" style="vertical-align:-3px"> ${I18N.t('dash.homework_done')}</span>`
+                : `<span class="badge badge-info">${hw.done}/${hw.total}</span>`}
+            </div>
+            <div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+              ${(hw.taskList || []).map(tid => {
+                const t = tasks.find(x => String(x.id) === String(tid));
+                if (!t) return '';
+                const done = hw.statuses[tid] === 'done';
+                return `<a href="/pages/task.html?id=${tid}" class="filter-chip ${done?'active':''}" style="text-decoration:none">
+                  ${done ? '<img class="chip-ic" src="https://cdn-icons-png.flaticon.com/512/190/190411.png">' : '<img class="chip-ic" src="https://cdn-icons-png.flaticon.com/512/4147/4147103.png">'}
+                  ${escapeHtml(t.title)}</a>`;
+              }).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>` : `<div class="card" style="padding:24px;text-align:center;color:#64748b">${I18N.t('dash.homework_empty')}</div>`}
+
+    <h2 class="section-title" style="margin-top:32px">${I18N.t('dash.continue')}</h2>
+    ${recommended.length ? `
+      <div class="tasks-grid">
+        ${recommended.map(t => renderTaskCard(t, progress, modules)).join('')}
+      </div>` : `
+      <div class="card" style="text-align:center;padding:40px">
+        <img class="mascot-md" src="${KURSOR_DB.MASCOT.happy}" alt="Маскот">
+        <h3 style="margin:14px 0">${I18N.t('dash.all_solved')}</h3>
+        <p style="color:#64748b">${I18N.t('dash.homework_empty')}</p>
+      </div>`}
+
+    ${(user.languages || []).length ? `
+    <h2 class="section-title" style="margin-top:32px">${I18N.t('dash.lang_progress')}</h2>
+    <div class="stats-grid">
+      ${Object.entries(langProgress).map(([l, p]) => {
+        const lang = KURSOR_DB.LANGS[l];
+        if (!lang) return '';
+        const pct = p.total ? Math.round(p.done / p.total * 100) : 0;
+        return `
+          <div class="card">
+            <div class="lang-card-row">
+              <img src="${lang.icon}" alt="" style="width:32px;height:32px;object-fit:contain">
+              <b>${escapeHtml(lang.name)}</b>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div style="font-size:13px;color:#64748b;margin-top:8px">${p.done} / ${p.total} ${I18N.t('dash.tasks_of')}</div>
+          </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    <div style="margin-top:32px;text-align:center">
+      <a href="/pages/catalog.html" class="btn btn-lg">${I18N.t('dash.all_tasks')}</a>
+    </div>
+  `;
+}
+
+function renderTaskCard(task, progress, modules) {
+  const m = modules.find(m => m.id === task.module);
+  const lang = m ? KURSOR_DB.LANGS[m.lang] : null;
+  const status = progress.tasks[task.id]?.status || 'new';
+  const typeIcons = {
+    quiz:    '<img src="https://cdn-icons-png.flaticon.com/512/3143/3143190.png" style="width:14px;height:14px;vertical-align:-2px">',
+    fill:    '<img src="https://cdn-icons-png.flaticon.com/512/1250/1250615.png" style="width:14px;height:14px;vertical-align:-2px">',
+    order:   '<img src="https://cdn-icons-png.flaticon.com/512/10209/10209063.png" style="width:14px;height:14px;vertical-align:-2px">',
+    code:    '<img src="https://cdn-icons-png.flaticon.com/512/6062/6062646.png" style="width:14px;height:14px;vertical-align:-2px">',
+    project: '<img src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" style="width:14px;height:14px;vertical-align:-2px">',
+  };
+  const typeNames = { quiz:'Тест', fill:'Пропуск', order:'Порядок', code:'Код', project:'Проект' };
+  return `
+    <div class="task-card" onclick="location.href='/pages/task.html?id=${task.id}'">
+      ${status === 'done' ? '<div class="task-status status-done"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/190/190411.png" alt="готово"></div>' : status === 'progress' ? '<div class="task-status status-progress"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2767/2767146.png" alt="в процессе"></div>' : ''}
+      ${lang ? `<span class="lang-badge ${lang.class}"><img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"> ${lang.name}</span>` : ''}
+      <h3>${escapeHtml(task.title)}</h3>
+      <div style="font-size:13px;color:#64748b;margin-top:4px">${m ? escapeHtml(m.title) : ''}</div>
+      <div class="task-meta">
+        <span>${typeIcons[task.type]} ${typeNames[task.type]}</span>
+        <span class="difficulty">${[1,2,3].map(d => `<span class="${d <= (task.difficulty||1) ? 'active' : ''}"></span>`).join('')}</span>
+      </div>
+    </div>`;
+}
+</script>
+</body>
+</html>

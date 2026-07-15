@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Кабинет родителя — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+/* ======= PARENT PANEL STYLES ======= */
+.parent-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 0;
+  min-height: calc(100vh - 70px);
+}
+
+/* Sidebar */
+.parent-sidebar {
+  background: #fff;
+  border-right: 1px solid #e2e8f0;
+  padding: 24px 0;
+  position: sticky;
+  top: 70px;
+  height: calc(100vh - 70px);
+  overflow-y: auto;
+}
+.sidebar-child-info {
+  padding: 0 16px 20px;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 8px;
+}
+.child-avatar-lg {
+  width: 72px; height: 72px; border-radius: 50%;
+  background: var(--gradient-1); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 900; margin: 0 auto 12px;
+  object-fit: cover;
+}
+.child-name-lg {
+  text-align: center; font-weight: 800; font-size: 16px; color: #1e293b;
+  margin-bottom: 4px;
+}
+.child-status-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 700;
+  margin: 0 auto; display: block; text-align: center; width: fit-content; margin: 0 auto;
+}
+.status-active { background: #dcfce7; color: #16a34a; }
+.status-frozen { background: #dbeafe; color: #2563eb; }
+.status-inactive { background: #f1f5f9; color: #64748b; }
+
+.sidebar-nav { padding: 0 8px; }
+.sidebar-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; border-radius: 12px;
+  font-weight: 700; font-size: 14px; color: #475569;
+  cursor: pointer; transition: all 0.18s; border: none; background: none;
+  width: 100%; text-align: left;
+}
+.sidebar-nav-item:hover { background: #f1f5f9; color: #6366f1; }
+.sidebar-nav-item.active { background: #eef2ff; color: #6366f1; }
+.sidebar-nav-item .nav-icon { font-size: 18px; width: 24px; text-align: center; }
+.sidebar-nav-item .nav-badge {
+  margin-left: auto; background: #ef4444; color: #fff;
+  font-size: 11px; padding: 1px 6px; border-radius: 10px;
+}
+
+/* Main content */
+.parent-main {
+  padding: 28px 32px;
+  background: #f8fafc;
+}
+
+/* Sections */
+.p-section { display: none; }
+.p-section.visible { display: block; }
+
+/* Feed */
+.feed-list { display: flex; flex-direction: column; gap: 14px; }
+.feed-card {
+  background: #fff; border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  padding: 18px 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  transition: box-shadow 0.2s;
+}
+.feed-card:hover { box-shadow: 0 4px 16px rgba(99,102,241,0.1); }
+.feed-card-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+}
+.feed-kind-icon {
+  width: 42px; height: 42px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+}
+.kind-feedback { background: #ede9fe; }
+.kind-video { background: #fce7f3; }
+.kind-work { background: #e0f2fe; }
+.feed-meta { flex: 1; }
+.feed-meta-title { font-weight: 800; font-size: 15px; color: #1e293b; }
+.feed-meta-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+.feed-date-chip {
+  font-size: 12px; font-weight: 600; color: #64748b;
+  background: #f1f5f9; padding: 4px 10px; border-radius: 20px; white-space: nowrap;
+}
+.feed-card-body { color: #374151; font-size: 15px; line-height: 1.6; }
+.feed-card-body.unavailable { color: #94a3b8; font-style: italic; }
+.feed-open-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 8px 16px; border-radius: 10px;
+  background: #6366f1; color: #fff; font-weight: 700; font-size: 13px;
+  text-decoration: none; transition: all 0.18s; border: none; cursor: pointer;
+}
+.feed-open-btn:hover { background: #4f46e5; transform: translateY(-1px); text-decoration: none; }
+
+/* ======= Instagram-style посты (Лента / Работы / Видео) ======= */
+.month-divider { display: flex; align-items: center; gap: 12px; margin: 28px 0 16px; }
+.month-divider:first-child { margin-top: 0; }
+.month-divider span { font-size: 13px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px; white-space: nowrap; }
+.month-divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+
+.ig-post { background: #fff; border-radius: 18px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 18px; }
+.ig-post-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; }
+.ig-post-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--gradient-1); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.ig-post-title { font-weight: 800; font-size: 14.5px; color: #1e293b; }
+.ig-post-sub { font-size: 12px; color: #94a3b8; margin-top: 1px; }
+.ig-post-date { margin-left: auto; font-size: 12px; color: #94a3b8; font-weight: 700; white-space: nowrap; }
+.ig-post-body { padding: 2px 0 14px; }
+.ig-block { padding: 12px 18px; }
+.ig-block + .ig-block { border-top: 1px dashed #f1f5f9; }
+
+.ig-image-wrap { padding: 0; }
+.ig-image { width: 100%; max-height: 520px; object-fit: contain; background: #f8fafc; display: block; cursor: zoom-in; }
+.ig-video { width: 100%; max-height: 520px; background: #0f172a; display: block; }
+.ig-media-actions { display: flex; gap: 10px; padding: 10px 18px 0; }
+.ig-download-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 10px;
+  background: #eef2ff; color: #4f46e5; font-weight: 700; font-size: 13px; text-decoration: none; border: none; cursor: pointer;
+  transition: all 0.15s;
+}
+.ig-download-btn:hover { background: #e0e7ff; text-decoration: none; }
+.ig-caption { padding: 8px 18px 2px; font-size: 14px; color: #374151; line-height: 1.55; }
+.ig-caption.muted { color: #94a3b8; font-style: italic; }
+.ig-file-card { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
+.ig-file-icon { width: 46px; height: 46px; border-radius: 12px; background: #eef2ff; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+.ig-file-name { font-weight: 700; font-size: 14px; color: #1e293b; }
+.ig-comment { padding: 10px 18px; background: #f8fafc; font-size: 14px; color: #374151; line-height: 1.55; }
+.ig-comment b { color: #1e293b; }
+.ig-comment + .ig-comment { border-top: 1px solid #eef2f7; }
+.ig-unavailable { padding: 14px 18px; color: #94a3b8; font-style: italic; font-size: 13.5px; background: #f8fafc; }
+
+/* Лайтбокс для просмотра фото в полный размер */
+.ig-lightbox {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.92); z-index: 9998;
+  display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out;
+}
+.ig-lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+
+/* Empty state */
+.empty-state {
+  text-align: center; padding: 60px 20px; color: #94a3b8;
+}
+.empty-state img { width: 100px; margin-bottom: 16px; opacity: 0.7; }
+.empty-state p { font-size: 16px; font-weight: 600; }
+
+/* Section title */
+.section-heading {
+  font-size: 22px; font-weight: 900; color: #1e293b;
+  margin-bottom: 20px; display: flex; align-items: center; gap: 10px;
+}
+.section-heading .sh-icon { font-size: 26px; }
+
+/* Lessons table */
+.lessons-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.lessons-table th { background: #f8fafc; padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 800; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+.lessons-table td { padding: 13px 16px; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #1e293b; }
+.lessons-table tr:last-child td { border-bottom: none; }
+.lessons-table tr:hover td { background: #fafbff; }
+
+.attend-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border-radius: 20px; font-size: 12px; font-weight: 800;
+}
+.ab-present { background: #dcfce7; color: #16a34a; }
+.ab-late    { background: #fef9c3; color: #a16207; }
+.ab-absent  { background: #fee2e2; color: #dc2626; }
+.ab-excused { background: #dbeafe; color: #2563eb; }
+.ab-future  { background: #f1f5f9; color: #94a3b8; }
+
+/* Works grid */
+.works-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.work-card {
+  background: #fff; border-radius: 16px; border: 1px solid #e2e8f0;
+  padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.work-card-icon {
+  width: 48px; height: 48px; border-radius: 12px; background: #e0f2fe;
+  display: flex; align-items: center; justify-content: center; font-size: 22px;
+}
+.work-card-title { font-weight: 800; font-size: 15px; color: #1e293b; }
+.work-card-meta { font-size: 13px; color: #94a3b8; }
+.work-card-text { font-size: 14px; color: #475569; line-height: 1.6; flex: 1; }
+
+/* Videos grid */
+.videos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.video-card {
+  background: #fff; border-radius: 16px; border: 1px solid #e2e8f0;
+  overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  transition: all 0.2s;
+}
+.video-card:hover { box-shadow: 0 6px 20px rgba(99,102,241,0.12); transform: translateY(-2px); }
+.video-thumb {
+  height: 140px; background: var(--gradient-1);
+  display: flex; align-items: center; justify-content: center; font-size: 48px;
+  position: relative;
+}
+.video-thumb.expired { background: #f1f5f9; }
+.video-expired-overlay {
+  position: absolute; inset: 0; background: rgba(255,255,255,0.85);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: #94a3b8; font-weight: 700; text-align: center; padding: 16px;
+}
+.video-card-body { padding: 14px 16px; }
+.video-card-title { font-weight: 800; font-size: 14px; color: #1e293b; margin-bottom: 4px; }
+.video-card-meta { font-size: 12px; color: #94a3b8; margin-bottom: 10px; }
+
+/* Account section */
+.account-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;
+}
+.account-info-card {
+  background: #fff; border-radius: 16px; border: 1px solid #e2e8f0;
+  padding: 20px 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.acc-card-title { font-size: 12px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 14px; }
+.acc-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+.acc-row:last-child { border-bottom: none; }
+.acc-label { font-size: 14px; color: #64748b; font-weight: 600; }
+.acc-value { font-size: 14px; color: #1e293b; font-weight: 800; }
+.acc-value.highlight { color: #6366f1; font-size: 20px; }
+.acc-value.warn { color: #f59e0b; }
+.acc-value.danger { color: #ef4444; }
+
+.visits-progress {
+  margin-top: 12px;
+}
+.visits-bar-bg {
+  height: 10px; border-radius: 10px; background: #e2e8f0; overflow: hidden;
+}
+.visits-bar-fill {
+  height: 100%; border-radius: 10px; background: var(--gradient-4); transition: width 0.6s ease;
+}
+.visits-pct { font-size: 12px; color: #64748b; margin-top: 6px; font-weight: 600; }
+
+/* Filter tabs */
+.filter-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.filter-tab {
+  padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700;
+  border: 2px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; transition: all 0.18s;
+}
+.filter-tab.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+.filter-tab:hover:not(.active) { border-color: #6366f1; color: #6366f1; }
+
+/* No child linked */
+.no-child-screen {
+  min-height: 60vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 40px 20px;
+}
+.no-child-screen h2 { font-size: 24px; font-weight: 900; color: #1e293b; margin: 20px 0 10px; }
+.no-child-screen p { color: #64748b; font-size: 16px; max-width: 420px; }
+
+/* Loader */
+.p-loader { text-align: center; padding: 60px; color: #94a3b8; font-weight: 600; font-size: 16px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .parent-layout { grid-template-columns: 1fr; }
+  .parent-sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid #e2e8f0; padding: 16px; }
+  .sidebar-nav { display: flex; gap: 6px; overflow-x: auto; padding: 0; }
+  .sidebar-nav-item { white-space: nowrap; flex-shrink: 0; }
+  .parent-main { padding: 20px 16px; }
+  .account-grid { grid-template-columns: 1fr; }
+  .works-grid, .videos-grid { grid-template-columns: 1fr; }
+}
+
+/* Scroll reveal */
+.feed-card { animation: fadeInUp 0.3s ease both; }
+.ig-post { animation: fadeInUp 0.3s ease both; }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<div id="app">
+  <div class="p-loader">Загружаем кабинет…</div>
+</div>
+
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['parent']);
+let child = null;     // единственный ребёнок
+let cachedData = {};  // { feed, attendance, feedback, artifacts, progress }
+let activeSection = 'feed';
+
+if (user) init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('parent');
+  I18N.applyI18n(document.getElementById('nav'));
+  I18N.applyI18n();
+
+  try {
+    const children = await API.parentChildren();
+
+    if (!children.length) {
+      document.getElementById('app').innerHTML = `
+        <div class="no-child-screen">
+          <img src="/uploads/mascot/explain.png" style="width:120px;opacity:0.85">
+          <h2>Ребёнок не прикреплён</h2>
+          <p>Ваш аккаунт пока не связан ни с одним учеником. Обратитесь к администратору школы, чтобы прикрепить ребёнка.</p>
+        </div>`;
+      return;
+    }
+
+    child = children[0];
+    renderLayout();
+    await loadAllData();
+    renderSection('feed');
+  } catch (err) {
+    document.getElementById('app').innerHTML = `
+      <div class="card" style="padding:32px;text-align:center;color:#ef4444;margin:40px auto;max-width:500px">
+        <b>Ошибка загрузки:</b> ${escapeHtml(err.message)}
+      </div>`;
+  }
+}
+
+function renderLayout() {
+  const statusLabel = { active: 'Активен', frozen: 'Заморожен', inactive: 'Неактивен' }[child.crmStatus] || child.crmStatus || 'Неизвестно';
+  const statusClass = { active: 'status-active', frozen: 'status-frozen', inactive: 'status-inactive' }[child.crmStatus] || 'status-inactive';
+  const avatarHtml = child.avatarUrl
+    ? `<img src="${escapeHtml(child.avatarUrl)}" class="child-avatar-lg" style="object-fit:cover">`
+    : `<div class="child-avatar-lg">${child.name.charAt(0).toUpperCase()}</div>`;
+
+  const navItems = [
+    { key: 'feed',       icon: '📰', label: 'Лента' },
+    { key: 'lessons',    icon: '📅', label: 'Уроки' },
+    { key: 'works',      icon: '📝', label: 'Работы' },
+    { key: 'videos',     icon: '🎥', label: 'Видеоотчёты' },
+    { key: 'account',   icon: '👤', label: 'Аккаунт' },
+  ];
+
+  document.getElementById('app').innerHTML = `
+    <div class="parent-layout">
+      <aside class="parent-sidebar">
+        <div class="sidebar-child-info">
+          ${avatarHtml}
+          <div class="child-name-lg">${escapeHtml(child.name)}</div>
+          <span class="child-status-badge ${statusClass}">${statusLabel}</span>
+        </div>
+        <nav class="sidebar-nav" id="sidebarNav">
+          ${navItems.map(n => `
+            <button class="sidebar-nav-item ${n.key === 'feed' ? 'active' : ''}" data-section="${n.key}" onclick="renderSection('${n.key}')">
+              <span class="nav-icon">${n.icon}</span> ${n.label}
+            </button>`).join('')}
+        </nav>
+      </aside>
+      <main class="parent-main" id="mainContent">
+        <div class="p-loader">Загружаем данные…</div>
+      </main>
+    </div>`;
+}
+
+async function loadAllData() {
+  const sid = child.id;
+  try {
+    const [feed, attendance, feedback, artifacts, progress] = await Promise.all([
+      API.parentFeed(sid),
+      API.parentAttendance(sid),
+      API.parentFeedback(sid),
+      API.parentArtifacts(sid),
+      API.parentProgress(sid),
+    ]);
+    cachedData = { feed, attendance, feedback, artifacts, progress };
+  } catch (e) {
+    cachedData = { feed: [], attendance: { records: [], visitsLeft: null }, feedback: [], artifacts: [], progress: { points: 0, streak: 0, tasks: {} } };
+    console.error('loadAllData error', e);
+  }
+}
+
+function renderSection(key) {
+  activeSection = key;
+  // Update sidebar active state
+  document.querySelectorAll('.sidebar-nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.section === key);
+  });
+
+  const main = document.getElementById('mainContent');
+  if (!main) return;
+
+  switch(key) {
+    case 'feed':    main.innerHTML = buildFeed(); break;
+    case 'lessons': main.innerHTML = buildLessons(); break;
+    case 'works':   main.innerHTML = buildWorks(); break;
+    case 'videos':  main.innerHTML = buildVideos(); break;
+    case 'account': main.innerHTML = buildAccount(); break;
+  }
+}
+
+/* ======= МЕДИА ОТЧЁТОВ (общие блоки для Ленты / Работ / Видео) =======
+   Раньше тут была одна ссылка "🔗 Открыть", из-за которой картинки и файлы
+   не показывались по-человечески. Теперь: картинка — прямо в посте + кнопка
+   «Скачать»; файл (pdf/doc/...) — карточка с иконкой + «Скачать»; видео —
+   настоящий проигрыватель + «Скачать»; внешняя ссылка — кнопка «Открыть». */
+function fileIconFor(url) {
+  const ext = (url || '').split('.').pop().toLowerCase();
+  if (ext === 'pdf') return '📕';
+  if (['doc', 'docx'].includes(ext)) return '📄';
+  if (['ppt', 'pptx'].includes(ext)) return '📊';
+  if (['xls', 'xlsx'].includes(ext)) return '📈';
+  if (['zip', 'rar', '7z'].includes(ext)) return '🗄';
+  if (ext === 'txt') return '📃';
+  return '📎';
+}
+function captionHtml(title) {
+  return title
+    ? `<div class="ig-caption">📝 ${escapeHtml(title)}</div>`
+    : `<div class="ig-caption muted">Описание не добавлено</div>`;
+}
+function imageBlockHtml(a) {
+  return `<div class="ig-block ig-image-wrap">
+    <img class="ig-image" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.title || 'Работа ученика')}" loading="lazy" onclick='openLightbox(${JSON.stringify(a.url)})'>
+    <div class="ig-media-actions"><a class="ig-download-btn" href="${escapeHtml(a.url)}" download>⬇ Скачать</a></div>
+    ${captionHtml(a.title)}
+  </div>`;
+}
+function fileBlockHtml(a) {
+  return `<div class="ig-block">
+    <div class="ig-file-card">
+      <div class="ig-file-icon">${fileIconFor(a.url)}</div>
+      <div style="flex:1;min-width:0"><div class="ig-file-name">${escapeHtml(a.title || 'Файл работы')}</div></div>
+      <a class="ig-download-btn" href="${escapeHtml(a.url)}" download>⬇ Скачать</a>
+    </div>
+  </div>`;
+}
+function videoBlockHtml(a) {
+  return `<div class="ig-block" style="padding:0">
+    <video class="ig-video" controls preload="metadata" src="${escapeHtml(a.url)}"></video>
+    <div class="ig-media-actions"><a class="ig-download-btn" href="${escapeHtml(a.url)}" download>⬇ Скачать видео</a></div>
+    ${captionHtml(a.title)}
+  </div>`;
+}
+function linkBlockHtml(a) {
+  return `<div class="ig-block">
+    ${a.title ? `<div class="ig-caption" style="padding:0 0 8px">🔗 ${escapeHtml(a.title)}</div>` : ''}
+    <a class="ig-download-btn" href="${escapeHtml(a.url)}" target="_blank">🔗 Открыть ссылку</a>
+  </div>`;
+}
+function unavailableBlockHtml(text) {
+  return `<div class="ig-unavailable">⚠️ ${escapeHtml(text)}</div>`;
+}
+// Диспетчер: какой блок показать для конкретного артефакта
+function artifactBlockHtml(a) {
+  if (a.deleted || a.unavailable) return unavailableBlockHtml(a.unavailable || 'Недоступно');
+  if (!a.url) return unavailableBlockHtml('Файл недоступен');
+  if (a.type === 'video') return videoBlockHtml(a);
+  if (a.type === 'link') return linkBlockHtml(a);
+  if (a.isImage || a.type === 'screenshot') return imageBlockHtml(a);
+  return fileBlockHtml(a);
+}
+// Просмотр картинки на весь экран по клику (как в Инстаграме)
+function openLightbox(url) {
+  const box = document.createElement('div');
+  box.className = 'ig-lightbox';
+  box.innerHTML = `<img src="${escapeHtml(url)}">`;
+  box.onclick = () => box.remove();
+  document.body.appendChild(box);
+}
+function monthLabel(ts) {
+  const d = toDate(ts);
+  if (!d) return '';
+  const label = d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/* ======= FEED (как лента в Инстаграме: один урок = один пост) ======= */
+function buildFeed() {
+  const items = cachedData.feed || [];
+  if (!items.length) {
+    return `<h1 class="section-heading"><span class="sh-icon">📰</span> Лента</h1>` + emptyState('explain', 'Пока ничего нет', 'Здесь появятся отчёты учителей, работы и видеоотчёты ребёнка');
+  }
+
+  let html = '';
+  let lastMonth = null;
+  items.forEach(item => {
+    const ts = item.kind === 'lesson' ? (item.date || item.createdAt) : item.createdAt;
+    const month = monthLabel(ts);
+    if (month && month !== lastMonth) {
+      html += `<div class="month-divider"><span>${escapeHtml(month)}</span></div>`;
+      lastMonth = month;
+    }
+    html += item.kind === 'lesson' ? lessonPostHtml(item) : generalFeedbackPostHtml(item);
+  });
+
+  return `<h1 class="section-heading"><span class="sh-icon">📰</span> Лента событий</h1>
+    <div class="feed-list">${html}</div>`;
+}
+
+// Один пост = один урок: тема/группа/дата в шапке, дальше все работы, видео,
+// ссылки и комментарий учителя по этому занятию — друг под другом.
+function lessonPostHtml(item) {
+  const works = item.works || [], videos = item.videos || [], links = item.links || [], comments = item.comments || [];
+  const blocks = [
+    ...works.map(artifactBlockHtml),
+    ...videos.map(artifactBlockHtml),
+    ...links.map(artifactBlockHtml),
+    ...comments.map(c => `<div class="ig-comment">💬 <b>${escapeHtml(c.teacherName || 'Учитель')}:</b> ${escapeHtml(c.text)}</div>`),
+  ];
+  return `<div class="ig-post">
+    <div class="ig-post-header">
+      <div class="ig-post-avatar">📚</div>
+      <div style="flex:1;min-width:0">
+        <div class="ig-post-title">${escapeHtml(item.topic || 'Занятие')}</div>
+        <div class="ig-post-sub">${escapeHtml(item.groupName || '')}</div>
+      </div>
+      <div class="ig-post-date">${item.date ? fmtDate(item.date) : ''}</div>
+    </div>
+    <div class="ig-post-body">${blocks.length ? blocks.join('') : unavailableBlockHtml('Пока ничего не загружено')}</div>
+  </div>`;
+}
+
+// Общий отзыв учителя, не привязанный к конкретному занятию (курс/общее)
+function generalFeedbackPostHtml(item) {
+  return `<div class="ig-post">
+    <div class="ig-post-header">
+      <div class="ig-post-avatar" style="background:#a78bfa">📋</div>
+      <div style="flex:1;min-width:0">
+        <div class="ig-post-title">Отчёт о занятии</div>
+        <div class="ig-post-sub">${escapeHtml(item.teacherName || 'Учитель')}</div>
+      </div>
+      <div class="ig-post-date">${fmtDate(item.createdAt)}</div>
+    </div>
+    <div class="ig-post-body"><div class="ig-caption" style="padding-top:12px">${escapeHtml(item.text)}</div></div>
+  </div>`;
+}
+
+/* ======= LESSONS ======= */
+function buildLessons() {
+  const records = (cachedData.attendance && cachedData.attendance.records) || [];
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Split into upcoming (no attendance record yet = future) vs past
+  // Records from API are past lessons with attendance status
+  // We show all records — they are sorted by date desc
+  if (!records.length) {
+    return `<h1 class="section-heading"><span class="sh-icon">📅</span> Уроки</h1>` + emptyState('thinking', 'Уроков пока нет', 'Здесь будет история всех занятий ребёнка');
+  }
+
+  const past = records.filter(r => r.date <= today);
+  const future = records.filter(r => r.date > today).reverse(); // asc for upcoming
+
+  let html = `<h1 class="section-heading"><span class="sh-icon">📅</span> Уроки ${escapeHtml(child.name)}</h1>`;
+
+  if (future.length) {
+    html += `<h3 style="font-size:15px;font-weight:800;color:#6366f1;margin-bottom:12px;margin-top:4px">📆 Предстоящие занятия</h3>
+    <table class="lessons-table" style="margin-bottom:28px">
+      <thead><tr><th>Дата</th><th>Тема</th><th>Группа</th><th>Статус</th></tr></thead>
+      <tbody>
+        ${future.map(r => `<tr>
+          <td><b>${fmtDate(r.date)}</b></td>
+          <td>${escapeHtml(r.topic || '—')}</td>
+          <td>${escapeHtml(r.groupName || '—')}</td>
+          <td><span class="attend-badge ab-future">Запланировано</span></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  }
+
+  html += `<h3 style="font-size:15px;font-weight:800;color:#64748b;margin-bottom:12px">🕐 История занятий</h3>
+  <table class="lessons-table">
+    <thead><tr><th>Дата</th><th>Тема</th><th>Группа</th><th>Статус</th></tr></thead>
+    <tbody>
+      ${past.map(r => `<tr>
+        <td>${fmtDate(r.date)}</td>
+        <td>${escapeHtml(r.topic || '—')}</td>
+        <td>${escapeHtml(r.groupName || '—')}</td>
+        <td>${attendBadge(r.status)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+
+  // Stats summary
+  const total = past.length;
+  const present = past.filter(r => r.status === 'present').length;
+  const late = past.filter(r => r.status === 'late').length;
+  const absent = past.filter(r => r.status === 'absent').length;
+  const pct = total ? Math.round((present + late) / total * 100) : 0;
+
+  html = `<h1 class="section-heading"><span class="sh-icon">📅</span> Уроки ${escapeHtml(child.name)}</h1>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">
+      <div style="background:#fff;border-radius:14px;padding:14px 20px;border:1px solid #e2e8f0;min-width:110px;text-align:center">
+        <div style="font-size:26px;font-weight:900;color:#6366f1">${total}</div>
+        <div style="font-size:12px;color:#64748b;font-weight:700">Всего</div>
+      </div>
+      <div style="background:#fff;border-radius:14px;padding:14px 20px;border:1px solid #e2e8f0;min-width:110px;text-align:center">
+        <div style="font-size:26px;font-weight:900;color:#10b981">${present}</div>
+        <div style="font-size:12px;color:#64748b;font-weight:700">Был(а)</div>
+      </div>
+      <div style="background:#fff;border-radius:14px;padding:14px 20px;border:1px solid #e2e8f0;min-width:110px;text-align:center">
+        <div style="font-size:26px;font-weight:900;color:#f59e0b">${late}</div>
+        <div style="font-size:12px;color:#64748b;font-weight:700">Опоздал(а)</div>
+      </div>
+      <div style="background:#fff;border-radius:14px;padding:14px 20px;border:1px solid #e2e8f0;min-width:110px;text-align:center">
+        <div style="font-size:26px;font-weight:900;color:#ef4444">${absent}</div>
+        <div style="font-size:12px;color:#64748b;font-weight:700">Пропустил(а)</div>
+      </div>
+      <div style="background:#fff;border-radius:14px;padding:14px 20px;border:1px solid #e2e8f0;min-width:140px;text-align:center">
+        <div style="font-size:26px;font-weight:900;color:${pct>=80?'#10b981':pct>=60?'#f59e0b':'#ef4444'}">${pct}%</div>
+        <div style="font-size:12px;color:#64748b;font-weight:700">Посещаемость</div>
+      </div>
+    </div>` + html.split('</h1>').slice(1).join('</h1>'); // remove duplicate h1
+
+  return html;
+}
+
+/* ======= WORKS ======= */
+function buildWorks() {
+  const feedback = cachedData.feedback || [];
+  const workArtifacts = (cachedData.artifacts || []).filter(a => a.type !== 'video');
+
+  if (!feedback.length && !workArtifacts.length) {
+    return `<h1 class="section-heading"><span class="sh-icon">📝</span> Работы</h1>` + emptyState('thinking', 'Работ пока нет', 'Здесь появятся отчёты о работе ребёнка на занятиях');
+  }
+
+  const fbCards = feedback.map(generalFeedbackPostHtml).join('');
+
+  const artCards = workArtifacts.map(a => `
+    <div class="ig-post">
+      <div class="ig-post-header">
+        <div class="ig-post-avatar">📎</div>
+        <div style="flex:1;min-width:0">
+          <div class="ig-post-title">${escapeHtml(a.topic || 'Занятие')}</div>
+          <div class="ig-post-sub">${a.sessionDate ? fmtDate(a.sessionDate) : ''}</div>
+        </div>
+      </div>
+      <div class="ig-post-body">${artifactBlockHtml(a)}</div>
+    </div>`).join('');
+
+  return `<h1 class="section-heading"><span class="sh-icon">📝</span> Работы ${escapeHtml(child.name)}</h1>
+    <div class="feed-list">${fbCards}${artCards}</div>`;
+}
+
+/* ======= VIDEOS ======= */
+function buildVideos() {
+  const videos = (cachedData.artifacts || []).filter(a => a.type === 'video');
+
+  if (!videos.length) {
+    return `<h1 class="section-heading"><span class="sh-icon">🎥</span> Видеоотчёты</h1>` + emptyState('happy', 'Видеоотчётов пока нет', 'Учитель ещё не добавил видео с занятий');
+  }
+
+  const cards = videos.map(v => `
+    <div class="ig-post">
+      <div class="ig-post-header">
+        <div class="ig-post-avatar" style="background:#ec4899">🎥</div>
+        <div style="flex:1;min-width:0">
+          <div class="ig-post-title">${escapeHtml(v.topic || 'Видеоотчёт')}</div>
+          <div class="ig-post-sub">${v.sessionDate ? fmtDate(v.sessionDate) : ''}</div>
+        </div>
+      </div>
+      <div class="ig-post-body">${artifactBlockHtml(v)}</div>
+    </div>`).join('');
+
+  return `<h1 class="section-heading"><span class="sh-icon">🎥</span> Видеоотчёты ${escapeHtml(child.name)}</h1>
+    <div class="feed-list">${cards}</div>`;
+}
+
+/* ======= ACCOUNT ======= */
+function buildAccount() {
+  const att = cachedData.attendance || {};
+  const progress = cachedData.progress || {};
+  const visitsLeft = att.visitsLeft != null ? att.visitsLeft : null;
+  const totalVisits = child.tariffVisits || null;
+  const pctLeft = (visitsLeft != null && totalVisits) ? Math.min(100, Math.round(visitsLeft / totalVisits * 100)) : null;
+  const solved = Object.values(progress.tasks || {}).filter(t => t.status === 'done').length;
+  const statusLabel = { active: '✅ Активен', frozen: '❄️ Заморожен', inactive: '⛔ Неактивен' }[child.crmStatus] || '—';
+
+  const issDate = child.subscriptionIssuedAt ? fmtDate(child.subscriptionIssuedAt) : '—';
+
+  // Compute expiry if we know issue date and duration
+  let expiryStr = '—';
+  if (child.subscriptionIssuedAt && child.tariffDays) {
+    const exp = new Date(child.subscriptionIssuedAt + child.tariffDays * 86400000);
+    expiryStr = fmtDate(exp.getTime());
+  }
+
+  const visitsColor = visitsLeft == null ? '' : visitsLeft <= 2 ? 'danger' : visitsLeft <= 5 ? 'warn' : '';
+
+  return `<h1 class="section-heading"><span class="sh-icon">👤</span> Аккаунт ${escapeHtml(child.name)}</h1>
+
+    <div class="account-grid">
+      <!-- Child info -->
+      <div class="account-info-card">
+        <div class="acc-card-title">🎒 Информация об ученике</div>
+        <div class="acc-row"><span class="acc-label">Имя</span><span class="acc-value">${escapeHtml(child.name)}</span></div>
+        <div class="acc-row"><span class="acc-label">Группа</span><span class="acc-value">${escapeHtml(child.groupName || '—')}</span></div>
+        <div class="acc-row"><span class="acc-label">Статус</span><span class="acc-value">${statusLabel}</span></div>
+        <div class="acc-row"><span class="acc-label">Очков набрано</span><span class="acc-value highlight">${progress.points || 0}</span></div>
+        <div class="acc-row"><span class="acc-label">Задач решено</span><span class="acc-value">${solved}</span></div>
+        <div class="acc-row"><span class="acc-label">Серия дней</span><span class="acc-value">🔥 ${progress.streak || 0} дней</span></div>
+      </div>
+
+      <!-- Tariff info -->
+      <div class="account-info-card">
+        <div class="acc-card-title">💳 Абонемент</div>
+        <div class="acc-row"><span class="acc-label">Тариф</span><span class="acc-value">${escapeHtml(child.tariffName || '—')}</span></div>
+        <div class="acc-row"><span class="acc-label">Занятий в пакете</span><span class="acc-value">${totalVisits != null ? totalVisits : '—'}</span></div>
+        <div class="acc-row"><span class="acc-label">Осталось занятий</span>
+          <span class="acc-value ${visitsColor}">${visitsLeft != null ? visitsLeft : '—'}</span>
+        </div>
+        <div class="acc-row"><span class="acc-label">Выдан</span><span class="acc-value">${issDate}</span></div>
+        <div class="acc-row"><span class="acc-label">Действует до</span><span class="acc-value">${expiryStr}</span></div>
+        ${child.tariffPrice ? `<div class="acc-row"><span class="acc-label">Стоимость</span><span class="acc-value">${child.tariffPrice.toLocaleString()} ₸</span></div>` : ''}
+
+        ${pctLeft != null ? `
+        <div class="visits-progress">
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+            <span style="font-size:12px;font-weight:700;color:#64748b">Использовано занятий</span>
+            <span style="font-size:12px;font-weight:800;color:#6366f1">${visitsLeft} / ${totalVisits}</span>
+          </div>
+          <div class="visits-bar-bg">
+            <div class="visits-bar-fill" style="width:${pctLeft}%"></div>
+          </div>
+          <div class="visits-pct">${pctLeft}% осталось</div>
+        </div>` : ''}
+      </div>
+    </div>
+
+    <!-- Attendance summary -->
+    <div class="account-info-card" style="margin-bottom:16px">
+      <div class="acc-card-title">📊 Статистика посещений</div>
+      ${buildMiniAttendanceSummary()}
+    </div>
+
+    <!-- Low visits warning -->
+    ${visitsLeft != null && visitsLeft <= 3 ? `
+    <div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:16px;padding:16px 20px;display:flex;gap:14px;align-items:center">
+      <span style="font-size:28px">⚠️</span>
+      <div>
+        <div style="font-weight:800;font-size:15px;color:#92400e">Заканчиваются занятия!</div>
+        <div style="font-size:14px;color:#a16207">Осталось <b>${visitsLeft}</b> занятий. Пора продлить абонемент — обратитесь к администратору.</div>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+function buildMiniAttendanceSummary() {
+  const records = (cachedData.attendance && cachedData.attendance.records) || [];
+  if (!records.length) return '<div style="color:#94a3b8;padding:8px 0">Данных о посещениях пока нет</div>';
+
+  const counts = { present:0, late:0, absent:0, excused:0 };
+  for (const r of records) { if (counts[r.status] !== undefined) counts[r.status]++; }
+  const total = records.length;
+  const attended = counts.present + counts.late;
+  const pct = Math.round(attended / total * 100);
+
+  return `<div style="display:flex;gap:20px;flex-wrap:wrap;padding:8px 0">
+    <div style="text-align:center">
+      <div style="font-size:22px;font-weight:900;color:#10b981">${counts.present}</div>
+      <div style="font-size:12px;color:#64748b;font-weight:700">Присутствовал</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:22px;font-weight:900;color:#f59e0b">${counts.late}</div>
+      <div style="font-size:12px;color:#64748b;font-weight:700">Опоздал</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:22px;font-weight:900;color:#ef4444">${counts.absent}</div>
+      <div style="font-size:12px;color:#64748b;font-weight:700">Пропустил</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:22px;font-weight:900;color:#3b82f6">${counts.excused}</div>
+      <div style="font-size:12px;color:#64748b;font-weight:700">Уважит. причина</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:22px;font-weight:900;color:${pct>=80?'#10b981':pct>=60?'#f59e0b':'#ef4444'}">${pct}%</div>
+      <div style="font-size:12px;color:#64748b;font-weight:700">Посещаемость</div>
+    </div>
+  </div>`;
+}
+
+/* ======= HELPERS ======= */
+function attendBadge(status) {
+  const m = {
+    present: ['ab-present', '✅ Присутствовал'],
+    late:    ['ab-late',    '⏰ Опоздал'],
+    absent:  ['ab-absent',  '❌ Отсутствовал'],
+    excused: ['ab-excused', '📋 Уваж. причина'],
+  };
+  const [cls, label] = m[status] || ['ab-future', status || '?'];
+  return `<span class="attend-badge ${cls}">${label}</span>`;
+}
+
+function emptyState(mascot, title, sub) {
+  return `<div class="empty-state">
+    <img src="/uploads/mascot/${mascot}.png">
+    <p style="font-size:18px;font-weight:800;color:#1e293b;margin-bottom:6px">${title}</p>
+    <p>${sub}</p>
+  </div>`;
+}
+
+// Extend API if needed
+if (!window.API.get) {
+  window.API.get = (url) => fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + API.getToken() }
+  }).then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); return d; });
+}
+</script>
+</body>
+</html>

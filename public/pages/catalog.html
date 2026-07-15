@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Каталог задач — КУРСОР</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/uploads/mascot/happy.png">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .module-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .module-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+  .lesson-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: white;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: opacity 0.15s, transform 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .lesson-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<div class="container">
+  <h1 class="section-title">Каталог задач</h1>
+
+  <div class="filters">
+    <input class="search-input" id="search" placeholder="Поиск задач...">
+    <div class="filter-group" data-filter="status">
+      <button class="filter-chip active" data-value="all">Все</button>
+      <button class="filter-chip" data-value="new">Не начато</button>
+      <button class="filter-chip" data-value="done">Решено</button>
+    </div>
+    <div class="filter-divider"></div>
+    <div class="filter-group" data-filter="type">
+      <button class="filter-chip active" data-value="all">Все типы</button>
+      <button class="filter-chip" data-value="quiz"><img src="https://cdn-icons-png.flaticon.com/512/3143/3143190.png" class="chip-ic"> Тесты</button>
+      <button class="filter-chip" data-value="fill"><img src="https://cdn-icons-png.flaticon.com/512/1250/1250615.png" class="chip-ic"> Пропуск</button>
+      <button class="filter-chip" data-value="order"><img src="https://cdn-icons-png.flaticon.com/512/10209/10209063.png" class="chip-ic"> Порядок</button>
+      <button class="filter-chip" data-value="project"><img src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" class="chip-ic"> Проекты</button>
+      <button class="filter-chip" data-value="interactive"><img src="https://cdn-icons-png.flaticon.com/512/2103/2103658.png" class="chip-ic"> Интерактивные</button>
+    </div>
+  </div>
+
+  <div id="langFilters" class="filters" style="margin-top:-12px"></div>
+  <div id="tasksContainer">Загружаем…</div>
+</div>
+
+<script src="/data/database.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+<script>
+const user = requireAuth(['student','teacher','admin']);
+let filters = { type:null, status:null, lang:'all', search:'' };
+let state = { tasks: [], modules: [], progress: null };
+
+if (user) init();
+
+async function init() {
+  document.getElementById('nav').innerHTML = renderNavbar('catalog'); I18N.applyI18n(document.getElementById('nav'));
+  const langs = Object.entries(KURSOR_DB.LANGS);
+  document.getElementById('langFilters').innerHTML = `
+    <button class="filter-chip active lang-chip" data-lang="all">Все</button>
+    ${langs.map(([k,l]) => `<button class="filter-chip lang-chip" data-lang="${k}" style="display:inline-flex;align-items:center;gap:6px"><img class="ic ic-16" src="${l.icon}" alt=""> ${l.name}</button>`).join('')}
+  `;
+  document.querySelectorAll('.lang-chip').forEach(b => {
+    b.onclick = () => {
+      document.querySelectorAll('.lang-chip').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      filters.lang = b.dataset.lang;
+      render();
+    };
+  });
+  document.querySelectorAll('.filter-group').forEach(group => {
+    const f = group.dataset.filter;
+    group.querySelectorAll('.filter-chip').forEach(b => {
+      b.onclick = () => {
+        const v = b.dataset.value;
+        if (b.classList.contains('active') && v !== 'all') {
+          group.querySelectorAll('.filter-chip').forEach(x => x.classList.remove('active'));
+          const allBtn = group.querySelector('.filter-chip[data-value="all"]');
+          if (allBtn) allBtn.classList.add('active');
+          filters[f] = null;
+        } else {
+          group.querySelectorAll('.filter-chip').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          filters[f] = v === 'all' ? null : v;
+        }
+        render();
+      };
+    });
+  });
+  document.getElementById('search').oninput = e => { filters.search = e.target.value.toLowerCase(); render(); };
+
+  try {
+    const [tasks, modules, lessons] = await Promise.all([API.getTasks(), API.getModules(), API.listLessons().catch(() => [])]);
+    let progress = null;
+    if (user.role === 'student') progress = await API.getMyProgress();
+    const lessonsMap = {};
+    (lessons || []).forEach(l => { if (l.has_lesson) lessonsMap[l.id] = true; });
+    state = { tasks, modules, progress, lessonsMap };
+    render();
+  } catch (err) {
+    document.getElementById('tasksContainer').innerHTML =
+      `<div class="card" style="padding:30px;text-align:center;color:#ef4444">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+const typeIcons = {
+  quiz:    '<img src="https://cdn-icons-png.flaticon.com/512/3143/3143190.png" style="width:14px;height:14px;vertical-align:-2px">',
+  fill:    '<img src="https://cdn-icons-png.flaticon.com/512/1250/1250615.png" style="width:14px;height:14px;vertical-align:-2px">',
+  order:   '<img src="https://cdn-icons-png.flaticon.com/512/10209/10209063.png" style="width:14px;height:14px;vertical-align:-2px">',
+  code:    '<img src="https://cdn-icons-png.flaticon.com/512/6062/6062646.png" style="width:14px;height:14px;vertical-align:-2px">',
+  project: '<img src="https://cdn-icons-png.flaticon.com/512/2583/2583344.png" style="width:14px;height:14px;vertical-align:-2px">',
+  scratch: '<img src="https://cdn-icons-png.flaticon.com/512/220/220112.png" style="width:14px;height:14px;vertical-align:-2px">',
+  htmlcss: '<img src="https://cdn-icons-png.flaticon.com/512/919/919827.png" style="width:14px;height:14px;vertical-align:-2px">',
+  blockly: '<img src="https://cdn-icons-png.flaticon.com/512/2103/2103658.png" style="width:14px;height:14px;vertical-align:-2px">',
+  java:    '<img src="/uploads/icons/java.svg" style="width:14px;height:14px;vertical-align:-2px">',
+  cpp:     '<img src="/uploads/icons/cpp.svg" style="width:14px;height:14px;vertical-align:-2px">',
+};
+const typeNames = { quiz:'Тест', fill:'Пропуск', order:'Порядок', code:'Код Python', project:'Проект', scratch:'Интерактив', htmlcss:'Интерактив', blockly:'Интерактив', java:'Код Java', cpp:'Код C++' };
+
+function render() {
+  const { tasks, modules, progress } = state;
+  let filtered = tasks.filter(t => {
+    const m = modules.find(m => m.id === t.module);
+    if (!m) return false;
+    if (user.role === 'student') {
+      const lang = KURSOR_DB.LANGS[m.lang];
+      if (!lang) return false;
+      if (lang.group !== user.group && !(user.languages || []).includes(m.lang)) return false;
+    }
+    if (filters.lang !== 'all' && m.lang !== filters.lang) return false;
+    if (filters.type) {
+      if (filters.type === 'interactive') {
+        if (!['code','java','cpp','scratch','htmlcss','blockly'].includes(t.type)) return false;
+      } else if (t.type !== filters.type) return false;
+    }
+    if (filters.status === 'done' && (!progress || progress.tasks[t.id]?.status !== 'done')) return false;
+    if (filters.status === 'new' && (progress && progress.tasks[t.id]?.status === 'done')) return false;
+    if (filters.search) {
+      const txt = (t.title + ' ' + (t.description||'') + ' ' + m.title).toLowerCase();
+      if (!txt.includes(filters.search)) return false;
+    }
+    return true;
+  });
+
+  const byModule = {};
+  filtered.forEach(t => { (byModule[t.module] = byModule[t.module] || []).push(t); });
+
+  if (!Object.keys(byModule).length) {
+    document.getElementById('tasksContainer').innerHTML = `
+      <div class="card" style="text-align:center;padding:40px">
+        <img src="${KURSOR_DB.MASCOT.thinking}" style="height:120px"><br>
+        <h3 style="margin:14px 0">Ничего не найдено</h3>
+        <p style="color:#64748b">Попробуй другие фильтры</p>
+      </div>`;
+    return;
+  }
+
+  document.getElementById('tasksContainer').innerHTML = Object.entries(byModule).map(([modId, tList]) => {
+    const m = modules.find(m => m.id === modId);
+    const lang = m ? KURSOR_DB.LANGS[m.lang] : null;
+    const hasLesson = m && state.lessonsMap && state.lessonsMap[m.id];
+
+    return `
+      <div style="margin-bottom:32px">
+        <div class="module-header">
+          <div class="module-header-left">
+            ${lang ? `<span class="lang-badge ${lang.class}"><img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"> ${lang.name}</span>` : ''}
+            <h2 style="margin:0">${m ? escapeHtml(m.title) : modId}</h2>
+          </div>
+          ${hasLesson ? `<a href="/pages/lesson.html?id=${m.id}" class="lesson-btn">
+            <img src="https://cdn-icons-png.flaticon.com/512/3273/3273259.png" style="width:15px;height:15px;filter:invert(1)">
+            Открыть урок
+          </a>` : ''}
+        </div>
+        ${m?.description ? `<p style="color:#64748b;margin-bottom:14px;margin-top:-6px">${escapeHtml(m.description)}</p>` : ''}
+        <div class="tasks-grid">
+          ${tList.sort((a,b)=>(a.difficulty||1)-(b.difficulty||1)).map(t => renderTaskCard(t, progress, m, lang)).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderTaskCard(task, progress, m, lang) {
+  const status = progress?.tasks[task.id]?.status || 'new';
+  return `
+    <div class="task-card" onclick="location.href='/pages/task.html?id=${task.id}'">
+      ${status === 'done' ? '<div class="task-status status-done"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/190/190411.png" alt="готово"></div>' : ''}
+      ${lang ? `<span class="lang-badge ${lang.class}"><img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"> ${lang.name}</span>` : ''}
+      <h3>${escapeHtml(task.title)}</h3>
+      <div style="font-size:13px;color:#64748b;margin-top:4px">${escapeHtml((task.description||'').slice(0,90))}${(task.description||'').length>90?'…':''}</div>
+      <div class="task-meta">
+        <span>${typeIcons[task.type]} ${typeNames[task.type]}</span>
+        <span class="difficulty">${[1,2,3].map(d => `<span class="${d <= (task.difficulty||1) ? 'active' : ''}"></span>`).join('')}</span>
+      </div>
+    </div>`;
+}
+</script>
+</body>
+</html>

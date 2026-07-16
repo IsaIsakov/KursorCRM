@@ -55,6 +55,24 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   const branch = (await api('POST', '/api/branches', { name: 'E2E branch', address: '' }, 201)).body;
   const tariff = (await api('POST', '/api/tariffs', { name: 'E2E tariff', visitsCount: 4, durationDays: 30, price: 10000 }, 201)).body;
   const student = (await api('POST', '/api/users', { name: 'E2E Student', login: `student_${port}`, password: 'Student-2026!', role: 'student', languages: [] }, 201)).body;
+
+  // Routers mounted at /api must not apply admin guards to unrelated student
+  // endpoints such as /tasks. This reproduces the student dashboard requests.
+  const studentLogin = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: `student_${port}`, password: 'Student-2026!' }) });
+  assert.equal(studentLogin.status, 200);
+  const studentLoginBody = await studentLogin.json();
+  const studentCookies = studentLogin.headers.getSetCookie ? studentLogin.headers.getSetCookie() : [studentLogin.headers.get('set-cookie')];
+  const studentCookie = studentCookies.filter(Boolean).map(line => line.split(';')[0]).join('; ');
+  const studentChange = await fetch(`${base}/api/auth/change-password`, { method: 'POST',
+    headers: { Cookie: studentCookie, 'Content-Type': 'application/json', 'X-CSRF-Token': studentLoginBody.csrfToken },
+    body: JSON.stringify({ oldPassword: 'Student-2026!', newPassword: 'Student-final-2026!' }) });
+  assert.equal(studentChange.status, 200);
+  for (const endpoint of ['/api/tasks', '/api/modules', '/api/progress/me', '/api/homework/me']) {
+    const response = await fetch(base + endpoint, { headers: { Cookie: studentCookie } });
+    assert.equal(response.status, 200, `student dashboard endpoint ${endpoint}: ${await response.text()}`);
+  }
+
   await api('POST', '/api/students-crm', { userId: student.id, fullName: student.name, branchId: branch.id,
     tariffId: tariff.id, subscriptionIssuedAt: Date.now(), videoConsent: true }, 201);
   const modules = (await api('GET', '/api/modules')).body;

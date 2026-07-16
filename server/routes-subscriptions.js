@@ -6,7 +6,8 @@ const subscriptions = require('./subscriptions').createSubscriptionService(db);
 const { z, id: idSchema, optionalText, timestamp, validateBody } = require('./validation');
 
 const router = express.Router();
-router.use(authRequired, requireRole('admin'));
+router.use(authRequired);
+const adminOnly = requireRole('admin');
 
 const issueSchema = z.strictObject({ studentId: idSchema, tariffId: idSchema.nullable().optional(), startsAt: timestamp.optional(), visitsTotal: z.coerce.number().int().min(0).max(10000).optional() });
 const adjustSchema = z.strictObject({ delta: z.coerce.number().int().min(-10000).max(10000).refine(v => v !== 0), note: optionalText(500) });
@@ -14,7 +15,7 @@ const paymentSchema = z.strictObject({ amount: z.coerce.number().int().positive(
 const freezeSchema = z.strictObject({ startsAt: timestamp.optional(), reason: optionalText(500) });
 const emptySchema = z.strictObject({});
 
-router.get('/subscriptions', (req, res) => {
+router.get('/subscriptions', adminOnly, (req, res) => {
   const params = []; let where = '';
   if (req.query.student_id) { where = 'WHERE s.student_id=?'; params.push(req.query.student_id); }
   res.json(db.prepare(`SELECT s.*, t.name AS tariff_name,
@@ -22,7 +23,7 @@ router.get('/subscriptions', (req, res) => {
     FROM subscriptions s LEFT JOIN tariffs t ON t.id=s.tariff_id ${where} ORDER BY s.created_at DESC`).all(...params));
 });
 
-router.post('/subscriptions', validateBody(issueSchema), (req, res, next) => {
+router.post('/subscriptions', adminOnly, validateBody(issueSchema), (req, res, next) => {
   try {
     const b = req.body || {};
     if (!b.studentId) return res.status(400).json({ error: 'studentId обязателен' });
@@ -33,11 +34,11 @@ router.post('/subscriptions', validateBody(issueSchema), (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/subscriptions/:id/transactions', (req, res) => {
+router.get('/subscriptions/:id/transactions', adminOnly, (req, res) => {
   res.json(db.prepare('SELECT * FROM subscription_transactions WHERE subscription_id=? ORDER BY created_at DESC, rowid DESC').all(req.params.id));
 });
 
-router.post('/subscriptions/:id/adjust', validateBody(adjustSchema), (req, res) => {
+router.post('/subscriptions/:id/adjust', adminOnly, validateBody(adjustSchema), (req, res) => {
   const sub = db.prepare('SELECT * FROM subscriptions WHERE id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ error: 'Абонемент не найден' });
   const delta = Number(req.body && req.body.delta);
@@ -49,7 +50,7 @@ router.post('/subscriptions/:id/adjust', validateBody(adjustSchema), (req, res) 
   res.json(result);
 });
 
-router.post('/subscriptions/:id/payments', validateBody(paymentSchema), (req, res) => {
+router.post('/subscriptions/:id/payments', adminOnly, validateBody(paymentSchema), (req, res) => {
   const sub = db.prepare('SELECT * FROM subscriptions WHERE id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ error: 'Абонемент не найден' });
   const amount = Number(req.body && req.body.amount);
@@ -65,7 +66,7 @@ router.post('/subscriptions/:id/payments', validateBody(paymentSchema), (req, re
   res.status(201).json(db.prepare('SELECT * FROM subscription_payments WHERE id=?').get(id));
 });
 
-router.post('/subscriptions/:id/freeze', validateBody(freezeSchema), (req, res) => {
+router.post('/subscriptions/:id/freeze', adminOnly, validateBody(freezeSchema), (req, res) => {
   const sub = db.prepare('SELECT * FROM subscriptions WHERE id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ error: 'Абонемент не найден' });
   if (sub.status !== 'active') return res.status(409).json({ error: 'Заморозить можно только активный абонемент' });
@@ -79,7 +80,7 @@ router.post('/subscriptions/:id/freeze', validateBody(freezeSchema), (req, res) 
   res.json({ ok: true });
 });
 
-router.post('/subscriptions/:id/unfreeze', validateBody(emptySchema), (req, res) => {
+router.post('/subscriptions/:id/unfreeze', adminOnly, validateBody(emptySchema), (req, res) => {
   const sub = db.prepare('SELECT * FROM subscriptions WHERE id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ error: 'Абонемент не найден' });
   if (sub.status !== 'frozen') return res.status(409).json({ error: 'Абонемент не заморожен' });

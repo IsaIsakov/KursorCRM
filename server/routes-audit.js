@@ -2,9 +2,9 @@ const express = require('express');
 const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const router = express.Router();
-router.use(authRequired, requireRole('admin'));
+router.use(authRequired);
 
-router.get('/audit-log', (req, res) => {
+router.get('/audit-log', requireRole('admin'), (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
   const before = Number(req.query.before) || Date.now() + 1;
   const rows = db.prepare(`SELECT id,actor_id,actor_role,action,resource,status_code,request_id,created_at

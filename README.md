@@ -1,466 +1,260 @@
-# KURSOR — Платформа школы программирования и CRM учебного центра
+# KURSOR
 
-**KURSOR** — это полноценная веб-платформа для детских школ программирования с CRM учебного центра.
-Ученики проходят интерактивные уроки и задачи, родители видят прогресс детей и остаток абонемента, учителя ведут журнал занятий и выдают домашние задания, администратор управляет филиалами, тарифами, группами, расписанием и пользователями.
+KURSOR — готовая веб-платформа школы программирования и CRM учебного центра. В одном приложении объединены обучение, управление учениками и группами, расписание, посещаемость, абонементы, платежи, домашние задания, отчёты преподавателей и кабинеты родителей.
 
-> **Стек:** Node.js 20 + Express + SQLite (`better-sqlite3`) + JWT + WebSocket + Vanilla JS.
-> Никаких сборщиков, никакого TypeScript, никакого Webpack. Запускается одной командой.
-
----
-
-## 📦 Содержание
-
-- [Возможности](#возможности)
-- [Технологический стек](#технологический-стек)
-- [Быстрый старт](#-быстрый-старт)
-- [Тестовые учётные записи](#-тестовые-учётные-записи)
-- [Структура проекта](#-структура-проекта)
-- [Переменные окружения](#-переменные-окружения)
-- [База данных](#-база-данных)
-- [Засев тестовых данных](#-засев-тестовых-данных)
-- [REST API — общая карта](#-rest-api--общая-карта)
-- [WebSocket](#-websocket)
-- [Роли и права доступа](#-роли-и-права-доступа)
-- [Деплой](#-деплой)
-- [FAQ](#-faq)
-
----
+Система рассчитана на администратора, преподавателей, ассистентов, учеников и родителей. Интерфейс работает на русском и казахском языках.
 
 ## Возможности
 
-### 🎓 Учебная часть
-- Каталог модулей (Scratch, Blockly, Minecraft Edu, Python, HTML/CSS, Roblox Lua, Кибербезопасность, Java, C++, Unity/C#, Blender, Data Science).
-- 6 типов задач: **quiz**, **fill** (вписать), **order** (расставить порядок), **code** (написать код), **project** (свободный ответ), а также Scratch / Blockly / HTML-CSS / Java / C++.
-- Интерактивные уроки с разделами **intro** (теория) и **miniTask** (мини-проверка).
-- Геймификация: очки, серия (streak), бейджи (`beginner`, `first_code`, `streak_3`, `streak_7`, `streak_30`).
-- Рейтинг учеников (leaderboard).
-- Маскот, мини-анимации, конфетти при правильных ответах.
+### Учебная платформа
 
-### 🏢 CRM учебного центра
-- Несколько **филиалов** с адресами.
-- **Тарифы** (цена в тенге ₸ + комментарий + кол-во занятий + срок действия).
-- **Группы**: курс, филиал, учитель, ассистент, тип (основной/доп.), статус.
-- **Расписание группы** по дням недели (понедельник = 1 ... воскресенье = 0).
-- **Состав группы** (`group_members`) — ученик может быть в нескольких группах.
-- **Карточки клиентов** (`students_crm`): ФИО, дата рождения, пол, тариф, остаток занятий, статус (active/frozen/inactive), родитель, телефон, документ, согласие на видео.
-- **Журнал занятий** с темами и проводящим учителем.
-- **Посещаемость**: `present` / `late` / `excused` / `absent`. Списывает занятие с активного абонемента, исправление возвращает.
-- **Домашние задания** с привязкой к занятию и ученикам.
-- **Отчёты и работы детей** (`session_artifacts`): video / screenshot / file / link. Видеозапись хранится 30 дней (автоудаление), остальное — бессрочно.
-- **Фидбек** учителя об ученике (общедоступный или внутренний `is_internal`).
-- **Уведомления** (in-app, с заделом на WhatsApp/email через поле `channel`).
-- **Кабинет родителя** (read-only): прогресс, посещаемость, остаток абонемента, работы и фидбек о своём ребёнке.
+- Каталог курсов и модулей: Scratch, Blockly, Python, HTML/CSS, Java, C++, Roblox Lua, Unity/C#, Blender, Data Science и другие направления.
+- Интерактивные уроки с теорией и мини-заданиями.
+- Quiz, fill, order, code, project, Scratch, Blockly, HTML/CSS, Java и C++ задания.
+- Серверная проверка объективных заданий и ручная проверка творческих работ.
+- Прогресс, очки, серии занятий, бейджи и рейтинг учеников.
+- Домашние задания, комментарии преподавателя и работы учеников.
 
-### 🌐 Дополнительно
-- **Казахский язык** интерфейса (переключатель Рус / Қаз в шапке) — переведён UI, контент уроков с мягким фолбэком на русский.
-- Импорт / экспорт данных (CSV / JSON) — встроен в соответствующие вкладки админки.
-- Загрузка аватарок (PNG/JPG, до 2 МБ, проверка по magic bytes).
-- WebSocket-обновления прогресса в реальном времени.
-- Автоматические миграции SQLite (новые колонки и CHECK добавляются без потери данных).
+### CRM
 
----
+- Филиалы, тарифы, группы и недельное расписание.
+- Учителя и ассистенты с настраиваемыми правами.
+- Состав групп с историей дат вступления и выхода.
+- Карточки учеников, контакты родителей и согласие на видеосъёмку.
+- Журнал занятий и посещаемость со статусами `present`, `late`, `excused`, `absent`.
+- Абонементы с неизменяемой историей списаний, возвратов и корректировок.
+- Платежи, заморозки и автоматическое продление срока абонемента.
+- Календарь, уведомления, импорт и экспорт CSV/JSON.
+- Материалы курсов и временный доступ преподавателей.
+- WhatsApp-напоминания через Green API.
 
-## Технологический стек
+### Кабинеты пользователей
 
-| Слой | Технология |
+| Роль | Возможности |
 | --- | --- |
-| Сервер | Node.js 20 + Express 4 |
-| База данных | SQLite (`better-sqlite3`, синхронный API, WAL-режим) |
-| Аутентификация | JWT (`jsonwebtoken`) + `bcryptjs` |
-| Realtime | WebSocket (`ws`) |
-| Frontend | Vanilla JS + HTML + CSS (без фреймворков) |
-| Конфигурация | `dotenv` |
+| Администратор | Полное управление CRM, обучением, пользователями, доступами, оплатами и аудитом |
+| Преподаватель | Свои группы, занятия, посещаемость, задания, материалы и обратная связь |
+| Ассистент | Делегированные преподавательские функции согласно выданным правам |
+| Ученик | Уроки, задачи, домашняя работа, прогресс, рейтинг и профиль |
+| Родитель | Прогресс, посещаемость, абонемент, работы и отзывы по привязанным детям |
 
----
+## Технологии
 
-## 🚀 Быстрый старт
+- Node.js 20/22 и Express 4.
+- SQLite в WAL-режиме через `better-sqlite3`.
+- Vanilla JavaScript, HTML и CSS без этапа сборки.
+- HttpOnly JWT-сессия, CSRF-защита и bcrypt.
+- WebSocket для обновлений прогресса.
+- Multipart streaming для файлов до 50 МБ.
+- Версионированные транзакционные миграции.
+- Автоматические проверяемые резервные копии.
 
-Требования: **Node.js 20+**
+## Быстрый запуск для разработки
+
+Требуется Node.js `20.19+` или `22.x`.
 
 ```bash
-# 1. Установить зависимости
-npm install
-
-# 2. (опц.) Создать .env  — см. раздел "Переменные окружения"
-echo "JWT_SECRET=$(openssl rand -hex 32)" > .env
-echo "PORT=3000" >> .env
-
-# 3. Засеять тестовые данные (10 групп, 100 учеников, 96 родителей и т.д.)
-node server/seed-test-data.js
-
-# 4. Запустить сервер
+npm ci
+cp .env.example .env
 npm start
-
-# Для разработки (авто-перезапуск при изменениях)
-npm run dev
 ```
 
-После запуска:
+Приложение откроется по адресу `http://localhost:3000`.
 
-- 🌐 Приложение: `http://localhost:3000`
-- ❤️ Health-check: `http://localhost:3000/api/health`
-- 🔌 WebSocket: `ws://localhost:3000/ws?token=<jwt>`
+На пустой development-базе создаётся временный администратор `admin / admin`. Система немедленно потребует заменить пароль. Эти данные никогда не используются в production.
 
-При первом запуске автоматически создаётся администратор `admin / admin`. **Смените пароль** после первого входа.
-
----
-
-## 🧪 Тестовые учётные записи
-
-После выполнения `node server/seed-test-data.js`:
-
-| Роль | Логин | Пароль | Куда попадает |
-| --- | --- | --- | --- |
-| Администратор | `admin` | `admin` | `/admin/index.html` |
-| Учитель | `teacher_aibek` | `teacher123` | `/pages/teacher.html` |
-| Учитель | `teacher_dina` | `teacher123` | `/pages/teacher.html` |
-| Учитель | `teacher_ruslan` | `teacher123` | `/pages/teacher.html` |
-| Ученик | (см. примеры ниже) | `test123` | `/pages/dashboard.html` |
-| Родитель | `parent_lesovaigerim0` | `parent123` | `/pages/parent.html` (2 ребёнка) |
-| Родитель | `parent_lesovzhandos1` | `parent123` | `/pages/parent.html` (2 ребёнка) |
-| Родитель | `parent_fazylovbauyrzhan2` | `parent123` | `/pages/parent.html` (2 ребёнка) |
-| Родитель | `parent_petrovshynar3` | `parent123` | `/pages/parent.html` (2 ребёнка) |
-
-Полный список логинов учеников и родителей можно посмотреть в админке («Люди → Пользователи») или через SQL:
+Дополнительные демонстрационные данные можно создать отдельно:
 
 ```bash
-sqlite3 server/db/kursor.sqlite "SELECT login, name, role FROM users WHERE role IN ('student','parent') LIMIT 20"
+node server/seed-test-data.js
 ```
 
----
+## Production-конфигурация
 
-## 📁 Структура проекта
-
-```
-kursor-platform/
-│
-├── server/                          # Backend (Node.js / Express)
-│   ├── index.js                     # Точка входа: сервер, маршруты, статика, WS
-│   ├── db.js                        # SQLite: схема + автомиграции
-│   ├── auth.js                      # JWT: signToken, verifyToken, authRequired, requireRole
-│   ├── util.js                      # genId, toCsv, parseCsv
-│   ├── storage.js                   # Хранилище файлов (отчёты, артефакты)
-│   ├── permissions.js               # Права учителей/ассистентов
-│   ├── cleanup.js                   # Очистка просроченных видео + автоуведомления
-│   ├── ws.js                        # WebSocket-сервер, broadcastProgress
-│   ├── init-db.js                   # Первичный засев: admin, модули, задачи, тарифы
-│   ├── seed-test-data.js            # ✨ Засев ТЕСТОВЫХ данных (filials, группы и т.д.)
-│   ├── routes-auth.js               # /api/auth
-│   ├── routes-users.js              # /api/users (+ /:id/children, /:id/parents)
-│   ├── routes-content.js            # /api/modules, /api/tasks
-│   ├── routes-progress.js           # /api/progress
-│   ├── routes-lessons.js            # /api/lessons
-│   ├── routes-feedback.js           # /api/feedback
-│   ├── routes-artifacts.js          # /api/session-artifacts (отчёты/работы)
-│   ├── routes-parent.js             # /api/parent/* (кабинет родителя, read-only)
-│   ├── routes-notifications.js      # /api/notifications
-│   ├── routes-materials.js          # /api/materials, /api/teacher-course-access
-│   ├── routes-crm.js                # /api/branches, /api/tariffs, /api/groups, /api/students-crm
-│   ├── routes-sessions.js           # /api/lesson-sessions, /api/attendance, /api/homework, /api/calendar
-│   ├── routes-permissions.js        # /api/teacher-permissions
-│   ├── routes-import-export.js      # /api/export/*, /api/import/*
-│   └── db/
-│       └── kursor.sqlite            # БД (создаётся автоматически)
-│
-├── public/                          # Frontend (статика)
-│   ├── index.html                   # Страница входа
-│   ├── css/style.css                # Единая таблица стилей
-│   ├── js/
-│   │   ├── api.js                   # API-клиент: все запросы, JWT в localStorage
-│   │   ├── app.js                   # Утилиты: navbar, toast, confetti, escapeHtml
-│   │   └── i18n.js                  # Переводы UI (рус/қаз)
-│   ├── pages/                       # Страницы пользователей
-│   │   ├── dashboard.html           # Дашборд ученика
-│   │   ├── catalog.html             # Каталог модулей и задач
-│   │   ├── task.html                # Страница задачи
-│   │   ├── lesson.html              # Урок (intro + miniTask)
-│   │   ├── profile.html             # Профиль ученика
-│   │   ├── teacher.html             # Панель учителя
-│   │   ├── parent.html              # Кабинет родителя
-│   │   └── leaderboard.html         # Рейтинг учеников
-│   ├── admin/index.html             # SPA админ-панель
-│   ├── data/database.js             # Контент: модули, задачи, языки, группы
-│   └── uploads/                     # Файлы (mascot, иконки, аватарки, артефакты)
-│
-├── data/lessons/                    # JSON-уроки (intro + miniTask)
-│   ├── _TEMPLATE.json
-│   ├── python-variables.json
-│   └── scratch-loops.json
-│
-├── package.json
-├── README.md                        # ← вы здесь
-├── GUIDE.md                         # ← пользовательское руководство
-├── CHANGES_FIXES.md                 # история исправлений
-└── fix_db.js                        # одноразовая утилита починки БД
-```
-
----
-
-## 🔧 Переменные окружения
-
-Создайте файл `.env` в корне:
+Скопируйте `.env.example` и задайте уникальные значения:
 
 ```env
-# Обязательно для продакшена
-JWT_SECRET=замени-на-длинный-случайный-секрет-минимум-32-символа
-
-# Срок жизни токена
-JWT_EXPIRES_IN=7d
-
-# Порт сервера
+NODE_ENV=production
 PORT=3000
+APP_ORIGIN=https://crm.example.kz
+TRUST_PROXY_HOPS=1
 
-# Данные первого администратора (создаётся только при пустой БД)
+JWT_SECRET=<независимый случайный секрет не короче 32 символов>
+ARTIFACT_URL_SECRET=<другой случайный секрет не короче 32 символов>
+SETTINGS_ENCRYPTION_KEY=<третий независимый случайный секрет>
+JWT_EXPIRES_IN=7d
+SESSION_MAX_AGE_MS=604800000
+API_AUTH_BEARER=false
+
+DB_PATH=/data/kursor.sqlite
+FILE_STORAGE_DIR=/data/files
+BACKUP_DIR=/data/backups
+BACKUP_RETENTION_DAYS=14
+
 SEED_ADMIN_LOGIN=admin
-SEED_ADMIN_PASSWORD=admin
+SEED_ADMIN_PASSWORD=<уникальный временный пароль не короче 12 символов>
 SEED_ADMIN_NAME=Администратор
-
-# (опц.) одноразовая починка БД при старте — Railway/Render
-RUN_DB_FIX=false
 ```
 
-> Если `JWT_SECRET` не задан или короче 16 символов, сервер запустится **с предупреждением** в консоли. В продакшене это критично.
-
----
-
-## 🗄️ База данных
-
-SQLite-файл хранится в `server/db/kursor.sqlite`. WAL-режим включён, внешние ключи активны.
-
-### Основные таблицы
-
-| Таблица | Назначение |
-| --- | --- |
-| `users` | Все пользователи (admin / teacher / assistant / student / parent) |
-| `progress` | Прогресс ученика: очки, серия, бейджи |
-| `task_progress` | Прогресс по каждой задаче |
-| `modules` | Учебные модули (темы) |
-| `tasks` | Задачи внутри модулей |
-| `lessons` | Уроки (intro-экраны + мини-задача) |
-| `lesson_progress` | Прогресс ученика по уроку |
-| `branches` | Филиалы |
-| `tariffs` | Тарифы абонементов |
-| `groups` | Учебные группы |
-| `group_schedule` | Расписание группы (день недели + время) |
-| `group_members` | Состав группы (ученик ↔ группа) |
-| `students_crm` | Карточки клиентов (CRM-данные ученика) |
-| `lesson_sessions` | Проведённые занятия (журнал) |
-| `attendance` | Посещаемость по занятиям |
-| `homework` / `homework_assignments` | Домашние задания и их назначения |
-| `session_artifacts` | Отчёты и работы детей (video/screenshot/file/link) |
-| `feedback` | Отзывы учителей об учениках |
-| `parent_children` | Привязка родитель ↔ ребёнок |
-| `notifications` | Уведомления |
-| `teacher_permissions` | Тонкие права учителей |
-| `teacher_course_access` | Доступ учителей к курсам (с истечением) |
-
-### Миграции
-
-При запуске `db.js` автоматически:
-- добавляет колонки (`avatar_url`, `comment`, `stdin`, `scratch_project_id`, `title` и т.д.) в старые БД;
-- расширяет `CHECK` для `tasks.type` (добавлены `scratch`, `blockly`, `htmlcss`, `java`, `cpp`);
-- снимает `CHECK` с `users.role` (для появления ролей `assistant` и `parent`);
-- снимает `NOT NULL` с `groups.teacher_id`;
-- чинит FK, ссылающиеся на `users_old` / `groups_old` / `tasks_old` (последствие старых неаккуратных миграций).
-
-Все миграции идемпотентны — повторный запуск ничего не ломает.
-
----
-
-## 🌱 Засев тестовых данных
-
-Скрипт `server/seed-test-data.js` создаёт полноценное демо-окружение:
+Секреты можно создать командами:
 
 ```bash
-node server/seed-test-data.js
+openssl rand -hex 32
+openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-| Что создаётся | Кол-во |
-| --- | --- |
-| Филиалы (Ташенова 8, Жошы Хан 6, Сарыарка 17) | 3 |
-| Тарифы (Пробный / Стандарт / Интенсив / Летний) | 4 |
-| Учителя (Айбек, Дина, Руслан) | 3 |
-| Группы (Scratch, Blockly, Minecraft, Дизайн, Python, HTML, Roblox, Cyber, Java, Unity) | 10 |
-| Слотов расписания (по 2/неделю на группу) | 20 |
-| Ученики (распределены по группам по возрастам) | 100 |
-| CRM-карточки с тарифами, родителями, телефонами | 100 |
-| Родители (4 — с 2 детьми, 92 — с 1 ребёнком) | 96 |
-| Журнал занятий (за последние 4 недели) | ~80 |
-| Записи посещаемости | ~800 |
-| Артефакты (отчёты/скриншоты/ссылки) | ~370 |
-| Отзывы учителей | ~30 |
-| Домашние задания | ~30 |
-| Решённых задач (`task_progress`) | ~490 |
-| Уведомления | ~80 |
-| Записей доступа учителей к курсам | ~48 |
+В production сервер не запустится со слабыми, шаблонными, отсутствующими или совпадающими секретами. `SETTINGS_ENCRYPTION_KEY` защищает интеграционные токены в SQLite. Первая установка также требует безопасный временный пароль администратора.
 
-> ⚠️ Скрипт **очищает** все CRM-данные и тестовых пользователей перед засевом (админ `admin_root`, модули, задачи и уроки — НЕ трогает).
+`DB_PATH`, `FILE_STORAGE_DIR` и `BACKUP_DIR` должны находиться на постоянном диске. Резервные копии рекомендуется дополнительно реплицировать вне сервера.
 
-Подробнее см. [GUIDE.md](GUIDE.md).
-
----
-
-## 🌐 REST API — общая карта
-
-Все маршруты начинаются с `/api`. Авторизованные требуют:
-
-```http
-Authorization: Bearer <jwt_token>
-```
-
-| Префикс | Раздел | Доступ |
-| --- | --- | --- |
-| `/api/auth` | Логин, /me, смена пароля | все / авторизованный |
-| `/api/users` | CRUD пользователей, аватарки, привязка родитель ↔ дети | admin / владелец |
-| `/api/modules`, `/api/tasks` | Контент: модули и задачи | admin / teacher с правом |
-| `/api/lessons` | Уроки (intro + miniTask) | авторизованный |
-| `/api/progress` | Прогресс ученика, leaderboard | student / teacher / admin |
-| `/api/feedback` | Отзывы об учениках | teacher / admin |
-| `/api/session-artifacts` | Отчёты и работы детей | staff / student (свои) |
-| `/api/materials` | Материалы курса (презентации, файлы) | admin / teacher |
-| `/api/teacher-course-access` | Доступ учителей к курсам | admin |
-| `/api/teacher-permissions` | Тонкие права учителей | admin |
-| `/api/branches` | Филиалы | admin (запись), все (чтение) |
-| `/api/tariffs` | Тарифы | admin (запись), все (чтение) |
-| `/api/groups` | Группы (+ /schedule, /members) | admin (запись), staff (чтение) |
-| `/api/students-crm` | Карточки клиентов | admin / teacher (свои) |
-| `/api/lesson-sessions` | Журнал занятий | staff |
-| `/api/attendance` | Посещаемость (массовое сохранение) | staff с правом `conduct_lessons` |
-| `/api/homework` | Домашние задания | staff / student (свои) |
-| `/api/calendar?from=&to=` | Календарь занятий по расписанию | staff |
-| `/api/parent/*` | Кабинет родителя (read-only) | parent |
-| `/api/notifications` | Уведомления | владелец |
-| `/api/export/*`, `/api/import/*` | CSV/JSON импорт-экспорт | admin |
-| `/api/health` | Health-check (без авторизации) | публичный |
-
-Подробное описание всех эндпоинтов с примерами — в [GUIDE.md](GUIDE.md).
-
----
-
-## 🔌 WebSocket
-
-```
-ws://host:3000/ws?token=<jwt>
-```
-
-После авторизации сервер шлёт:
-
-```json
-{ "type": "hello", "userId": "...", "role": "student" }
-```
-
-При изменении прогресса ученика — всем заинтересованным (сам ученик + его учитель + все админы):
-
-```json
-{
-  "type": "progress",
-  "studentId": "u_...",
-  "progress": { "points": 145, "streak": 3, "badges": ["beginner","first_code"] },
-  "t": 1734567890
-}
-```
-
-Клиент может слать `{ "type": "ping" }` — сервер ответит `{ "type": "pong", "t": ... }`.
-
----
-
-## 👥 Роли и права доступа
-
-| Роль | Может |
-| --- | --- |
-| **admin** | Всё |
-| **teacher** | Свои группы; журнал, посещаемость, ДЗ, фидбек, отчёты; модули/задачи по `manage_tasks` |
-| **assistant** | Как учитель, но права настраиваются точечно через `teacher_permissions` |
-| **student** | Свой прогресс, уроки, задачи, ДЗ, рейтинг |
-| **parent** | Только чтение данных СВОИХ детей через `/api/parent/*` |
-
-### Тонкие права (`teacher_permissions`)
-
-| Ключ | Что разрешает |
-| --- | --- |
-| `conduct_lessons` | Создавать занятия и отмечать посещаемость |
-| `write_feedback` | Писать отзывы об учениках |
-| `upload_artifacts` | Загружать работы/видео |
-| `manage_tasks` | Управлять модулями и задачами |
-| `see_subscriptions` | Видеть тарифы и остатки занятий учеников |
-
-Чувствительные данные (документ, дата рождения, телефон родителя) **не отдаются** учителю в `/api/students-crm/me-as-teacher` — телефон маскируется `••••`, документ удаляется.
-
----
-
-## 🚢 Деплой
-
-### Минимальный (VPS)
+## Docker
 
 ```bash
-npm install --production
-echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
-echo "PORT=3000" >> .env
-node server/index.js
+cp .env.example .env
+# заполните production-переменные
+docker compose up -d --build
 ```
 
-С `pm2` для автоперезапуска:
+Контейнер работает от непривилегированного пользователя, хранит изменяемые данные в volume `/data` и проверяет `/api/ready` встроенным healthcheck.
+
+Для обновления:
 
 ```bash
-npm install -g pm2
-pm2 start server/index.js --name kursor
-pm2 save
-pm2 startup
+docker compose build --pull
+docker compose up -d
+docker compose exec kursor npm run migrate
 ```
 
-### Reverse proxy (Nginx)
+## Команды
 
-```nginx
-server {
-    listen 80;
-    server_name example.com;
+| Команда | Назначение |
+| --- | --- |
+| `npm start` | Запустить приложение |
+| `npm run dev` | Запустить с автоматическим перезапуском |
+| `npm test` | Выполнить все unit и HTTP integration тесты |
+| `npm run migrate` | Применить миграции и вывести версию схемы |
+| `npm run backup` | Создать и проверить резервную копию SQLite |
+| `CONFIRM_RESTORE=YES npm run restore -- <файл>` | Атомарно восстановить базу |
+| `npm audit --omit=dev` | Проверить production-зависимости |
 
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
+## Миграции
 
-        # Обязательно для WebSocket
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+Миграции запускаются автоматически до старта HTTP-сервера. Каждая версия выполняется в отдельной транзакции и сохраняется в `schema_migrations` вместе с SHA-256 контрольной суммой.
 
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
+Уже применённые миграции нельзя редактировать. Для изменения схемы добавьте новую запись в `server/migrations.js` с очередным номером версии.
 
-### Бэкап БД
+Перед production-обновлением:
 
 ```bash
-# В режиме WAL — корректный онлайн-бэкап:
-sqlite3 server/db/kursor.sqlite ".backup backup-$(date +%F).sqlite"
+npm ci
+npm test
+npm run backup
+npm run migrate
 ```
 
----
+## Резервное копирование
 
-## ❓ FAQ
+Сервер ежедневно создаёт SQLite backup, проверяет `PRAGMA integrity_check` и удаляет копии старше `BACKUP_RETENTION_DAYS`.
 
-**Q: Как сбросить базу данных?**
-Удалите `server/db/kursor.sqlite` (и `*-wal`, `*-shm`). При следующем запуске БД и контент будут воссозданы из `database.js` и `data/lessons/`.
+Ручное создание:
 
-**Q: Как пере-засеять тестовые данные?**
-Просто запустите `node server/seed-test-data.js` ещё раз — скрипт сам очистит старые тестовые данные.
+```bash
+npm run backup
+```
 
-**Q: Как изменить дефолтный пароль администратора?**
-Войдите как `admin / admin`, профиль → смена пароля. Или задайте `SEED_ADMIN_PASSWORD` в `.env` ДО первого запуска.
+Восстановление выполняется на остановленном приложении:
 
-**Q: Можно ли добавить новый тип задачи?**
-Да. Добавьте значение в `CHECK(type IN (...))` в `db.js`, обработайте его в `routes-progress.js` (логика начисления очков) и в нужных HTML-страницах.
+```bash
+CONFIRM_RESTORE=YES npm run restore -- /data/backups/kursor-2026-07-16.sqlite
+```
 
-**Q: Где хранится токен на клиенте?**
-В `localStorage` под ключом `kursor_jwt`. При выходе или при 401 — автоматически удаляется.
+Перед заменой текущая база сохраняется как `*.pre-restore-*`. После восстановления проверьте `/api/ready`, вход администратора и журнал аудита.
 
-**Q: Поддерживается ли HTTPS?**
-Само приложение работает по HTTP — SSL-терминация на уровне Nginx (Let's Encrypt). WebSocket автоматически переключится на `wss://`.
+## Health endpoints
 
-**Q: Что происходит с видеозаписями?**
-Видео (`type='video'` в `session_artifacts`) хранятся 30 дней — затем `cleanup.js` помечает их `deleted=1` и удаляет файл. Скриншоты / файлы / ссылки — бессрочно.
+| Endpoint | Назначение |
+| --- | --- |
+| `GET /api/health` | Liveness: процесс HTTP работает |
+| `GET /api/ready` | Readiness: база, версия схемы и файловое хранилище готовы |
 
----
+`/api/ready` возвращает HTTP 503, если экземпляр нельзя подключать к трафику.
 
-📖 **Дальше:** см. [GUIDE.md](GUIDE.md) — пошаговое руководство по работе с админкой, кабинетами учителя, ученика и родителя.
+## Безопасность
+
+- JWT хранится только в HttpOnly cookie с `SameSite=Strict`; в production добавляются `Secure` и `__Host-`.
+- Все изменяющие браузерные запросы проходят CSRF-проверку.
+- Bearer-аутентификация в production выключена, пока явно не задано `API_AUTH_BEARER=true`.
+- Доступ к ученикам проверяется по роли, группам и родственным связям.
+- Файлы хранятся вне публичной директории и выдаются только после проверки доступа.
+- Изменяющие API-запросы записываются в append-only audit trail.
+- Вход и выполнение кода защищены лимитами.
+- Production CORS разрешает только `APP_ORIGIN`.
+- Временный пароль необходимо изменить при первом входе.
+
+## Файлы
+
+Артефакты занятий и материалы передаются multipart-потоком. Сервер не держит base64-копию большого файла в памяти. Максимальный размер одного файла — 50 МБ.
+
+Видеоотчёты автоматически удаляются через 30 дней. Скриншоты, документы и ссылки сохраняются до явного удаления. Материалы и работы детей не раздаются напрямую через `public/`.
+
+## Наблюдаемость и остановка
+
+В production сервер пишет структурированные JSON-логи с `requestId`, методом, маршрутом, кодом ответа и длительностью. Заголовок `X-Request-Id` можно передать с reverse proxy или получить от приложения.
+
+При `SIGTERM`/`SIGINT` приложение:
+
+1. останавливает планировщики;
+2. закрывает WebSocket-подключения;
+3. прекращает принимать HTTP-соединения;
+4. закрывает SQLite после завершения активных запросов.
+
+## API
+
+Все маршруты расположены под `/api`.
+
+| Раздел | Маршруты |
+| --- | --- |
+| Авторизация | `/api/auth/login`, `/api/auth/me`, `/api/auth/change-password`, `/api/auth/logout` |
+| Пользователи | `/api/users` |
+| Обучение | `/api/modules`, `/api/tasks`, `/api/lessons`, `/api/progress` |
+| CRM | `/api/branches`, `/api/tariffs`, `/api/groups`, `/api/students-crm` |
+| Абонементы | `/api/subscriptions` |
+| Занятия | `/api/lesson-sessions`, `/api/attendance`, `/api/homework`, `/api/calendar` |
+| Материалы | `/api/materials`, `/api/session-artifacts` |
+| Коммуникации | `/api/feedback`, `/api/notifications`, `/api/whatsapp` |
+| Данные | `/api/import/*`, `/api/export/*`, `/api/audit-log` |
+
+Изменяющие запросы браузера должны отправлять `X-CSRF-Token`. Встроенный клиент `public/js/api.js` делает это автоматически.
+
+## Структура проекта
+
+```text
+server/                 backend, маршруты, БД, миграции и фоновые задачи
+public/                 браузерный интерфейс
+public/admin/           административная панель
+public/pages/           кабинеты преподавателя, ученика и родителя
+data/lessons/           контент интерактивных уроков
+test/                   unit и end-to-end тесты
+Dockerfile              production-образ
+compose.yml             локальный/односерверный Docker deployment
+.github/workflows/      CI для Node.js 20 и 22
+```
+
+## Проверка перед релизом
+
+```bash
+npm ci
+npm test
+npm audit --omit=dev
+npm run backup
+npm run migrate
+```
+
+После развёртывания проверьте:
+
+- `/api/health` и `/api/ready`;
+- вход и обязательную смену временного пароля;
+- создание занятия и сохранение посещаемости;
+- загрузку и скачивание файла;
+- создание и восстановление тестовой резервной копии.

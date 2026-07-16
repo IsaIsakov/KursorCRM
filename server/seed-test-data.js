@@ -3,9 +3,9 @@
    Создаёт демо-окружение для проверки всех ролей и панелей:
    • 3 филиала (Ташенова 8, Жошы Хан 6, Сарыарка 17)
    • 3 учителя
-   • 10 групп с расписанием (привязаны к учителям и филиалам)
-   • 100 учеников + CRM-карточки + распределение по группам
-   • 96 родителей (некоторые — с 2 детьми) с привязкой к ученикам
+   • 3 группы по 10 учеников с расписанием
+   • 30 учеников + CRM-карточки
+   • 30 родителей с привязкой к ученикам
    • Журнал занятий за последние 4 недели + посещаемость
    • Фейковые отчёты учеников (screenshot/file/link) и фидбек
    • Домашние задания
@@ -69,6 +69,9 @@ function insertUser({ id, login, name, role, age = 0, group_id = 0, languages = 
 function clearOldTestData() {
   console.log('[seed-test] Очистка предыдущих тестовых данных...');
   const txn = db.transaction(() => {
+    db.exec(`DELETE FROM account_credentials`);
+    db.exec(`DELETE FROM crm_tasks`);
+    db.exec(`DELETE FROM crm_leads`);
     db.exec(`DELETE FROM notifications`);
     db.exec(`DELETE FROM session_artifacts`);
     db.exec(`DELETE FROM homework_assignments`);
@@ -83,6 +86,10 @@ function clearOldTestData() {
     db.exec(`DELETE FROM students_crm`);
     db.exec(`DELETE FROM teacher_permissions`);
     db.exec(`DELETE FROM teacher_course_access`);
+    db.exec(`DELETE FROM subscription_freezes`);
+    db.exec(`DELETE FROM subscription_payments`);
+    db.exec(`DELETE FROM subscription_transactions`);
+    db.exec(`DELETE FROM subscriptions`);
     // удаляем всех пользователей кроме admin
     db.exec(`DELETE FROM task_progress WHERE user_id != 'admin_root'`);
     db.exec(`DELETE FROM lesson_progress WHERE user_id != 'admin_root'`);
@@ -151,22 +158,15 @@ function seedTeachers() {
 }
 
 // ============================================================
-// 4) ГРУППЫ (10 шт. + расписание)
+// 4) ГРУППЫ (3 шт. + расписание)
 // ============================================================
 function seedGroups(branches, teachers) {
   console.log('[seed-test] Создаём группы и расписание...');
   // Тип: для какого учителя/языка/возрастной группы
   const plans = [
     { name: 'Scratch — Юниоры (6–8)',      lang: 'scratch',    course: 'scratch_1',    ageGroup: 1, teacher: 't_aibek',  branch: 'br_tashenova' },
-    { name: 'Blockly — Юниоры (6–8)',      lang: 'blockly',    course: 'blockly_1',    ageGroup: 1, teacher: 't_aibek',  branch: 'br_zhoshy'    },
-    { name: 'Minecraft Edu (8–10)',        lang: 'minecraft',  course: 'minecraft_1',  ageGroup: 1, teacher: 't_aibek',  branch: 'br_saryarka'  },
-    { name: 'Дизайн и анимация (8–11)',    lang: 'design',     course: 'design_1',     ageGroup: 1, teacher: 't_aibek',  branch: 'br_tashenova' },
     { name: 'Python — Старт (10–12)',      lang: 'python',     course: 'python_1',     ageGroup: 2, teacher: 't_dina',   branch: 'br_zhoshy'    },
-    { name: 'HTML/CSS — Веб (10–13)',      lang: 'html',       course: 'html_1',       ageGroup: 2, teacher: 't_dina',   branch: 'br_tashenova' },
-    { name: 'Roblox Lua (11–14)',          lang: 'roblox',     course: 'roblox_1',     ageGroup: 2, teacher: 't_dina',   branch: 'br_saryarka'  },
-    { name: 'Кибербезопасность (12–15)',   lang: 'cyber',      course: 'cyber_1',      ageGroup: 2, teacher: 't_dina',   branch: 'br_zhoshy'    },
     { name: 'Java для подростков (13–16)', lang: 'java',       course: 'java_1',       ageGroup: 3, teacher: 't_ruslan', branch: 'br_saryarka'  },
-    { name: 'Unity / C# (14–16)',          lang: 'unity',      course: 'unity_1',      ageGroup: 3, teacher: 't_ruslan', branch: 'br_tashenova' },
   ];
 
   const insG = db.prepare(`INSERT INTO groups (id, name, course_id, branch_id, teacher_id, assistant_id, lesson_kind, status) VALUES (?,?,?,?,?,?,'main','active')`);
@@ -189,29 +189,29 @@ function seedGroups(branches, teachers) {
     }
     return { id, ...p };
   });
-  console.log(`[seed-test] ✓ Групп: ${groups.length} (по 2 занятия/нед = 20 слотов в расписании)`);
+  console.log(`[seed-test] ✓ Групп: ${groups.length} (по 2 занятия/нед = ${groups.length * 2} слотов в расписании)`);
   return groups;
 }
 
 // ============================================================
-// 5) УЧЕНИКИ (100 шт.) + CRM-карточки + распределение по группам
+// 5) УЧЕНИКИ (30 шт.) + CRM-карточки + распределение по группам
 // ============================================================
 function seedStudents(branches, tariffs, groups, teachers) {
-  console.log('[seed-test] Создаём 100 учеников...');
+  console.log('[seed-test] Создаём 30 учеников (по 10 на группу)...');
   const students = [];
   const usedLogins = new Set();
 
-  for (let i = 1; i <= 100; i++) {
+  for (let i = 1; i <= 30; i++) {
     const gender = Math.random() < 0.5 ? 'm' : 'f';
     const name = russianName(gender);
     let login = translit(name) + i;
     while (usedLogins.has(login)) login = translit(name) + i + Math.floor(Math.random() * 99);
     usedLogins.add(login);
 
-    // распределение по возрастным группам: 30/40/30
+    // ровно по 10 учеников в каждой из трёх возрастных групп
     let ageGroup, age;
-    if (i <= 30) { ageGroup = 1; age = rnd(6, 8); }
-    else if (i <= 70) { ageGroup = 2; age = rnd(9, 11); }
+    if (i <= 10) { ageGroup = 1; age = rnd(6, 8); }
+    else if (i <= 20) { ageGroup = 2; age = rnd(9, 12); }
     else { ageGroup = 3; age = rnd(12, 16); }
 
     // привязываем к группе, подходящей по возрасту
@@ -233,6 +233,7 @@ function seedStudents(branches, tariffs, groups, teachers) {
      status, responsible_manager_id, parent_name, parent_phone, document_id, comment, video_consent, video_consent_date)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const today = new Date();
+  const managerId = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY created_at LIMIT 1").get()?.id || teachers[0]?.id || null;
   for (const s of students) {
     const t = pick(tariffs);
     const issuedDaysAgo = rnd(1, 25);
@@ -243,7 +244,7 @@ function seedStudents(branches, tariffs, groups, teachers) {
     const status = visitsLeft === 0 ? (Math.random() < 0.5 ? 'frozen' : 'active') : 'active';
     insCrm.run(
       s.id, s.name, birthDate, s.gender, s.branchId, t.id, issued, visitsLeft, status,
-      pick(['admin_root', null]), // менеджер
+      Math.random() < 0.7 ? managerId : null,
       'Родитель ' + s.name.split(' ')[0], // временное имя (потом заполним из родителя)
       `+7 700 ${rnd(100,999)} ${rnd(10,99)}-${rnd(10,99)}`,
       `IIN${rnd(100000000000, 999999999999)}`,
@@ -253,60 +254,31 @@ function seedStudents(branches, tariffs, groups, teachers) {
     );
   }
 
-  // распределение по группам (group_members) — основная + у некоторых вторая группа
+  // распределение по группам: ровно 10 активных учеников в каждой
   console.log('[seed-test] Распределяем по группам...');
   const insGm = db.prepare(`INSERT INTO group_members (id, student_id, group_id, since, until) VALUES (?,?,?,?,?)`);
   for (const s of students) {
     insGm.run(genId('gm'), s.id, s.primaryGroupId, Date.now() - rnd(15, 60) * 86400000, null);
-    // 15% — вторая (доп.) группа того же возраста
-    if (Math.random() < 0.15) {
-      const second = pick(groups.filter(g => g.ageGroup === s.ageGroup && g.id !== s.primaryGroupId));
-      if (second) insGm.run(genId('gm'), s.id, second.id, Date.now() - rnd(1, 20) * 86400000, null);
-    }
   }
   console.log(`[seed-test] ✓ Учеников: ${students.length} (пароль test123)`);
   return students;
 }
 
 // ============================================================
-// 6) РОДИТЕЛИ (96 шт.) — некоторые с 2 детьми
+// 6) РОДИТЕЛИ (30 шт.) — по одному связанному аккаунту на ученика
 // ============================================================
 function seedParents(students) {
-  console.log('[seed-test] Создаём 96 родителей...');
-  // Сначала решим: 8 родителей будут иметь 2 детей (8*2 = 16 учеников), остальные 88 родителей — по 1 ребёнку (88 учеников). 16+88=104 — но мы хотим максимум 100 учеников.
-  // Скорректируем: 96 родителей, из них 4 — с 2 детьми = 8 учеников, 92 — по 1 ребёнку = 92. Итого 100 учеников. ✓
-  const TWO_KIDS_PARENTS = 4;
-  const ONE_KID_PARENTS = 92;
-
-  // перемешаем студентов
+  console.log('[seed-test] Создаём 30 родителей...');
   const shuffledStudents = pickN(students, students.length);
-  let cursor = 0;
-
   const parents = [];
   const insPC = db.prepare('INSERT INTO parent_children (id, parent_id, student_id, since) VALUES (?,?,?,?)');
-
-  // 4 родителя с 2 детьми
-  for (let i = 0; i < TWO_KIDS_PARENTS; i++) {
+  for (let i = 0; i < shuffledStudents.length; i++) {
     const gender = Math.random() < 0.5 ? 'm' : 'f';
     const fullName = russianName(gender);
     const id = uid('par');
-    const login = `parent_${translit(fullName)}${i}`;
-    insertUser({ id, login, name: fullName, role: 'parent', age: rnd(30, 50) });
-    const child1 = shuffledStudents[cursor++];
-    const child2 = shuffledStudents[cursor++];
-    insPC.run(genId('pc'), id, child1.id, Date.now());
-    insPC.run(genId('pc'), id, child2.id, Date.now());
-    parents.push({ id, login, name: fullName, children: [child1.id, child2.id] });
-  }
-
-  // 92 родителя с 1 ребёнком
-  for (let i = 0; i < ONE_KID_PARENTS; i++) {
-    const gender = Math.random() < 0.5 ? 'm' : 'f';
-    const fullName = russianName(gender);
-    const id = uid('par');
-    const login = `parent_${translit(fullName)}${i + 100}`;
+    const login = `parent_${translit(fullName)}${i + 1}`;
     insertUser({ id, login, name: fullName, role: 'parent', age: rnd(28, 55) });
-    const child = shuffledStudents[cursor++];
+    const child = shuffledStudents[i];
     insPC.run(genId('pc'), id, child.id, Date.now());
     parents.push({ id, login, name: fullName, children: [child.id] });
   }
@@ -318,7 +290,7 @@ function seedParents(students) {
     for (const cid of p.children) updCrm.run(p.name, phone, cid);
   }
 
-  console.log(`[seed-test] ✓ Родителей: ${parents.length} (${TWO_KIDS_PARENTS} с 2 детьми, ${ONE_KID_PARENTS} с 1) — пароль parent123`);
+  console.log(`[seed-test] ✓ Родителей: ${parents.length} — пароль parent123`);
   return parents;
 }
 
@@ -540,7 +512,7 @@ function seedNotifications(students, parents) {
   // админу
   const admins = db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
   for (const a of admins) {
-    insN.run(genId('ntf'), a.id, 'system', 'Загружены тестовые данные: 10 групп, 100 учеников, 96 родителей', '/admin/index.html', 0, Date.now());
+    insN.run(genId('ntf'), a.id, 'system', 'Загружены тестовые данные: 3 группы, 30 учеников, 30 родителей', '/admin/index.html', 0, Date.now());
     count++;
   }
   console.log(`[seed-test] ✓ Уведомлений: ${count}`);

@@ -129,6 +129,58 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    name: 'education_operations_and_parent_requests',
+    up(db) {
+      const attendanceCols = db.prepare('PRAGMA table_info(attendance)').all().map(c => c.name);
+      if (!attendanceCols.includes('reason')) db.exec('ALTER TABLE attendance ADD COLUMN reason TEXT');
+      if (!attendanceCols.includes('source')) db.exec("ALTER TABLE attendance ADD COLUMN source TEXT NOT NULL DEFAULT 'staff'");
+      const subscriptionCols = db.prepare('PRAGMA table_info(subscriptions)').all().map(c => c.name);
+      if (!subscriptionCols.includes('amount_paid')) db.exec('ALTER TABLE subscriptions ADD COLUMN amount_paid INTEGER NOT NULL DEFAULT 0');
+      if (!subscriptionCols.includes('unit_price')) db.exec('ALTER TABLE subscriptions ADD COLUMN unit_price REAL NOT NULL DEFAULT 0');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS absence_notices (
+          id TEXT PRIMARY KEY,
+          parent_id TEXT NOT NULL,
+          student_id TEXT NOT NULL,
+          group_id TEXT NOT NULL,
+          lesson_at INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','acknowledged','cancelled')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY(parent_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
+          UNIQUE(student_id, group_id, lesson_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_absence_notices_lesson ON absence_notices(group_id, lesson_at, status);
+        CREATE INDEX IF NOT EXISTS idx_absence_notices_parent ON absence_notices(parent_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS freeze_requests (
+          id TEXT PRIMARY KEY,
+          parent_id TEXT NOT NULL,
+          student_id TEXT NOT NULL,
+          starts_at INTEGER NOT NULL,
+          ends_at INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          lessons_count INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),
+          reviewed_by TEXT,
+          review_comment TEXT,
+          reviewed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY(parent_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_freeze_requests_queue ON freeze_requests(status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_freeze_requests_student_dates ON freeze_requests(student_id, starts_at, ends_at, status);
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

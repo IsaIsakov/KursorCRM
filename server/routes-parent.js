@@ -6,6 +6,8 @@ const express = require('express');
 const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const storage = require('./storage');
+const { genId } = require('./util');
+const { asMs, scheduledLessons } = require('./lesson-planning');
 
 const router = express.Router();
 router.use(authRequired);
@@ -38,7 +40,9 @@ router.get('/children', (req, res) => {
   const rows = db.prepare(`
     SELECT u.id, u.name, u.avatar_url, c.visits_left, c.status AS crm_status, t.name AS tariff_name,
            t.visits_count, t.price, t.duration_days, c.subscription_issued_at, c.birth_date, c.gender,
-           g.name AS group_name
+           g.name AS group_name,
+           (SELECT amount_paid FROM subscriptions s WHERE s.student_id=u.id ORDER BY s.created_at DESC LIMIT 1) AS amount_paid,
+           (SELECT unit_price FROM subscriptions s WHERE s.student_id=u.id ORDER BY s.created_at DESC LIMIT 1) AS unit_price
     FROM parent_children pc
     JOIN users u ON u.id = pc.student_id
     LEFT JOIN students_crm c ON c.user_id = u.id
@@ -57,7 +61,91 @@ router.get('/children', (req, res) => {
     birthDate: r.birth_date || null,
     gender: r.gender || null,
     groupName: r.group_name || null,
+    amountPaid: r.amount_paid != null ? r.amount_paid : null,
+    unitPrice: r.unit_price != null ? r.unit_price : null,
   })));
+});
+
+// Календарь будущих занятий ребёнка, развёрнутый из расписания его групп.
+router.get('/calendar/:studentId', guard, (req, res) => {
+  const from = asMs(req.query.from || Date.now());
+  const to = asMs(req.query.to || (Date.now() + 60 * 86400000));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 370 * 86400000) {
+    return res.status(400).json({ error: 'Некорректный диапазон календаря' });
+  }
+  res.json(scheduledLessons(db, req.params.studentId, from, to));
+});
+
+router.get('/requests/:studentId', guard, (req, res) => {
+  const sid = req.params.studentId;
+  const absences = db.prepare(`SELECT * FROM absence_notices WHERE parent_id=? AND student_id=? ORDER BY lesson_at DESC LIMIT 100`).all(req.user.id, sid);
+  const freezes = db.prepare(`SELECT * FROM freeze_requests WHERE parent_id=? AND student_id=? ORDER BY created_at DESC LIMIT 100`).all(req.user.id, sid);
+  res.json({ absences, freezes });
+});
+
+router.post('/absence-notices', (req, res) => {
+  const studentId = String(req.body?.studentId || '');
+  const groupId = String(req.body?.groupId || '');
+  const lessonAt = asMs(req.body?.lessonAt);
+  const reason = String(req.body?.reason || '').trim();
+  if (!ownsChild(req.user.id, studentId)) return res.status(403).json({ error: 'Это не ваш ребёнок' });
+  if (!groupId || !Number.isFinite(lessonAt) || lessonAt < Date.now() - 300000) return res.status(400).json({ error: 'Можно сообщить только о будущем занятии' });
+  if (reason.length < 3 || reason.length > 1000) return res.status(400).json({ error: 'Укажите причину отсутствия' });
+  const lesson = scheduledLessons(db, studentId, lessonAt - 60000, lessonAt + 60000).find(x => x.groupId === groupId);
+  if (!lesson) return res.status(400).json({ error: 'Занятие не найдено в расписании ребёнка' });
+  const now = Date.now(), id = genId('abs');
+  db.prepare(`INSERT INTO absence_notices(id,parent_id,student_id,group_id,lesson_at,reason,status,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,'submitted',?,?)
+    ON CONFLICT(student_id,group_id,lesson_at) DO UPDATE SET reason=excluded.reason,status='submitted',updated_at=excluded.updated_at`)
+    .run(id, req.user.id, studentId, groupId, lessonAt, reason, now, now);
+  const row = db.prepare('SELECT * FROM absence_notices WHERE student_id=? AND group_id=? AND lesson_at=?').get(studentId, groupId, lessonAt);
+  const recipients = db.prepare(`SELECT id FROM users WHERE role='admin' UNION SELECT responsible_manager_id AS id FROM students_crm WHERE user_id=? AND responsible_manager_id IS NOT NULL`).all(studentId);
+  const notify = db.prepare(`INSERT INTO notifications(id,user_id,type,text,link,channel,read,created_at) VALUES (?,?, 'absence_notice', ?, '/admin/index.html', 'in_app',0,?)`);
+  for (const r of recipients) notify.run(genId('ntf'), r.id, `Родитель сообщил об отсутствии: ${lesson.groupName}, ${new Date(lessonAt).toLocaleString('ru-RU')}`, now);
+  res.status(201).json(row);
+});
+
+router.delete('/absence-notices/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM absence_notices WHERE id=? AND parent_id=?').get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: 'Уведомление не найдено' });
+  if (row.lesson_at <= Date.now()) return res.status(409).json({ error: 'Прошедшее уведомление отменить нельзя' });
+  db.prepare("UPDATE absence_notices SET status='cancelled',updated_at=? WHERE id=?").run(Date.now(), row.id);
+  res.json({ ok:true });
+});
+
+router.post('/freeze-requests/preview', (req, res) => {
+  const studentId = String(req.body?.studentId || '');
+  const startsAt = asMs(req.body?.startsAt), endsAt = asMs(req.body?.endsAt);
+  if (!ownsChild(req.user.id, studentId)) return res.status(403).json({ error: 'Это не ваш ребёнок' });
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt < startsAt || endsAt - startsAt > 366 * 86400000) return res.status(400).json({ error: 'Некорректные даты заморозки' });
+  const lessons = scheduledLessons(db, studentId, startsAt, endsAt);
+  res.json({ lessonsCount:lessons.length, lessons });
+});
+
+router.post('/freeze-requests', (req, res) => {
+  const studentId = String(req.body?.studentId || '');
+  const startsAt = asMs(req.body?.startsAt), endsAt = asMs(req.body?.endsAt);
+  const reason = String(req.body?.reason || '').trim();
+  if (!ownsChild(req.user.id, studentId)) return res.status(403).json({ error: 'Это не ваш ребёнок' });
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt < startsAt || startsAt < Date.now() - 86400000 || endsAt - startsAt > 366 * 86400000) return res.status(400).json({ error: 'Некорректные даты заморозки' });
+  if (reason.length < 5 || reason.length > 2000) return res.status(400).json({ error: 'Опишите причину заморозки' });
+  const duplicate = db.prepare("SELECT 1 FROM freeze_requests WHERE student_id=? AND status IN ('pending','approved') AND starts_at<=? AND ends_at>=?").get(studentId, endsAt, startsAt);
+  if (duplicate) return res.status(409).json({ error: 'На эти даты уже есть активная заявка' });
+  const lessonsCount = scheduledLessons(db, studentId, startsAt, endsAt).length;
+  const now=Date.now(), id=genId('frq');
+  db.prepare(`INSERT INTO freeze_requests(id,parent_id,student_id,starts_at,ends_at,reason,lessons_count,status,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,'pending',?,?)`).run(id,req.user.id,studentId,startsAt,endsAt,reason,lessonsCount,now,now);
+  const recipients = db.prepare(`SELECT id FROM users WHERE role='admin' UNION SELECT responsible_manager_id AS id FROM students_crm WHERE user_id=? AND responsible_manager_id IS NOT NULL`).all(studentId);
+  const notify = db.prepare(`INSERT INTO notifications(id,user_id,type,text,link,channel,read,created_at) VALUES (?,?, 'freeze_request', ?, '/admin/index.html#requests', 'in_app',0,?)`);
+  for (const r of recipients) notify.run(genId('ntf'),r.id,`Новая заявка на заморозку: ${lessonsCount} занятий`,now);
+  res.status(201).json(db.prepare('SELECT * FROM freeze_requests WHERE id=?').get(id));
+});
+
+router.delete('/freeze-requests/:id', (req,res) => {
+  const row=db.prepare("SELECT * FROM freeze_requests WHERE id=? AND parent_id=? AND status='pending'").get(req.params.id,req.user.id);
+  if(!row) return res.status(404).json({error:'Ожидающая заявка не найдена'});
+  db.prepare("UPDATE freeze_requests SET status='cancelled',updated_at=? WHERE id=?").run(Date.now(),row.id);
+  res.json({ok:true});
 });
 
 // Прогресс ребёнка

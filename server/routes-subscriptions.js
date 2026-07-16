@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(authRequired);
 const adminOnly = requireRole('admin');
 
-const issueSchema = z.strictObject({ studentId: idSchema, tariffId: idSchema.nullable().optional(), startsAt: timestamp.optional(), visitsTotal: z.coerce.number().int().min(0).max(10000).optional() });
+const issueSchema = z.strictObject({ studentId: idSchema, tariffId: idSchema.nullable().optional(), startsAt: timestamp.optional(), visitsTotal: z.coerce.number().int().min(0).max(10000).optional(), amountPaid: z.coerce.number().int().min(0).max(1000000000).optional() });
 const adjustSchema = z.strictObject({ delta: z.coerce.number().int().min(-10000).max(10000).refine(v => v !== 0), note: optionalText(500) });
 const paymentSchema = z.strictObject({ amount: z.coerce.number().int().positive().max(1000000000), currency: z.string().trim().length(3).regex(/^[A-Za-z]{3}$/).optional(), method: z.enum(['cash','card','transfer','other']), paidAt: timestamp.optional() });
 const freezeSchema = z.strictObject({ startsAt: timestamp.optional(), reason: optionalText(500) });
@@ -29,7 +29,7 @@ router.post('/subscriptions', adminOnly, validateBody(issueSchema), (req, res, n
     if (!b.studentId) return res.status(400).json({ error: 'studentId обязателен' });
     if (!db.prepare('SELECT 1 FROM students_crm WHERE user_id=?').get(b.studentId)) return res.status(404).json({ error: 'Карточка ученика не найдена' });
     const row = db.transaction(() => subscriptions.issue({ studentId: b.studentId, tariffId: b.tariffId || null,
-      startsAt: b.startsAt || Date.now(), visitsTotal: b.visitsTotal, actorId: req.user.id }))();
+      startsAt: b.startsAt || Date.now(), visitsTotal: b.visitsTotal, amountPaid: b.amountPaid, actorId: req.user.id }))();
     res.status(201).json(row);
   } catch (e) { next(e); }
 });

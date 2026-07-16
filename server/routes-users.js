@@ -87,6 +87,10 @@ router.get('/students', requireRole('teacher', 'assistant', 'admin'), (req, res)
   res.json(rows.map(rowToUser));
 });
 
+router.get('/staff', requireRole('assistant','admin'), (_req,res)=>{
+  res.json(db.prepare("SELECT * FROM users WHERE role IN ('teacher','assistant') ORDER BY role,name").all().map(rowToUser));
+});
+
 router.post('/', requireRole('admin'), validateBody(createUserSchema), (req, res) => {
   const { name, login, password, role, age, group, languages, teacher_id } = req.body || {};
   if (!name || !login || !password) return res.status(400).json({ error: 'Имя, логин, пароль обязательны' });

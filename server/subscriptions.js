@@ -1,6 +1,7 @@
 const { genId } = require('./util');
 
 function createSubscriptionService(db) {
+  const subscriptionColumns = new Set(db.prepare('PRAGMA table_info(subscriptions)').all().map(c => c.name));
   const active = db.prepare(`SELECT * FROM subscriptions
     WHERE student_id = ? AND status IN ('active','frozen') ORDER BY created_at DESC LIMIT 1`);
   const balance = db.prepare(`SELECT balance_after FROM subscription_transactions
@@ -53,7 +54,7 @@ function createSubscriptionService(db) {
     return { applied: true, balance: after, subscriptionId: subscription.id };
   }
 
-  function issue({ studentId, tariffId = null, startsAt = Date.now(), visitsTotal, actorId = null }) {
+  function issue({ studentId, tariffId = null, startsAt = Date.now(), visitsTotal, amountPaid, actorId = null }) {
     const tariff = tariffId ? db.prepare('SELECT * FROM tariffs WHERE id = ?').get(tariffId) : null;
     if (tariffId && !tariff) throw Object.assign(new Error('Тариф не найден'), { status: 404 });
     const total = visitsTotal === undefined ? Number(tariff && tariff.visits_count) : Number(visitsTotal);
@@ -71,6 +72,11 @@ function createSubscriptionService(db) {
       VALUES (?,?,?,?,?,'issue','subscription',?,?,?,?)`).run(genId('stx'), id, studentId, total, total, id, actorId, 'Выдача абонемента', Date.now());
     db.prepare(`UPDATE students_crm SET tariff_id=?, subscription_issued_at=?, visits_left=?, status='active' WHERE user_id=?`)
       .run(tariffId, start, total, studentId);
+    const paid = amountPaid === undefined ? Number(tariff?.price || 0) : Number(amountPaid);
+    if (!Number.isInteger(paid) || paid < 0) throw Object.assign(new Error('Некорректная оплаченная сумма'), { status:400 });
+    if (subscriptionColumns.has('amount_paid') && subscriptionColumns.has('unit_price')) {
+      db.prepare('UPDATE subscriptions SET amount_paid=?,unit_price=? WHERE id=?').run(paid, total ? paid / total : 0, id);
+    }
     return db.prepare('SELECT * FROM subscriptions WHERE id=?').get(id);
   }
 

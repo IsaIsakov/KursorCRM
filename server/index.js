@@ -84,6 +84,7 @@ app.use('/api/feedback',          require('./routes-feedback'));
 app.use('/api/session-artifacts', require('./routes-artifacts'));
 app.use('/api/parent',            require('./routes-parent'));
 app.use('/api/notifications',     require('./routes-notifications'));
+app.use('/api',                   require('./routes-care'));
 app.use('/api/whatsapp',          require('./routes-whatsapp'));
 app.use('/api',                   require('./routes-onboarding'));
 app.use('/api', require('./routes-materials'));       // /api/materials, /api/teacher-course-access

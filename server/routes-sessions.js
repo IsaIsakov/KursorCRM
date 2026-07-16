@@ -16,14 +16,18 @@ const router = express.Router();
 router.use(authRequired);
 
 const lessonSchema = z.strictObject({ groupId: idSchema, date: timestamp, topic: optionalText(500) });
-const attendanceSchema = z.strictObject({ lessonSessionId: idSchema, records: z.array(z.strictObject({ studentId: idSchema, status: z.enum(['present','absent','excused','late']) })).max(500) });
+const attendanceSchema = z.strictObject({ lessonSessionId: idSchema, records: z.array(z.strictObject({ studentId: idSchema, status: z.enum(['present','absent','excused','late']), reason: optionalText(1000) })).max(500) });
 const homeworkSchema = z.strictObject({ lessonSessionId: idSchema, moduleId: idSchema.nullable().optional(), taskIds: z.array(z.coerce.number().int().positive()).max(500).optional(), dueDate: timestamp.nullable().optional(), studentIds: z.array(idSchema).max(500).optional() });
 
 function canManageGroup(user, groupId) {
   if (user.role === 'admin') return true;
   if (!['teacher', 'assistant'].includes(user.role)) return false;
-  const g = db.prepare('SELECT teacher_id, assistant_id FROM groups WHERE id = ?').get(groupId);
-  return g && (g.teacher_id === user.id || g.assistant_id === user.id);
+  const g = db.prepare('SELECT teacher_id, assistant_id,branch_id FROM groups WHERE id = ?').get(groupId);
+  if (!g) return false;
+  if (g.teacher_id === user.id || g.assistant_id === user.id) return true;
+  // Ассистент выполняет роль куратора филиала: назначение хотя бы в одну группу
+  // филиала даёт ему управление учебным календарём этого филиала.
+  return user.role === 'assistant' && !!db.prepare('SELECT 1 FROM groups WHERE assistant_id=? AND branch_id=? LIMIT 1').get(user.id,g.branch_id);
 }
 
 /* ============================================================
@@ -72,13 +76,16 @@ router.delete('/lesson-sessions/:id', (req, res) => {
   if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
   // вернуть посещения, списанные за это занятие
   // «present» и «late» в равной степени списывали визит — возвращаем оба.
-  const present = db.prepare("SELECT student_id FROM attendance WHERE lesson_session_id = ? AND status IN ('present','late')").all(req.params.id);
+  const present = db.prepare("SELECT student_id FROM attendance WHERE lesson_session_id = ? AND status IN ('present','late','absent')").all(req.params.id);
   const txn = db.transaction(() => {
-    for (const p of present) subscriptions.applyDelta({
-      studentId: p.student_id, delta: 1, type: 'refund', referenceType: 'lesson_delete',
-      referenceId: `${req.params.id}:${p.student_id}`, actorId: req.user.id, note: 'Удаление занятия',
-      allowInactive: true,
-    });
+    for (const p of present) {
+      const prefix = `${req.params.id}:${p.student_id}:%`;
+      const net = db.prepare(`SELECT COALESCE(SUM(delta),0) AS total FROM subscription_transactions
+        WHERE student_id=? AND reference_id LIKE ? AND reference_type IN ('lesson_session','lesson_session_refund')`)
+        .get(p.student_id,prefix).total;
+      if (net < 0) subscriptions.applyDelta({ studentId:p.student_id,delta:-net,type:'refund',referenceType:'lesson_delete',
+        referenceId:`${req.params.id}:${p.student_id}`,actorId:req.user.id,note:'Удаление занятия',allowInactive:true });
+    }
     db.prepare('DELETE FROM lesson_sessions WHERE id = ?').run(req.params.id);
   });
   txn();
@@ -96,7 +103,21 @@ router.get('/lesson-sessions/:id/attendance', (req, res) => {
     SELECT a.*, u.name FROM attendance a JOIN users u ON u.id = a.student_id
     WHERE a.lesson_session_id = ? ORDER BY u.name
   `).all(req.params.id);
-  res.json(rows.map(r => ({ studentId: r.student_id, name: r.name, status: r.status, markedAt: r.marked_at })));
+  const lessonAt = sessionTimestamp(ls.date);
+  const notices = db.prepare("SELECT student_id,reason FROM absence_notices WHERE group_id=? AND lesson_at BETWEEN ? AND ? AND status!='cancelled'")
+    .all(ls.group_id, lessonAt - 60000, lessonAt + 60000);
+  const noticeMap = new Map(notices.map(n => [n.student_id, n.reason]));
+  const out = rows.map(r => ({ studentId: r.student_id, name: r.name, status: r.status, reason: r.reason || noticeMap.get(r.student_id) || '', parentNotice: noticeMap.has(r.student_id), markedAt: r.marked_at }));
+  const seen = new Set(out.map(r => r.studentId));
+  for (const studentId of activeMemberIds(db, ls.group_id, lessonAt)) {
+    if (!noticeMap.has(studentId) || seen.has(studentId)) continue;
+    const student = db.prepare('SELECT name FROM users WHERE id=?').get(studentId);
+    // Предупреждение родителя не является автоматическим признанием причины
+    // уважительной: окончательное решение принимает сотрудник при проведении урока.
+    out.push({ studentId, name:student?.name || studentId, status:'absent', reason:noticeMap.get(studentId), parentNotice:true, markedAt:null });
+  }
+  out.sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+  res.json(out);
 });
 
 /* ============================================================
@@ -125,30 +146,46 @@ router.post('/attendance', validateBody(attendanceSchema), (req, res) => {
 
   const getPrev = db.prepare('SELECT status FROM attendance WHERE lesson_session_id = ? AND student_id = ?');
   const upsert = db.prepare(`
-    INSERT INTO attendance (id, lesson_session_id, student_id, status, marked_at)
-    VALUES (?,?,?,?,?)
-    ON CONFLICT(lesson_session_id, student_id) DO UPDATE SET status=excluded.status, marked_at=excluded.marked_at
+    INSERT INTO attendance (id, lesson_session_id, student_id, status, reason, source, marked_at)
+    VALUES (?,?,?,?,?,'staff',?)
+    ON CONFLICT(lesson_session_id, student_id) DO UPDATE SET status=excluded.status,reason=excluded.reason,source='staff',marked_at=excluded.marked_at
   `);
   const charged = [];
   const txn = db.transaction(() => {
     for (const rec of records) {
       const { studentId, status } = rec;
+      const reason = String(rec.reason || '').trim() || null;
       const prev = getPrev.get(lessonSessionId, studentId);
       const prevStatus = prev ? prev.status : null;
-      upsert.run(genId('att'), lessonSessionId, studentId, status, Date.now());
+      upsert.run(genId('att'), lessonSessionId, studentId, status, reason, Date.now());
+      db.prepare("UPDATE absence_notices SET status='acknowledged',updated_at=? WHERE student_id=? AND group_id=? AND lesson_at BETWEEN ? AND ? AND status='submitted'")
+        .run(Date.now(),studentId,ls.group_id,sessionTimestamp(ls.date)-60000,sessionTimestamp(ls.date)+60000);
 
       // Для списания «опоздал» (late) считаем присутствием — ученик всё-таки был на занятии.
-      const isPresent = (s) => s === 'present' || s === 'late';
+      const lessonAt = sessionTimestamp(ls.date);
+      const approvedFreeze = db.prepare("SELECT 1 FROM freeze_requests WHERE student_id=? AND status='approved' AND starts_at<=? AND ends_at>=? LIMIT 1")
+        .get(studentId, lessonAt, lessonAt);
+      const group = db.prepare('SELECT lesson_kind FROM groups WHERE id=?').get(ls.group_id);
+      const tariff = db.prepare(`SELECT t.extra_lessons_separate FROM students_crm sc LEFT JOIN tariffs t ON t.id=sc.tariff_id WHERE sc.user_id=?`).get(studentId);
+      const separateExtra = group?.lesson_kind === 'extra' && tariff?.extra_lessons_separate;
+      const isPresent = (s) => ['present','late','absent'].includes(s) && !approvedFreeze && !separateExtra;
       // списание только для активных абонементов
       if (isPresent(status) && !isPresent(prevStatus)) {
         const result = subscriptions.applyDelta({ studentId, delta: -1, type: 'attendance',
-          referenceType: 'lesson_session', referenceId: genId('charge'),
-          actorId: req.user.id, note: 'Посещение занятия' });
-        if (result.applied) charged.push({ studentId, action: 'charged', balance: result.balance });
+          referenceType: 'lesson_session', referenceId: `${lessonSessionId}:${studentId}:${Date.now()}`,
+          actorId: req.user.id, note: status === 'absent' ? 'Неуважительный пропуск' : 'Посещение занятия' });
+        if (result.applied) {
+          charged.push({ studentId, action: 'charged', balance: result.balance });
+          if (result.balance <= 2) {
+            const parents = db.prepare('SELECT parent_id FROM parent_children WHERE student_id=?').all(studentId);
+            const put = db.prepare(`INSERT OR IGNORE INTO notifications(id,user_id,type,text,link,channel,read,created_at) VALUES (?,?, 'low_balance', ?, '/pages/parent.html', 'in_app',0,?)`);
+            for (const p of parents) put.run(`low_balance_${result.subscriptionId}_${result.balance}_${p.parent_id}`,p.parent_id,`В абонементе осталось ${result.balance} занятия. Пора продлить обучение.`,Date.now());
+          }
+        }
       } else if (isPresent(prevStatus) && !isPresent(status)) {
         // возврат посещения при исправлении
         const result = subscriptions.applyDelta({ studentId, delta: 1, type: 'refund',
-          referenceType: 'attendance_correction', referenceId: genId('refund'),
+          referenceType: 'lesson_session_refund', referenceId: `${lessonSessionId}:${studentId}:${Date.now()}`,
           actorId: req.user.id, note: 'Исправление посещаемости', allowInactive: true });
         if (result.applied) charged.push({ studentId, action: 'refunded', balance: result.balance });
       }
@@ -365,8 +402,11 @@ router.get('/calendar', (req, res) => {
     WHERE g.status = 'active'
   `).all();
   if (branch_id) groups = groups.filter(g => g.branch_id === branch_id);
-  if (req.user.role !== 'admin') {
+  if (req.user.role === 'teacher') {
     groups = groups.filter(g => g.teacher_id === req.user.id || g.assistant_id === req.user.id);
+  } else if (req.user.role === 'assistant') {
+    const branches = new Set(db.prepare('SELECT DISTINCT branch_id FROM groups WHERE assistant_id=?').all(req.user.id).map(r=>r.branch_id));
+    groups = groups.filter(g => branches.has(g.branch_id));
   }
   if (!groups.length) return res.json([]);
 

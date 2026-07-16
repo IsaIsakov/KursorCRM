@@ -111,6 +111,7 @@
     return _users;
   }
   async function getStudents() { return await API_.get('/api/users/students'); }
+  async function getStaff() { return await API_.get('/api/users/staff'); }
   const searchStudents = (q) => API_.get('/api/users/students?q=' + encodeURIComponent(q || ''));
 
   const createUser   = (data) => API_.post('/api/users', data);
@@ -259,6 +260,16 @@
   const parentFeedback   = (sid) => API_.get('/api/parent/feedback/' + encodeURIComponent(sid));
   const parentArtifacts  = (sid) => API_.get('/api/parent/artifacts/' + encodeURIComponent(sid));
   const parentFeed       = (sid) => API_.get('/api/parent/feed/'      + encodeURIComponent(sid));
+  const parentCalendar   = (sid, from, to) => API_.get('/api/parent/calendar/' + encodeURIComponent(sid) + '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
+  const parentRequests   = (sid) => API_.get('/api/parent/requests/' + encodeURIComponent(sid));
+  const createAbsenceNotice = (data) => API_.post('/api/parent/absence-notices', data);
+  const cancelAbsenceNotice = (id) => API_.del('/api/parent/absence-notices/' + encodeURIComponent(id));
+  const previewFreezeRequest = (data) => API_.post('/api/parent/freeze-requests/preview', data);
+  const createFreezeRequest = (data) => API_.post('/api/parent/freeze-requests', data);
+  const cancelFreezeRequest = (id) => API_.del('/api/parent/freeze-requests/' + encodeURIComponent(id));
+  const getCareRequests = (status) => API_.get('/api/care-requests?status=' + encodeURIComponent(status || 'pending'));
+  const decideCareRequest = (id, data) => API_.put('/api/care-requests/' + encodeURIComponent(id) + '/decision', data);
+  const getAbsenceNotices = (from, to) => API_.get('/api/absence-notices?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
 
   /* ---------- Фаза 6: уведомления ---------- */
   const getNotifications  = () => API_.get('/api/notifications');
@@ -293,7 +304,7 @@
 
   window.API = {
     login, logout, getToken, getCurrentUser, refreshCurrentUser, requireAuth,
-    getModules, getTasks, getUsers, getStudents, searchStudents,
+    getModules, getTasks, getUsers, getStudents, getStaff, searchStudents,
     createUser, updateUser, deleteUser,
     getParentChildren, setParentChildren, getStudentParents,
     createModule, updateModule, deleteModule,
@@ -325,6 +336,9 @@
     getArtifacts, createArtifact, deleteArtifact,
     // фаза 5
     parentChildren, parentProgress, parentAttendance, parentFeedback, parentArtifacts, parentFeed,
+    parentCalendar, parentRequests, createAbsenceNotice, cancelAbsenceNotice,
+    previewFreezeRequest, createFreezeRequest, cancelFreezeRequest,
+    getCareRequests, decideCareRequest, getAbsenceNotices,
     // фаза 6
     getNotifications, markNotifRead, markAllNotifRead, deleteNotif,
     // WhatsApp

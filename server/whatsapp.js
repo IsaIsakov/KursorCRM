@@ -204,6 +204,46 @@ async function sendTestMessage(rawPhone, message) {
   return { ok: true, phone };
 }
 
+/* ---- Безопасная отправка временных доступов, инициированная администратором ---- */
+async function sendAccessMessage({ phone: rawPhone, studentName, parentName, credentials }) {
+  const cfg = getSettings();
+  if (!cfg.instanceId || !cfg.apiToken) throw new Error('Не настроены instanceId и apiToken Green API');
+  const phone = normalizePhone(rawPhone);
+  if (!phone) throw new Error('Некорректный номер WhatsApp');
+  const lines = (credentials || []).map(item => {
+    const label = item.kind === 'parent' ? 'Родитель' : 'Ученик';
+    return `${label}:\nЛогин: ${item.login}\nВременный пароль: ${item.password}`;
+  });
+  if (!lines.length) throw new Error('Нет доступов для отправки');
+  const message = `Здравствуйте, ${parentName || 'родитель'}! 👋\n\nДоступы в KURSOR для ${studentName}:\n\n${lines.join('\n\n')}\n\nПри первом входе система попросит создать новый пароль. Не пересылайте эти данные посторонним.`;
+  try {
+    const response = await sendGreenApi(cfg.instanceId, cfg.apiToken, phone, message);
+    logSend({ phone, studentName, parentName, message: `Доступы для ${studentName} (${lines.length} аккаунт.)`, status: 'ok' });
+    return { ok: true, phone, messageId: response.idMessage || null };
+  } catch (error) {
+    logSend({ phone, studentName, parentName, message: `Доступы для ${studentName}`, status: 'error', error: error.message });
+    throw error;
+  }
+}
+
+async function notifyParentAboutArtifact({ phone: rawPhone, studentName, parentName, artifactType, sessionDate }) {
+  const cfg = getSettings();
+  if (!cfg.enabled || !cfg.instanceId || !cfg.apiToken) return { skipped:true, reason:'disabled_or_not_configured' };
+  const phone = normalizePhone(rawPhone); if (!phone) return { skipped:true, reason:'invalid_phone' };
+  const origin = String(process.env.APP_ORIGIN || '').split(',')[0].trim().replace(/\/$/, '');
+  const kind = artifactType === 'video' ? 'видеоотчёт' : 'новая работа';
+  const date = sessionDate ? new Date(sessionDate).toLocaleDateString('ru-RU') : 'последнего занятия';
+  const message = `Здравствуйте, ${parentName || 'родитель'}! В кабинете KURSOR опубликован ${kind} ${studentName} за ${date}.${origin ? `\n\nОткрыть ленту: ${origin}/pages/parent.html` : ''}`;
+  try {
+    const response = await sendGreenApi(cfg.instanceId, cfg.apiToken, phone, message);
+    logSend({ phone, studentName, parentName, message, status:'ok' });
+    return { ok:true, messageId:response.idMessage || null };
+  } catch (error) {
+    logSend({ phone, studentName, parentName, message, status:'error', error:error.message });
+    throw error;
+  }
+}
+
 /* ---- Вспомогательная ---- */
 function formatWeekday(n) {
   return ['воскресенье','понедельник','вторник','среду','четверг','пятницу','субботу'][n] || '';
@@ -233,4 +273,4 @@ function startScheduler() {
 }
 function stopScheduler() { if (_schedulerInterval) clearInterval(_schedulerInterval); _schedulerInterval = null; _schedulerRunning = false; }
 
-module.exports = { sendWhatsAppReminders, sendTestMessage, normalizePhone, startScheduler, stopScheduler, getInstanceState };
+module.exports = { sendWhatsAppReminders, sendTestMessage, sendAccessMessage, notifyParentAboutArtifact, normalizePhone, startScheduler, stopScheduler, getInstanceState };

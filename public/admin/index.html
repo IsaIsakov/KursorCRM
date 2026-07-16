@@ -37,7 +37,7 @@
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
 const isAdmin = user && user.role === 'admin';
-let currentTab = 'dashboard';
+let currentTab = location.hash === '#requests' ? 'requests' : 'dashboard';
 let cache = { users: [], modules: [], tasks: [], progressById: {} };
 let _renderToken = 0;
 
@@ -88,6 +88,7 @@ const NAV_GROUPS = [
   ]},
   { id:'journal', titleKey:'admin.grp_journal', items:[
     { tab:'calendar', i18n:'admin.calendar', iconKey:'calendar' },
+    { tab:'requests', i18n:'admin.requests', iconKey:'notifications' },
     { tab:'groups', i18n:'admin.groups', iconKey:'groups' },
     { tab:'sessions', i18n:'admin.sessions', iconKey:'sessions' },
     { tab:'homework', i18n:'admin.homework', iconKey:'homework' },
@@ -187,6 +188,7 @@ const TAB_RENDERERS = {
   sessions: () => renderSessions(),
   homework: () => renderHomeworkAdmin(),
   notifications: () => renderNotificationsTab(),
+  requests: () => renderCareRequests(),
   whatsapp: () => renderWhatsapp(),
 };
 
@@ -1100,17 +1102,18 @@ async function renderGroups() {
       <td>${g.memberCount ?? 0}</td>
       <td><span class="badge badge-info">${g.lessonKind==='extra'?I18N.t('admin.type_extra'):I18N.t('admin.type_main')}</span></td>
       <td><button class="btn btn-ghost btn-sm" onclick="openGroupDetail('${g.id}')">${I18N.t('common.open')}</button>
-        ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openGroupForm('${g.id}')">${I18N.t('common.edit')}</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroup('${g.id}')">${I18N.t('common.delete')}</button>` : ''}</td>
+        ${(isAdmin||user.role==='assistant') ? `<button class="btn btn-ghost btn-sm" onclick="openGroupForm('${g.id}')">${I18N.t('common.edit')}</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroup('${g.id}')">${I18N.t('common.delete')}</button>` : ''}</td>
     </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
     </tbody></table>`;
   I18N.applyI18n(tabEl());
   window._groups = list;
 }
-function openGroupForm(id) {
+async function openGroupForm(id) {
   const g = id ? _byId(window._groups||[], id) : { name:'', branchId:(window._branches&&window._branches[0]?.id)||'', teacherId:'', assistantId:'', courseId:'', lessonKind:'main', status:'active' };
-  const teachers = cache.users.filter(u=>u.role==='teacher');
-  const assistants = cache.users.filter(u=>u.role==='assistant');
+  const staff = isAdmin ? cache.users : await API.getStaff();
+  const teachers = staff.filter(u=>u.role==='teacher');
+  const assistants = staff.filter(u=>u.role==='assistant');
   const branches = window._branches || [];
   const ensureBranches = branches.length ? Promise.resolve(branches) : API.getBranches();
   Promise.resolve(ensureBranches).then(brs => {
@@ -1351,6 +1354,8 @@ function openClientForm(id) {
       <option value="">—</option>${branches.map(b=>`<option value="${b.id}" ${c&&c.branchId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select></div>
     <div class="form-group"><label data-i18n="crm.tariff">Тариф</label><select class="form-input" id="cl_tariff">
       <option value="">—</option>${tariffs.map(t=>`<option value="${t.id}" ${c&&c.tariffId===t.id?'selected':''}>${escapeHtml(t.name)} (${t.visitsCount} зан.)</option>`).join('')}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="form-group"><label>Количество занятий</label><input class="form-input" id="cl_visits" type="number" min="0" value="${c?.visitsLeft??''}"></div><div class="form-group"><label>Оплаченная сумма, ₸</label><input class="form-input" id="cl_amount" type="number" min="0" placeholder="По тарифу"></div></div>
+    ${id?`<label class="form-group" style="display:flex;align-items:center;gap:8px;padding:10px;background:#eef2ff;border-radius:10px"><input type="checkbox" id="cl_issue"> Оформить новый абонемент с указанными суммой и количеством</label>`:''}
     <div class="form-group"><label data-i18n="common.status">Статус</label><select class="form-input" id="cl_status">
       ${['active','frozen','inactive'].map(s=>`<option value="${s}" ${c&&c.status===s?'selected':''}>${I18N.t('crm.status_'+s)}</option>`).join('')}</select></div>
     <div class="form-group"><label data-i18n="crm.manager">Ответственный</label><select class="form-input" id="cl_manager">
@@ -1386,9 +1391,12 @@ async function saveClient(id) {
     documentId: document.getElementById('cl_doc').value.trim(),
     videoConsent: document.getElementById('cl_video').checked,
     comment: document.getElementById('cl_comment').value.trim(),
+    visitsLeft: Number(document.getElementById('cl_visits').value || 0),
+    amountPaid: document.getElementById('cl_amount').value ? Number(document.getElementById('cl_amount').value) : undefined,
+    issueSubscription: !!document.getElementById('cl_issue')?.checked,
   };
   // Если выбран тариф — отметим дату выдачи абонемента, чтобы сервер рассчитал остаток занятий
-  if (data.tariffId) data.subscriptionIssuedAt = Date.now();
+  if (data.tariffId && (!id || data.issueSubscription)) data.subscriptionIssuedAt = Date.now();
   const err = document.getElementById('modalErr');
   if (!data.userId || !data.fullName) { err.textContent = I18N.t('common.error'); return; }
   try {
@@ -1684,7 +1692,7 @@ async function openAttendance(sessionId, groupId) {
     API.getArtifacts('lesson_session_id=' + encodeURIComponent(sessionId)).catch(() => []),
   ]);
   const existMap = {};
-  (existing || []).forEach(r => { existMap[r.studentId] = r.status; });
+  (existing || []).forEach(r => { existMap[r.studentId] = r; });
   // полный список = состав группы ∪ уже отмеченные
   const roster = [];
   const seen = new Set();
@@ -1697,7 +1705,7 @@ async function openAttendance(sessionId, groupId) {
     <h2 data-i18n="session.conduct">Проведение занятия</h2>
     <div class="lesson-help"><b>Как закрыть занятие</b><span>1. Отметьте посещаемость</span><span>2. Добавьте работу или отчёт каждому присутствующему</span><span>3. Сохраните занятие</span></div>
     <p style="color:#64748b;font-size:13px;margin:10px 0">Видео и файлы — до 150 МБ. Материалы сразу появляются в защищённой ленте родителя.</p>
-    <div id="att_list">${roster.length ? roster.map(r=>lessonRowHtml(r, existMap[r.studentId] || 'present')).join('')
+    <div id="att_list">${roster.length ? roster.map(r=>lessonRowHtml(r, existMap[r.studentId] || {status:'present',reason:''})).join('')
       : `<div style="color:#64748b">${I18N.t('common.none')} — в группе нет учеников</div>`}</div>
     <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
@@ -1709,7 +1717,8 @@ async function openAttendance(sessionId, groupId) {
 }
 
 // Разметка строки одного ученика в окне проведения занятия
-function lessonRowHtml(r, st) {
+function lessonRowHtml(r, attendance) {
+  const st = attendance.status || 'present';
   const arts = _lesson.artifacts.filter(a => a.studentId === r.studentId);
   return `<div class="lesson-row" data-row="${r.studentId}">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
@@ -1721,6 +1730,8 @@ function lessonRowHtml(r, st) {
         <option value="excused" ${st==='excused'?'selected':''}>${I18N.t('session.excused')}</option>
       </select>
     </div>
+    ${attendance.parentNotice ? `<div style="margin-top:6px;padding:7px 10px;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;font-weight:700">👨‍👩‍👧 Родитель предупредил заранее</div>` : ''}
+    <input class="form-input att_reason" data-student="${r.studentId}" value="${escapeHtml(attendance.reason||'')}" placeholder="Причина / примечание к посещению" style="margin-top:6px;font-size:13px">
     <div class="art_list" data-student="${r.studentId}" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
       ${arts.map(artChipHtml).join('')}
     </div>
@@ -1791,7 +1802,7 @@ function refreshArtList(studentId) {
 }
 
 async function saveAttendance(sessionId) {
-  const records = Array.from(document.querySelectorAll('.att_sel')).map(s => ({ studentId: s.dataset.student, status: s.value }));
+  const records = Array.from(document.querySelectorAll('.att_sel')).map(s => ({ studentId: s.dataset.student, status: s.value, reason: document.querySelector(`.att_reason[data-student="${s.dataset.student}"]`)?.value.trim() || '' }));
   try {
     const resp = await API.saveAttendance({ lessonSessionId: sessionId, records });
     const missing = resp && resp.missingReports || [];
@@ -1832,6 +1843,24 @@ function clearMissingForStudent(studentId) {
   if (!_lesson.missing || !_lesson.missing.length) return;
   if (!_lesson.missing.some(m => m.studentId === studentId)) return;
   renderMissingReportWarning(_lesson.missing.filter(m => m.studentId !== studentId));
+}
+
+// ---------- Заявки родителей: заморозки и будущие отсутствия ----------
+async function renderCareRequests() {
+  const [pending, approved, absences] = await Promise.all([
+    API.getCareRequests('pending'), API.getCareRequests('approved'),
+    API.getAbsenceNotices(Date.now()-86400000, Date.now()+60*86400000),
+  ]);
+  document.getElementById('tab').innerHTML = `<div class="page-header"><div><h1>Заявки родителей</h1><p>Заморозки абонементов и предупреждения о будущих пропусках</p></div><button class="btn btn-outline" onclick="renderCareRequests()">Обновить</button></div>
+    <div class="stats-grid" style="margin-bottom:20px"><div class="stat-card"><div><div class="stat-value">${pending.length}</div><div class="stat-label">Ждут решения</div></div></div><div class="stat-card"><div><div class="stat-value">${absences.length}</div><div class="stat-label">Будущих отсутствий</div></div></div></div>
+    <div class="card" style="margin-bottom:18px"><h2>❄️ Запросы на заморозку</h2>${pending.length?`<div style="display:grid;gap:12px">${pending.map(r=>`<div style="border:1px solid #e2e8f0;border-radius:14px;padding:16px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><b>${escapeHtml(r.student_name)}</b><div style="font-size:13px;color:#64748b">${escapeHtml(r.branch_name||'')} · родитель: ${escapeHtml(r.parent_name)}</div></div><span class="badge badge-warning">${r.lessons_count} занятий</span></div><div style="margin:10px 0"><b>${fmtDate(r.starts_at)} — ${fmtDate(r.ends_at)}</b><br>${escapeHtml(r.reason)}</div><textarea class="form-input" id="decision_${r.id}" rows="2" placeholder="Комментарий родителю (необязательно)"></textarea><div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-success" onclick="decideFreeze('${r.id}',true)">Одобрить</button><button class="btn btn-danger" onclick="decideFreeze('${r.id}',false)">Отклонить</button></div></div>`).join('')}</div>`:'<div class="empty-state" style="padding:30px">Новых заявок нет</div>'}</div>
+    <div class="card"><h2>📅 Предупреждения об отсутствии</h2>${absences.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Дата</th><th>Ученик</th><th>Группа</th><th>Причина</th></tr></thead><tbody>${absences.map(a=>`<tr><td>${new Date(a.lesson_at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'})}</td><td><b>${escapeHtml(a.student_name)}</b></td><td>${escapeHtml(a.group_name)}</td><td>${escapeHtml(a.reason)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state" style="padding:30px">Предупреждений нет</div>'}</div>
+    ${approved.length?`<div class="card" style="margin-top:18px"><h2>Недавно одобренные</h2>${approved.slice(0,10).map(r=>`<div style="padding:8px 0;border-bottom:1px solid #f1f5f9"><b>${escapeHtml(r.student_name)}</b> · ${fmtDate(r.starts_at)}—${fmtDate(r.ends_at)}</div>`).join('')}</div>`:''}`;
+}
+async function decideFreeze(id,approved){
+  const comment=document.getElementById('decision_'+id)?.value.trim()||'';
+  if(!approved&&!comment&&!confirm('Отклонить заявку без комментария?')) return;
+  try{await API.decideCareRequest(id,{approved,comment});showToast('Решение сохранено','success');await renderCareRequests();}catch(e){alert(e.message);}
 }
 
 // ---------- Домашние задания (привязаны к занятиям) ----------

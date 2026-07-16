@@ -35,6 +35,7 @@ const crmFields = {
   fullName: text(200), birthDate: z.string().trim().max(32).nullable().optional(), gender: z.enum(['m','f']).nullable().optional(),
   branchId: idSchema.nullable().optional(), tariffId: idSchema.nullable().optional(), subscriptionIssuedAt: timestamp.nullable().optional(),
   visitsLeft: z.coerce.number().int().min(0).max(10000).optional(), status: z.enum(['active','frozen','inactive']).optional(),
+  amountPaid: z.coerce.number().int().min(0).max(1000000000).optional(), issueSubscription: z.boolean().optional(),
   responsibleManagerId: idSchema.nullable().optional(), parentName: optionalText(200), parentPhone: optionalText(50),
   documentId: optionalText(100), comment: optionalText(5000), videoConsent: z.boolean().optional(), videoConsentDate: timestamp.nullable().optional(),
 };
@@ -50,6 +51,15 @@ function isStaff(u) { return ['admin', 'teacher', 'assistant'].includes(u.role);
 function teacherGroupIds(userId) {
   return db.prepare('SELECT id FROM groups WHERE teacher_id = ? OR assistant_id = ?')
     .all(userId, userId).map(r => r.id);
+}
+function curatorBranchIds(userId) {
+  return db.prepare('SELECT DISTINCT branch_id FROM groups WHERE assistant_id=?').all(userId).map(r=>r.branch_id);
+}
+function canCurateGroup(user, groupId) {
+  if (user.role === 'admin') return true;
+  if (user.role !== 'assistant') return false;
+  const group = db.prepare('SELECT branch_id FROM groups WHERE id=?').get(groupId);
+  return !!group && curatorBranchIds(user.id).includes(group.branch_id);
 }
 
 function rowToTariff(r) {
@@ -168,6 +178,9 @@ router.get('/groups', (req, res) => {
   let rows;
   if (req.user.role === 'admin') {
     rows = db.prepare(`${GROUP_SELECT} ORDER BY g.status, g.name`).all();
+  } else if (req.user.role === 'assistant') {
+    const ids=curatorBranchIds(req.user.id); if(!ids.length) rows=[];
+    else rows=db.prepare(`${GROUP_SELECT} WHERE g.branch_id IN (${ids.map(()=>'?').join(',')}) ORDER BY g.name`).all(...ids);
   } else {
     rows = db.prepare(`${GROUP_SELECT} WHERE g.teacher_id = ? OR g.assistant_id = ? ORDER BY g.name`)
       .all(req.user.id, req.user.id);
@@ -179,7 +192,7 @@ router.get('/groups/:id', (req, res) => {
   if (!isStaff(req.user)) return res.status(403).json({ error: 'Недостаточно прав' });
   const g = db.prepare(`${GROUP_SELECT} WHERE g.id = ?`).get(req.params.id);
   if (!g) return res.status(404).json({ error: 'Не найдена' });
-  if (req.user.role !== 'admin' && g.teacher_id !== req.user.id && g.assistant_id !== req.user.id) {
+  if (req.user.role !== 'admin' && g.teacher_id !== req.user.id && g.assistant_id !== req.user.id && !canCurateGroup(req.user,g.id)) {
     return res.status(403).json({ error: 'Это не ваша группа' });
   }
   res.json(rowToGroup(g));
@@ -197,9 +210,10 @@ router.post('/groups', requireRole('admin'), validateBody(groupCreateSchema), (r
   res.status(201).json(rowToGroup(db.prepare(`${GROUP_SELECT} WHERE g.id = ?`).get(id)));
 });
 
-router.put('/groups/:id', requireRole('admin'), validateBody(groupUpdateSchema), (req, res) => {
+router.put('/groups/:id', requireRole('admin','assistant'), validateBody(groupUpdateSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найдена' });
+  if (!canCurateGroup(req.user,req.params.id)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const { name, courseId, branchId, teacherId, assistantId, lessonKind, status } = req.body || {};
   db.prepare(`UPDATE groups SET name=?, course_id=?, branch_id=?, teacher_id=?, assistant_id=?, lesson_kind=?, status=? WHERE id=?`)
     .run(
@@ -227,7 +241,8 @@ router.get('/groups/:id/schedule', (req, res) => {
   const rows = db.prepare('SELECT * FROM group_schedule WHERE group_id = ? ORDER BY weekday, start_time').all(req.params.id);
   res.json(rows.map(r => ({ id: r.id, groupId: r.group_id, weekday: r.weekday, startTime: r.start_time, durationMin: r.duration_min })));
 });
-router.post('/groups/:id/schedule', requireRole('admin'), validateBody(scheduleSchema), (req, res) => {
+router.post('/groups/:id/schedule', requireRole('admin','assistant'), validateBody(scheduleSchema), (req, res) => {
+  if (!canCurateGroup(req.user,req.params.id)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const { weekday, startTime, durationMin } = req.body || {};
   if (weekday == null || !startTime || !durationMin) return res.status(400).json({ error: 'weekday, startTime, durationMin обязательны' });
   const wd = parseInt(weekday);
@@ -237,7 +252,8 @@ router.post('/groups/:id/schedule', requireRole('admin'), validateBody(scheduleS
     .run(id, req.params.id, wd, String(startTime), parseInt(durationMin) || 60);
   res.status(201).json({ id, groupId: req.params.id, weekday: wd, startTime, durationMin: parseInt(durationMin) || 60 });
 });
-router.delete('/groups/:gid/schedule/:sid', requireRole('admin'), (req, res) => {
+router.delete('/groups/:gid/schedule/:sid', requireRole('admin','assistant'), (req, res) => {
+  if (!canCurateGroup(req.user,req.params.gid)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const info = db.prepare('DELETE FROM group_schedule WHERE id = ? AND group_id = ?').run(req.params.sid, req.params.gid);
   if (!info.changes) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
@@ -246,7 +262,7 @@ router.delete('/groups/:gid/schedule/:sid', requireRole('admin'), (req, res) => 
 // --- Состав группы ---
 router.get('/groups/:id/members', (req, res) => {
   if (!isStaff(req.user)) return res.status(403).json({ error: 'Недостаточно прав' });
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'admin' && !canCurateGroup(req.user,req.params.id)) {
     const g = db.prepare('SELECT teacher_id, assistant_id FROM groups WHERE id = ?').get(req.params.id);
     if (!g || (g.teacher_id !== req.user.id && g.assistant_id !== req.user.id)) {
       return res.status(403).json({ error: 'Это не ваша группа' });
@@ -262,7 +278,8 @@ router.get('/groups/:id/members', (req, res) => {
     name: r.name, login: r.login, avatarUrl: r.avatar_url || null,
   })));
 });
-router.post('/groups/:id/members', requireRole('admin'), validateBody(memberSchema), (req, res) => {
+router.post('/groups/:id/members', requireRole('admin','assistant'), validateBody(memberSchema), (req, res) => {
+  if (!canCurateGroup(req.user,req.params.id)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const { studentId, since, until } = req.body || {};
   if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
   if (!db.prepare('SELECT id FROM groups WHERE id=?').get(req.params.id)) return res.status(404).json({ error: 'Группа не найдена' });
@@ -276,7 +293,8 @@ router.post('/groups/:id/members', requireRole('admin'), validateBody(memberSche
     .run(id, studentId, req.params.id, since || Date.now(), until || null);
   res.status(201).json({ id, studentId, groupId: req.params.id });
 });
-router.delete('/groups/:gid/members/:mid', requireRole('admin'), (req, res) => {
+router.delete('/groups/:gid/members/:mid', requireRole('admin','assistant'), (req, res) => {
+  if (!canCurateGroup(req.user,req.params.gid)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const info = db.prepare('DELETE FROM group_members WHERE id = ? AND group_id = ?').run(req.params.mid, req.params.gid);
   if (!info.changes) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
@@ -361,7 +379,7 @@ router.post('/students-crm', requireRole('admin'), validateBody(crmCreateSchema)
          b.videoConsent ? 1 : 0, b.videoConsent ? (b.videoConsentDate || Date.now()) : null);
     if (b.tariffId || visitsLeft > 0) subscriptions.issue({
       studentId: b.userId, tariffId: b.tariffId || null,
-      startsAt: b.subscriptionIssuedAt || Date.now(), visitsTotal: visitsLeft, actorId: req.user.id,
+      startsAt: b.subscriptionIssuedAt || Date.now(), visitsTotal: visitsLeft, amountPaid:b.amountPaid, actorId: req.user.id,
     });
     else subscriptions.ensureLegacy(b.userId, req.user.id);
   });
@@ -405,9 +423,9 @@ router.put('/students-crm/:id', requireRole('admin'), validateBody(crmUpdateSche
       b.videoConsent !== undefined ? (b.videoConsent ? (b.videoConsentDate || Date.now()) : null) : cur.video_consent_date,
       req.params.id
     );
-    const isNewIssue = b.tariffId && b.subscriptionIssuedAt && b.tariffId !== cur.tariff_id;
+    const isNewIssue = b.issueSubscription === true || (b.tariffId && b.subscriptionIssuedAt && b.tariffId !== cur.tariff_id);
     if (isNewIssue) subscriptions.issue({ studentId: req.params.id, tariffId: b.tariffId,
-      startsAt: b.subscriptionIssuedAt, visitsTotal: visitsLeft, actorId: req.user.id });
+      startsAt: b.subscriptionIssuedAt || Date.now(), visitsTotal: visitsLeft, amountPaid:b.amountPaid, actorId: req.user.id });
     else if (visitsLeft !== cur.visits_left) {
       const result = subscriptions.applyDelta({ studentId: req.params.id, delta: visitsLeft - cur.visits_left,
         type: 'adjustment', referenceType: 'crm_edit', referenceId: genId('edit'), actorId: req.user.id,

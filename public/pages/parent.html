@@ -263,6 +263,14 @@
 }
 .filter-tab.active { background: #6366f1; border-color: #6366f1; color: #fff; }
 .filter-tab:hover:not(.active) { border-color: #6366f1; color: #6366f1; }
+.care-grid { display:grid;grid-template-columns:1.2fr .8fr;gap:18px; }
+.care-card { background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.04); }
+.care-lesson { display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f1f5f9; }
+.care-lesson:last-child { border-bottom:0; }
+.care-date { width:58px;text-align:center;background:#eef2ff;color:#4f46e5;border-radius:12px;padding:7px;font-weight:900; }
+.request-status { display:inline-flex;padding:4px 9px;border-radius:20px;font-size:12px;font-weight:800; }
+.rs-pending { background:#fef3c7;color:#a16207 }.rs-approved { background:#dcfce7;color:#15803d }.rs-rejected,.rs-cancelled { background:#fee2e2;color:#b91c1c }
+@media(max-width:900px){.care-grid{grid-template-columns:1fr}}
 
 /* No child linked */
 .no-child-screen {
@@ -309,6 +317,7 @@
 <script>
 const user = requireAuth(['parent']);
 let child = null;     // единственный ребёнок
+let parentChildrenList = [];
 let cachedData = {};  // { feed, attendance, feedback, artifacts, progress }
 let activeSection = 'feed';
 
@@ -332,6 +341,7 @@ async function init() {
       return;
     }
 
+    parentChildrenList = children;
     child = children[0];
     renderLayout();
     await loadAllData();
@@ -356,6 +366,7 @@ function renderLayout() {
     { key: 'lessons',    icon: '📅', label: 'Уроки' },
     { key: 'works',      icon: '📝', label: 'Работы' },
     { key: 'videos',     icon: '🎥', label: 'Видеоотчёты' },
+    { key: 'care',       icon: '❄️', label: 'Пропуски и заморозка' },
     { key: 'account',   icon: '👤', label: 'Аккаунт' },
   ];
 
@@ -366,6 +377,7 @@ function renderLayout() {
           ${avatarHtml}
           <div class="child-name-lg">${escapeHtml(child.name)}</div>
           <span class="child-status-badge ${statusClass}">${statusLabel}</span>
+          ${parentChildrenList.length>1?`<select class="form-input" style="margin-top:10px;font-size:12px" onchange="switchChild(this.value)">${parentChildrenList.map(c=>`<option value="${c.id}" ${c.id===child.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select>`:''}
         </div>
         <nav class="sidebar-nav" id="sidebarNav">
           ${navItems.map(n => `
@@ -380,17 +392,21 @@ function renderLayout() {
     </div>`;
 }
 
+async function switchChild(id){child=parentChildrenList.find(c=>c.id===id)||child;cachedData={};renderLayout();await loadAllData();renderSection('feed');}
+
 async function loadAllData() {
   const sid = child.id;
   try {
-    const [feed, attendance, feedback, artifacts, progress] = await Promise.all([
+    const [feed, attendance, feedback, artifacts, progress, calendar, requests] = await Promise.all([
       API.parentFeed(sid),
       API.parentAttendance(sid),
       API.parentFeedback(sid),
       API.parentArtifacts(sid),
       API.parentProgress(sid),
+      API.parentCalendar(sid, Date.now(), Date.now() + 90 * 86400000),
+      API.parentRequests(sid),
     ]);
-    cachedData = { feed, attendance, feedback, artifacts, progress };
+    cachedData = { feed, attendance, feedback, artifacts, progress, calendar, requests };
   } catch (e) {
     cachedData = { feed: [], attendance: { records: [], visitsLeft: null }, feedback: [], artifacts: [], progress: { points: 0, streak: 0, tasks: {} } };
     console.error('loadAllData error', e);
@@ -412,9 +428,33 @@ function renderSection(key) {
     case 'lessons': main.innerHTML = buildLessons(); break;
     case 'works':   main.innerHTML = buildWorks(); break;
     case 'videos':  main.innerHTML = buildVideos(); break;
+    case 'care':    main.innerHTML = buildCare(); break;
     case 'account': main.innerHTML = buildAccount(); break;
   }
 }
+
+function requestStatus(status) {
+  const labels={pending:'На рассмотрении',approved:'Одобрено',rejected:'Отклонено',cancelled:'Отменено',submitted:'Передано куратору',acknowledged:'Куратор увидел'};
+  return `<span class="request-status rs-${status}">${labels[status]||status}</span>`;
+}
+function buildCare() {
+  const lessons=(cachedData.calendar||[]).slice(0,30), reqs=cachedData.requests||{freezes:[],absences:[]};
+  return `<h1 class="section-heading"><span class="sh-icon">❄️</span> Пропуски и заморозка</h1>
+  <div class="care-grid">
+    <div class="care-card"><h3 style="margin:0 0 6px">📅 Ближайшие занятия</h3><p style="color:#64748b;margin:0 0 12px">Сообщите заранее, если ребёнок не сможет прийти.</p>
+      ${lessons.length?lessons.map(l=>`<div class="care-lesson"><div class="care-date">${new Date(l.lessonAt).toLocaleDateString('ru-RU',{day:'2-digit',month:'short'})}</div><div style="flex:1"><b>${escapeHtml(l.groupName)}</b><div style="font-size:12px;color:#64748b">${new Date(l.lessonAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})} · ${l.durationMin} мин · ${l.lessonKind==='extra'?'Дополнительный':'Основной'}</div>${l.absenceNotice?`<div style="font-size:12px;color:#2563eb;margin-top:3px">Причина: ${escapeHtml(l.absenceNotice.reason)}</div>`:''}</div>${l.absenceNotice?requestStatus(l.absenceNotice.status):`<button class="btn btn-outline btn-sm" onclick="showAbsenceForm('${l.groupId}',${l.lessonAt},'${escapeHtml(l.groupName)}')">Не придём</button>`}</div>`).join(''):'<div class="empty-state" style="padding:30px">Нет занятий в ближайшие 90 дней</div>'}
+    </div>
+    <div><div class="care-card"><h3 style="margin-top:0">❄️ Запросить заморозку</h3><div class="form-group"><label>С какого числа</label><input class="form-input" type="date" id="freezeFrom"></div><div class="form-group"><label>По какое число</label><input class="form-input" type="date" id="freezeTo"></div><div class="form-group"><label>Причина</label><textarea class="form-input" id="freezeReason" rows="3" placeholder="Например: отъезд, лечение"></textarea></div><div id="freezePreview" style="font-size:13px;color:#4f46e5;margin-bottom:10px"></div><button class="btn btn-outline" onclick="previewFreeze()">Посчитать уроки</button> <button class="btn" onclick="sendFreeze()">Отправить запрос</button><div id="careErr" style="color:#ef4444;margin-top:8px"></div></div>
+    <div class="care-card" style="margin-top:18px"><h3 style="margin-top:0">История заявок</h3>${(reqs.freezes||[]).length?reqs.freezes.map(r=>`<div style="padding:10px 0;border-bottom:1px solid #f1f5f9"><div style="display:flex;justify-content:space-between;gap:8px"><b>${fmtDate(r.starts_at)} — ${fmtDate(r.ends_at)}</b>${requestStatus(r.status)}</div><small>${r.lessons_count} занятий · ${escapeHtml(r.reason)}</small>${r.review_comment?`<div style="font-size:12px;margin-top:4px">Комментарий: ${escapeHtml(r.review_comment)}</div>`:''}</div>`).join(''):'<span style="color:#94a3b8">Заявок пока нет</span>'}</div></div>
+  </div>`;
+}
+function showAbsenceForm(groupId,lessonAt,groupName){
+  const reason=prompt(`Почему ребёнок не придёт на занятие «${groupName}»?`); if(!reason)return;
+  API.createAbsenceNotice({studentId:child.id,groupId,lessonAt,reason}).then(async()=>{cachedData.calendar=await API.parentCalendar(child.id,Date.now(),Date.now()+90*86400000);cachedData.requests=await API.parentRequests(child.id);renderSection('care');}).catch(e=>alert(e.message));
+}
+function freezePayload(){const from=document.getElementById('freezeFrom').value,to=document.getElementById('freezeTo').value;return {studentId:child.id,startsAt:new Date(from+'T00:00:00').getTime(),endsAt:new Date(to+'T23:59:59').getTime(),reason:document.getElementById('freezeReason').value.trim()};}
+async function previewFreeze(){try{const r=await API.previewFreezeRequest(freezePayload());document.getElementById('freezePreview').textContent=`За этот период запланировано занятий: ${r.lessonsCount}`;}catch(e){document.getElementById('careErr').textContent=e.message;}}
+async function sendFreeze(){try{await API.createFreezeRequest(freezePayload());cachedData.requests=await API.parentRequests(child.id);renderSection('care');}catch(e){document.getElementById('careErr').textContent=e.message;}}
 
 /* ======= МЕДИА ОТЧЁТОВ (общие блоки для Ленты / Работ / Видео) =======
    Раньше тут была одна ссылка "🔗 Открыть", из-за которой картинки и файлы
@@ -729,6 +769,8 @@ function buildAccount() {
         <div class="acc-row"><span class="acc-label">Выдан</span><span class="acc-value">${issDate}</span></div>
         <div class="acc-row"><span class="acc-label">Действует до</span><span class="acc-value">${expiryStr}</span></div>
         ${child.tariffPrice ? `<div class="acc-row"><span class="acc-label">Стоимость</span><span class="acc-value">${child.tariffPrice.toLocaleString()} ₸</span></div>` : ''}
+        ${child.amountPaid != null ? `<div class="acc-row"><span class="acc-label">Оплачено</span><span class="acc-value">${Number(child.amountPaid).toLocaleString()} ₸</span></div>` : ''}
+        ${child.unitPrice != null ? `<div class="acc-row"><span class="acc-label">Цена одного урока</span><span class="acc-value">${Math.round(Number(child.unitPrice)).toLocaleString()} ₸</span></div>` : ''}
 
         ${pctLeft != null ? `
         <div class="visits-progress">

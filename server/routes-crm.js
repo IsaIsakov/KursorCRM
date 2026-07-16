@@ -7,9 +7,41 @@ const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
+const subscriptions = require('./subscriptions').createSubscriptionService(db);
+const { z, id: idSchema, text, optionalText, timestamp, validateBody } = require('./validation');
 
 const router = express.Router();
 router.use(authRequired);
+
+const branchCreateSchema = z.strictObject({ name: text(200), address: optionalText(500) });
+const branchUpdateSchema = z.strictObject({ name: text(200).optional(), address: optionalText(500) });
+const tariffFields = {
+  name: text(200), visitsCount: z.coerce.number().int().min(0).max(10000),
+  durationDays: z.coerce.number().int().min(1).max(3650), price: z.coerce.number().int().min(0).max(1000000000).optional(),
+  comment: optionalText(2000), extraLessonsSeparate: z.boolean().optional(),
+};
+const tariffCreateSchema = z.strictObject(tariffFields);
+const tariffUpdateSchema = z.strictObject(Object.fromEntries(Object.entries(tariffFields).map(([k, v]) => [k, v.optional()])));
+const groupFields = {
+  name: text(200), courseId: idSchema.nullable().optional(), branchId: idSchema,
+  teacherId: idSchema.nullable().optional(), assistantId: idSchema.nullable().optional(),
+  lessonKind: z.enum(['main','extra']).optional(), status: z.enum(['active','archived']).optional(),
+};
+const groupCreateSchema = z.strictObject(groupFields);
+const groupUpdateSchema = z.strictObject(Object.fromEntries(Object.entries(groupFields).map(([k, v]) => [k, v.optional()])));
+const scheduleSchema = z.strictObject({ weekday: z.coerce.number().int().min(0).max(6), startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), durationMin: z.coerce.number().int().min(10).max(720) });
+const memberSchema = z.strictObject({ studentId: idSchema, since: timestamp.optional(), until: timestamp.nullable().optional() });
+const crmFields = {
+  fullName: text(200), birthDate: z.string().trim().max(32).nullable().optional(), gender: z.enum(['m','f']).nullable().optional(),
+  branchId: idSchema.nullable().optional(), tariffId: idSchema.nullable().optional(), subscriptionIssuedAt: timestamp.nullable().optional(),
+  visitsLeft: z.coerce.number().int().min(0).max(10000).optional(), status: z.enum(['active','frozen','inactive']).optional(),
+  responsibleManagerId: idSchema.nullable().optional(), parentName: optionalText(200), parentPhone: optionalText(50),
+  documentId: optionalText(100), comment: optionalText(5000), videoConsent: z.boolean().optional(), videoConsentDate: timestamp.nullable().optional(),
+};
+const crmCreateSchema = z.strictObject({ userId: idSchema, ...crmFields });
+// The current admin form also sends userId while editing. It is accepted for
+// backwards compatibility but the route identity remains req.params.id.
+const crmUpdateSchema = z.strictObject({ userId: idSchema.optional(), ...Object.fromEntries(Object.entries(crmFields).map(([k, v]) => [k, v.optional()])) });
 
 /* ============== ХЕЛПЕРЫ ============== */
 function isStaff(u) { return ['admin', 'teacher', 'assistant'].includes(u.role); }
@@ -56,14 +88,14 @@ function rowToCrm(r) {
 router.get('/branches', (req, res) => {
   res.json(db.prepare('SELECT * FROM branches ORDER BY name').all());
 });
-router.post('/branches', requireRole('admin'), (req, res) => {
+router.post('/branches', requireRole('admin'), validateBody(branchCreateSchema), (req, res) => {
   const { name, address } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name обязателен' });
   const id = genId('br');
   db.prepare('INSERT INTO branches (id, name, address) VALUES (?,?,?)').run(id, String(name).trim(), address || null);
   res.status(201).json(db.prepare('SELECT * FROM branches WHERE id = ?').get(id));
 });
-router.put('/branches/:id', requireRole('admin'), (req, res) => {
+router.put('/branches/:id', requireRole('admin'), validateBody(branchUpdateSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM branches WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найден' });
   const { name, address } = req.body || {};
@@ -83,7 +115,7 @@ router.delete('/branches/:id', requireRole('admin'), (req, res) => {
 router.get('/tariffs', (req, res) => {
   res.json(db.prepare('SELECT * FROM tariffs ORDER BY name').all().map(rowToTariff));
 });
-router.post('/tariffs', requireRole('admin'), (req, res) => {
+router.post('/tariffs', requireRole('admin'), validateBody(tariffCreateSchema), (req, res) => {
   const { name, visitsCount, durationDays, price, comment, extraLessonsSeparate } = req.body || {};
   if (!name || visitsCount == null || durationDays == null) {
     return res.status(400).json({ error: 'name, visitsCount, durationDays обязательны' });
@@ -95,7 +127,7 @@ router.post('/tariffs', requireRole('admin'), (req, res) => {
          parseInt(price) || 0, comment || null, extraLessonsSeparate ? 1 : 0);
   res.status(201).json(rowToTariff(db.prepare('SELECT * FROM tariffs WHERE id = ?').get(id)));
 });
-router.put('/tariffs/:id', requireRole('admin'), (req, res) => {
+router.put('/tariffs/:id', requireRole('admin'), validateBody(tariffUpdateSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM tariffs WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найден' });
   const { name, visitsCount, durationDays, price, comment, extraLessonsSeparate } = req.body || {};
@@ -153,7 +185,7 @@ router.get('/groups/:id', (req, res) => {
   res.json(rowToGroup(g));
 });
 
-router.post('/groups', requireRole('admin'), (req, res) => {
+router.post('/groups', requireRole('admin'), validateBody(groupCreateSchema), (req, res) => {
   const { name, courseId, branchId, teacherId, assistantId, lessonKind, status } = req.body || {};
   if (!name || !branchId) return res.status(400).json({ error: 'name, branchId обязательны' });
   const id = genId('grp');
@@ -165,7 +197,7 @@ router.post('/groups', requireRole('admin'), (req, res) => {
   res.status(201).json(rowToGroup(db.prepare(`${GROUP_SELECT} WHERE g.id = ?`).get(id)));
 });
 
-router.put('/groups/:id', requireRole('admin'), (req, res) => {
+router.put('/groups/:id', requireRole('admin'), validateBody(groupUpdateSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найдена' });
   const { name, courseId, branchId, teacherId, assistantId, lessonKind, status } = req.body || {};
@@ -195,7 +227,7 @@ router.get('/groups/:id/schedule', (req, res) => {
   const rows = db.prepare('SELECT * FROM group_schedule WHERE group_id = ? ORDER BY weekday, start_time').all(req.params.id);
   res.json(rows.map(r => ({ id: r.id, groupId: r.group_id, weekday: r.weekday, startTime: r.start_time, durationMin: r.duration_min })));
 });
-router.post('/groups/:id/schedule', requireRole('admin'), (req, res) => {
+router.post('/groups/:id/schedule', requireRole('admin'), validateBody(scheduleSchema), (req, res) => {
   const { weekday, startTime, durationMin } = req.body || {};
   if (weekday == null || !startTime || !durationMin) return res.status(400).json({ error: 'weekday, startTime, durationMin обязательны' });
   const wd = parseInt(weekday);
@@ -230,9 +262,12 @@ router.get('/groups/:id/members', (req, res) => {
     name: r.name, login: r.login, avatarUrl: r.avatar_url || null,
   })));
 });
-router.post('/groups/:id/members', requireRole('admin'), (req, res) => {
+router.post('/groups/:id/members', requireRole('admin'), validateBody(memberSchema), (req, res) => {
   const { studentId, since, until } = req.body || {};
   if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
+  if (!db.prepare('SELECT id FROM groups WHERE id=?').get(req.params.id)) return res.status(404).json({ error: 'Группа не найдена' });
+  if (!db.prepare("SELECT id FROM users WHERE id=? AND role='student'").get(studentId)) return res.status(400).json({ error: 'Можно добавить только существующего ученика' });
+  if (until && since && Number(until) < Number(since)) return res.status(400).json({ error: 'Дата окончания не может быть раньше даты начала' });
   const exists = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND student_id = ? AND (until IS NULL OR until > ?)')
     .get(req.params.id, studentId, Date.now());
   if (exists) return res.status(409).json({ error: 'Ученик уже в этой группе' });
@@ -297,7 +332,7 @@ router.get('/students-crm/:id', requireRole('admin'), (req, res) => {
   res.json(rowToCrm(row));
 });
 
-router.post('/students-crm', requireRole('admin'), (req, res) => {
+router.post('/students-crm', requireRole('admin'), validateBody(crmCreateSchema), (req, res) => {
   const b = req.body || {};
   if (!b.userId || !b.fullName) return res.status(400).json({ error: 'userId, fullName обязательны' });
   const user = db.prepare('SELECT id FROM users WHERE id = ?').get(b.userId);
@@ -311,6 +346,7 @@ router.post('/students-crm', requireRole('admin'), (req, res) => {
     const tar = db.prepare('SELECT visits_count FROM tariffs WHERE id = ?').get(b.tariffId);
     if (tar) visitsLeft = tar.visits_count;
   }
+  const create = db.transaction(() => {
   db.prepare(`INSERT INTO students_crm
     (user_id, full_name, birth_date, gender, branch_id, tariff_id, subscription_issued_at,
      visits_left, status, responsible_manager_id, parent_name, parent_phone, document_id,
@@ -318,15 +354,22 @@ router.post('/students-crm', requireRole('admin'), (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(b.userId, String(b.fullName).trim(), b.birthDate || null,
          ['m', 'f'].includes(b.gender) ? b.gender : null, b.branchId || null, b.tariffId || null,
-         b.subscriptionIssuedAt || null, visitsLeft,
+         b.subscriptionIssuedAt || null, 0,
          ['active', 'frozen', 'inactive'].includes(b.status) ? b.status : 'active',
          b.responsibleManagerId || null, b.parentName || null, b.parentPhone || null,
          b.documentId || null, b.comment || null,
          b.videoConsent ? 1 : 0, b.videoConsent ? (b.videoConsentDate || Date.now()) : null);
+    if (b.tariffId || visitsLeft > 0) subscriptions.issue({
+      studentId: b.userId, tariffId: b.tariffId || null,
+      startsAt: b.subscriptionIssuedAt || Date.now(), visitsTotal: visitsLeft, actorId: req.user.id,
+    });
+    else subscriptions.ensureLegacy(b.userId, req.user.id);
+  });
+  create();
   res.status(201).json(rowToCrm(db.prepare(`${CRM_SELECT} WHERE c.user_id = ?`).get(b.userId)));
 });
 
-router.put('/students-crm/:id', requireRole('admin'), (req, res) => {
+router.put('/students-crm/:id', requireRole('admin'), validateBody(crmUpdateSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM students_crm WHERE user_id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Карточка не найдена' });
   const b = req.body || {};
@@ -339,6 +382,7 @@ router.put('/students-crm/:id', requireRole('admin'), (req, res) => {
     if (tar) visitsLeft = tar.visits_count;
   }
 
+  const update = db.transaction(() => {
   db.prepare(`UPDATE students_crm SET
     full_name=?, birth_date=?, gender=?, branch_id=?, tariff_id=?, subscription_issued_at=?,
     visits_left=?, status=?, responsible_manager_id=?, parent_name=?, parent_phone=?,
@@ -350,7 +394,7 @@ router.put('/students-crm/:id', requireRole('admin'), (req, res) => {
       pick('branchId', 'branch_id'),
       pick('tariffId', 'tariff_id'),
       pick('subscriptionIssuedAt', 'subscription_issued_at'),
-      visitsLeft,
+      cur.visits_left,
       b.status && ['active', 'frozen', 'inactive'].includes(b.status) ? b.status : cur.status,
       pick('responsibleManagerId', 'responsible_manager_id'),
       pick('parentName', 'parent_name'),
@@ -361,6 +405,17 @@ router.put('/students-crm/:id', requireRole('admin'), (req, res) => {
       b.videoConsent !== undefined ? (b.videoConsent ? (b.videoConsentDate || Date.now()) : null) : cur.video_consent_date,
       req.params.id
     );
+    const isNewIssue = b.tariffId && b.subscriptionIssuedAt && b.tariffId !== cur.tariff_id;
+    if (isNewIssue) subscriptions.issue({ studentId: req.params.id, tariffId: b.tariffId,
+      startsAt: b.subscriptionIssuedAt, visitsTotal: visitsLeft, actorId: req.user.id });
+    else if (visitsLeft !== cur.visits_left) {
+      const result = subscriptions.applyDelta({ studentId: req.params.id, delta: visitsLeft - cur.visits_left,
+        type: 'adjustment', referenceType: 'crm_edit', referenceId: genId('edit'), actorId: req.user.id,
+        note: 'Ручная корректировка остатка', allowInactive: true });
+      if (!result.applied) throw Object.assign(new Error('Не удалось скорректировать остаток посещений'), { status: 409 });
+    }
+  });
+  update();
   res.json(rowToCrm(db.prepare(`${CRM_SELECT} WHERE c.user_id = ?`).get(req.params.id)));
 });
 

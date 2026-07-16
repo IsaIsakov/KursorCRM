@@ -12,7 +12,7 @@ const MASCOT = {
   sitting:  '/uploads/mascot/sitting.png',
   thinking: '/uploads/mascot/thinking.png',
 };
-const LOGO = 'https://salamalekum.sirv.com/_1_1.png.webp';
+const LOGO = '/uploads/mascot/happy.png';
 
 /* ===== ЯЗЫКИ / ТЕХНОЛОГИИ ===== */
 const LANGS = {

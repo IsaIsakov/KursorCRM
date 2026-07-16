@@ -92,7 +92,7 @@ function renderRow(s, p, tasks) {
   p = p || { points:0, streak:0, tasks:{}, badges:[] };
   const projectSubmissions = Object.entries(p.tasks).filter(([id, pr]) => {
     const t = tasks.find(t => t.id === parseInt(id));
-    return t && t.type === 'project' && pr.submission;
+    return t && ['project','scratch','htmlcss','blockly'].includes(t.type) && pr.status !== 'done' && pr.submission;
   });
   const done = Object.values(p.tasks).filter(t => t.status === 'done').length;
   return `
@@ -114,7 +114,7 @@ function showStudent(id) {
   const p = state.progressById[id] || { points:0, streak:0, tasks:{}, badges:[] };
   const submissions = Object.entries(p.tasks).filter(([tid, pr]) => {
     const t = state.tasks.find(t => t.id === parseInt(tid));
-    return t && t.type === 'project' && pr.submission;
+    return t && ['project','scratch','htmlcss','blockly'].includes(t.type) && pr.status !== 'done' && pr.submission;
   });
 
   const modal = document.createElement('div');
@@ -130,7 +130,7 @@ function showStudent(id) {
         <div><b style="font-size:20px">${Object.values(p.tasks).filter(t=>t.status==='done').length}</b><br>задач</div>
       </div>
       ${submissions.length ? `
-        <h3 style="margin-top:20px">Проекты на проверку</h3>
+        <h3 style="margin-top:20px">Работы на проверку</h3>
         ${submissions.map(([tid, pr]) => {
           const t = state.tasks.find(t => t.id === parseInt(tid));
           return `
@@ -138,6 +138,10 @@ function showStudent(id) {
               <b>${escapeHtml(t.title)}</b>
               <div style="margin-top:6px;white-space:pre-wrap;font-size:14px">${escapeHtml(pr.submission)}</div>
               <div style="margin-top:8px;font-size:12px;color:#64748b">Сдано: ${fmtDateTime(pr.completedAt, I18N.lang==='kk'?'kk-KZ':'ru-RU')}</div>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn btn-success btn-sm" onclick="reviewWork('${s.id}',${t.id},true,this)">Принять</button>
+                <button class="btn btn-outline btn-sm" onclick="reviewWork('${s.id}',${t.id},false,this)">Вернуть</button>
+              </div>
             </div>`;
         }).join('')}
       ` : ''}
@@ -182,7 +186,7 @@ function updateRow(studentId) {
   const done = Object.values(p.tasks).filter(t => t.status === 'done').length;
   const projectSubs = Object.entries(p.tasks).filter(([id, pr]) => {
     const t = state.tasks.find(t => t.id === parseInt(id));
-    return t && t.type === 'project' && pr.submission;
+    return t && ['project','scratch','htmlcss','blockly'].includes(t.type) && pr.status !== 'done' && pr.submission;
   });
   tr.querySelector('[data-points]').innerHTML = `<img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.points}`;
   tr.querySelector('[data-streak]').innerHTML = `<img src="https://cdn-icons-png.flaticon.com/512/785/785116.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.streak}`;
@@ -192,6 +196,17 @@ function updateRow(studentId) {
   tr.classList.remove('row-flash');
   void tr.offsetWidth;
   tr.classList.add('row-flash');
+}
+
+async function reviewWork(studentId, taskId, approved, button) {
+  button.disabled = true;
+  try {
+    const result = await API.reviewSubmission(studentId, taskId, approved);
+    state.progressById[studentId] = result.progress;
+    const overlay = button.closest('.modal-overlay'); if (overlay) overlay.remove();
+    updateRow(studentId);
+    showToast(approved ? 'Работа принята' : 'Работа возвращена ученику', 'success');
+  } catch (error) { button.disabled = false; showToast(error.message, 'error'); }
 }
 // ===== Доп. разделы кабинета учителя =====
 async function loadTeacherExtras() {

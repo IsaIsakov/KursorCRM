@@ -7,9 +7,17 @@ const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
+const { canAccessStudent } = require('./access-scope');
+const { activeMemberIds, validateGroupStudents, sessionTimestamp } = require('./group-scope');
+const subscriptions = require('./subscriptions').createSubscriptionService(db);
+const { z, id: idSchema, optionalText, timestamp, validateBody } = require('./validation');
 
 const router = express.Router();
 router.use(authRequired);
+
+const lessonSchema = z.strictObject({ groupId: idSchema, date: timestamp, topic: optionalText(500) });
+const attendanceSchema = z.strictObject({ lessonSessionId: idSchema, records: z.array(z.strictObject({ studentId: idSchema, status: z.enum(['present','absent','excused','late']) })).max(500) });
+const homeworkSchema = z.strictObject({ lessonSessionId: idSchema, moduleId: idSchema.nullable().optional(), taskIds: z.array(z.coerce.number().int().positive()).max(500).optional(), dueDate: timestamp.nullable().optional(), studentIds: z.array(idSchema).max(500).optional() });
 
 function canManageGroup(user, groupId) {
   if (user.role === 'admin') return true;
@@ -45,7 +53,7 @@ router.get('/lesson-sessions', (req, res) => {
   })));
 });
 
-router.post('/lesson-sessions', (req, res) => {
+router.post('/lesson-sessions', validateBody(lessonSchema), (req, res) => {
   const { groupId, date, topic } = req.body || {};
   if (!groupId || !date) return res.status(400).json({ error: 'groupId, date обязательны' });
   if (!canManageGroup(req.user, groupId)) return res.status(403).json({ error: 'Это не ваша группа' });
@@ -65,9 +73,12 @@ router.delete('/lesson-sessions/:id', (req, res) => {
   // вернуть посещения, списанные за это занятие
   // «present» и «late» в равной степени списывали визит — возвращаем оба.
   const present = db.prepare("SELECT student_id FROM attendance WHERE lesson_session_id = ? AND status IN ('present','late')").all(req.params.id);
-  const refund = db.prepare("UPDATE students_crm SET visits_left = visits_left + 1 WHERE user_id = ? AND status='active'");
   const txn = db.transaction(() => {
-    for (const p of present) refund.run(p.student_id);
+    for (const p of present) subscriptions.applyDelta({
+      studentId: p.student_id, delta: 1, type: 'refund', referenceType: 'lesson_delete',
+      referenceId: `${req.params.id}:${p.student_id}`, actorId: req.user.id, note: 'Удаление занятия',
+      allowInactive: true,
+    });
     db.prepare('DELETE FROM lesson_sessions WHERE id = ?').run(req.params.id);
   });
   txn();
@@ -93,7 +104,7 @@ router.get('/lesson-sessions/:id/attendance', (req, res) => {
    Тело: { lessonSessionId, records: [{studentId, status}] }
    Логика списания абонемента — см. ТЗ 3.2 / 3.4.
    ============================================================ */
-router.post('/attendance', (req, res) => {
+router.post('/attendance', validateBody(attendanceSchema), (req, res) => {
   const { lessonSessionId, records } = req.body || {};
   if (!lessonSessionId || !Array.isArray(records)) {
     return res.status(400).json({ error: 'lessonSessionId и массив records обязательны' });
@@ -104,6 +115,13 @@ router.post('/attendance', (req, res) => {
   if (req.user.role !== 'admin' && !hasPermission(req.user, 'conduct_lessons')) {
     return res.status(403).json({ error: 'Нет права отмечать посещаемость' });
   }
+  const malformed = records.filter(rec => !rec || !rec.studentId || !['present', 'absent', 'excused', 'late'].includes(rec.status));
+  if (malformed.length) return res.status(400).json({ error: 'Все записи посещаемости должны содержать корректные studentId и status' });
+  const membership = validateGroupStudents(db, ls.group_id, records.map(r => r.studentId), sessionTimestamp(ls.date));
+  if (!membership.valid) return res.status(400).json({
+    error: membership.duplicates.length ? 'Список посещаемости содержит дубликаты учеников' : 'Один или несколько учеников не состоят в этой группе',
+    invalidStudentIds: membership.duplicates.length ? membership.duplicates : membership.outsiders,
+  });
 
   const getPrev = db.prepare('SELECT status FROM attendance WHERE lesson_session_id = ? AND student_id = ?');
   const upsert = db.prepare(`
@@ -111,35 +129,28 @@ router.post('/attendance', (req, res) => {
     VALUES (?,?,?,?,?)
     ON CONFLICT(lesson_session_id, student_id) DO UPDATE SET status=excluded.status, marked_at=excluded.marked_at
   `);
-  const getCrm = db.prepare("SELECT status, visits_left FROM students_crm WHERE user_id = ?");
-  const decVisit = db.prepare("UPDATE students_crm SET visits_left = MAX(0, visits_left - 1) WHERE user_id = ?");
-  const incVisit = db.prepare("UPDATE students_crm SET visits_left = visits_left + 1 WHERE user_id = ?");
-
   const charged = [];
   const txn = db.transaction(() => {
     for (const rec of records) {
       const { studentId, status } = rec;
-      // Разрешённые статусы: present, absent, excused (уважительно), late (опоздал).
-      // «Опоздал» трактуется как присутствие для списания абонемента (см. ниже).
-      if (!studentId || !['present', 'absent', 'excused', 'late'].includes(status)) {
-        // Не «continue» молча — явно логируем, чтобы не было «сохранено» для брака.
-        console.warn('[attendance] пропущена запись: studentId=%s status=%s', studentId, status);
-        continue;
-      }
       const prev = getPrev.get(lessonSessionId, studentId);
       const prevStatus = prev ? prev.status : null;
       upsert.run(genId('att'), lessonSessionId, studentId, status, Date.now());
 
-      const crm = getCrm.get(studentId);
-      if (!crm) continue; // нет CRM-карточки — не списываем
       // Для списания «опоздал» (late) считаем присутствием — ученик всё-таки был на занятии.
       const isPresent = (s) => s === 'present' || s === 'late';
       // списание только для активных абонементов
       if (isPresent(status) && !isPresent(prevStatus)) {
-        if (crm.status === 'active') { decVisit.run(studentId); charged.push({ studentId, action: 'charged' }); }
+        const result = subscriptions.applyDelta({ studentId, delta: -1, type: 'attendance',
+          referenceType: 'lesson_session', referenceId: genId('charge'),
+          actorId: req.user.id, note: 'Посещение занятия' });
+        if (result.applied) charged.push({ studentId, action: 'charged', balance: result.balance });
       } else if (isPresent(prevStatus) && !isPresent(status)) {
         // возврат посещения при исправлении
-        if (crm.status === 'active') { incVisit.run(studentId); charged.push({ studentId, action: 'refunded' }); }
+        const result = subscriptions.applyDelta({ studentId, delta: 1, type: 'refund',
+          referenceType: 'attendance_correction', referenceId: genId('refund'),
+          actorId: req.user.id, note: 'Исправление посещаемости', allowInactive: true });
+        if (result.applied) charged.push({ studentId, action: 'refunded', balance: result.balance });
       }
     }
   });
@@ -215,7 +226,7 @@ function rowToHw(r) {
   };
 }
 
-router.post('/homework', (req, res) => {
+router.post('/homework', validateBody(homeworkSchema), (req, res) => {
   const { lessonSessionId, moduleId, taskIds, dueDate, studentIds } = req.body || {};
   if (!lessonSessionId) return res.status(400).json({ error: 'lessonSessionId обязателен' });
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
@@ -223,15 +234,18 @@ router.post('/homework', (req, res) => {
   if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
 
   const id = genId('hw');
-  db.prepare('INSERT INTO homework (id, lesson_session_id, module_id, task_ids, due_date, created_at) VALUES (?,?,?,?,?,?)')
-    .run(id, lessonSessionId, moduleId || null, taskIds && taskIds.length ? JSON.stringify(taskIds) : null, dueDate || null, Date.now());
-
   // назначения: конкретным ученикам или всей группе (по составу)
   let targets = Array.isArray(studentIds) && studentIds.length
-    ? studentIds
-    : db.prepare('SELECT DISTINCT student_id FROM group_members WHERE group_id = ?').all(ls.group_id).map(r => r.student_id);
+    ? [...new Set(studentIds.map(String))]
+    : activeMemberIds(db, ls.group_id, sessionTimestamp(ls.date));
+  const targetCheck = validateGroupStudents(db, ls.group_id, targets, sessionTimestamp(ls.date));
+  if (!targetCheck.valid) return res.status(400).json({ error: 'Домашнее задание содержит ученика не из этой группы', invalidStudentIds: targetCheck.outsiders });
   const insA = db.prepare('INSERT INTO homework_assignments (id, homework_id, student_id) VALUES (?,?,?)');
-  const txn = db.transaction(() => { for (const sid of targets) insA.run(genId('ha'), id, sid); });
+  const insertHomework = db.prepare('INSERT INTO homework (id, lesson_session_id, module_id, task_ids, due_date, created_at) VALUES (?,?,?,?,?,?)');
+  const txn = db.transaction(() => {
+    insertHomework.run(id, lessonSessionId, moduleId || null, taskIds && taskIds.length ? JSON.stringify(taskIds) : null, dueDate || null, Date.now());
+    for (const sid of targets) insA.run(genId('ha'), id, sid);
+  });
   txn();
 
   // уведомления ученикам (фаза 6, мягко — если таблица есть)
@@ -259,7 +273,7 @@ router.get('/homework', (req, res) => {
     return res.json(rows.map(rowToHw));
   }
   if (student_id) {
-    if (req.user.role === 'student' && req.user.id !== student_id) return res.status(403).json({ error: 'Недоступно' });
+    if (!canAccessStudent(db, req.user, student_id)) return res.status(403).json({ error: 'Недоступно' });
     const rows = db.prepare(`
       SELECT h.*, ls.group_id, ls.date AS session_date, m.title AS module_title
       FROM homework h

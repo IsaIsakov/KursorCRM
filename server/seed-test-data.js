@@ -13,6 +13,9 @@
    Запуск:  node server/seed-test-data.js
    ============================================================ */
 require('dotenv').config();
+if (process.env.NODE_ENV === 'production') {
+  throw new Error('Демонстрационные данные запрещено создавать в production');
+}
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 const { genId } = require('./util');

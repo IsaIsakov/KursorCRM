@@ -290,7 +290,7 @@ function openChangePassword() {
     <div class="modal" style="max-width:420px;width:100%">
       <h2>Сменить пароль</h2>
       <div class="form-group"><label>Старый пароль</label><input class="form-input" type="password" id="oldp"></div>
-      <div class="form-group"><label>Новый пароль (мин. 4 символа)</label><input class="form-input" type="password" id="newp"></div>
+      <div class="form-group"><label>Новый пароль (минимум 10 символов)</label><input class="form-input" type="password" id="newp" minlength="10"></div>
       <div id="cpMsg" style="color:#ef4444;font-weight:700;margin:8px 0;min-height:18px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end">
         <button class="btn btn-outline" id="cpCancel">Отмена</button>

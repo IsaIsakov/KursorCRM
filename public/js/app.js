@@ -31,7 +31,7 @@ function renderNavbar(activePage) {
   return `
   <nav class="navbar">
     <a class="navbar-logo" href="/index.html">
-      <img src="${KURSOR_DB.LOGO}" alt="KURSOR">
+      <span class="brand-wordmark brand-wordmark-light">KURSOR</span>
     </a>
     <div class="navbar-menu">
       ${links.map(l => `<a href="${l.href}" class="${l.key === activePage ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:8px"><img class="ic ic-20" src="${l.icon}" alt=""> <span data-i18n="${
@@ -119,6 +119,8 @@ function logout() {
 
 function showToast(msg, type='info') {
   const t = document.createElement('div');
+  t.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  t.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
   const bg = type==='success' ? '#10b981' : type==='error' ? '#ef4444' : type==='warning' ? '#f59e0b' : '#3b82f6';
   t.style.cssText = `position:fixed;top:80px;right:24px;background:${bg};color:white;padding:14px 22px;border-radius:12px;font-weight:700;z-index:9999;box-shadow:0 8px 30px rgba(0,0,0,0.2);animation:fadeIn 0.3s`;
   t.textContent = msg;
@@ -128,6 +130,7 @@ function showToast(msg, type='info') {
 }
 
 function fireConfetti() {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const colors = ['#fbbf24','#a855f7','#10b981','#3b82f6','#ec4899'];
   for (let i = 0; i < 80; i++) {
     const p = document.createElement('div');

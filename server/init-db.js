@@ -13,19 +13,35 @@ const db = require('./db');
 function seedAdmin() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
   if (count > 0) {
+    // Upgrade historic installations that still use the published admin/admin
+    // credentials: keep access, but force replacement immediately after login.
+    const legacy = db.prepare("SELECT id, password_hash, must_change_password FROM users WHERE role='admin' AND login='admin'").get();
+    const legacyPassword = legacy && bcrypt.compareSync('admin', legacy.password_hash);
+    const looksLikeDemo = count >= 50 && db.prepare("SELECT 1 FROM users WHERE login='teacher_aibek'").get();
+    if (process.env.NODE_ENV === 'production' && (legacyPassword || looksLikeDemo)) {
+      throw new Error('Обнаружены demo-данные или admin/admin. Production-запуск заблокирован: создайте чистую БД и импортируйте только реальные данные');
+    }
+    if (legacyPassword && !legacy.must_change_password) {
+      db.prepare('UPDATE users SET must_change_password=1 WHERE id=?').run(legacy.id);
+      console.warn('[init] Обнаружен старый admin/admin — обязательна смена пароля при следующем входе.');
+    }
     console.log(`[init] Пользователи уже есть в БД (${count}), админа не пересоздаю.`);
     return;
   }
   const login = process.env.SEED_ADMIN_LOGIN || 'admin';
   const password = process.env.SEED_ADMIN_PASSWORD || 'admin';
   const name = process.env.SEED_ADMIN_NAME || 'Администратор';
+  if (process.env.NODE_ENV === 'production') {
+    if (!process.env.SEED_ADMIN_LOGIN || !process.env.SEED_ADMIN_PASSWORD || password.length < 12 || password === 'admin') {
+      throw new Error('Для первой production-установки задайте SEED_ADMIN_LOGIN и уникальный SEED_ADMIN_PASSWORD длиной не менее 12 символов');
+    }
+  }
   const hash = bcrypt.hashSync(password, 10);
   db.prepare(`
-    INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, created_at)
-    VALUES (?, ?, ?, ?, 'admin', 0, 0, '[]', ?)
+    INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, must_change_password, created_at)
+    VALUES (?, ?, ?, ?, 'admin', 0, 0, '[]', 1, ?)
   `).run('admin_root', login, hash, name, Date.now());
-  console.log(`[init] ✅ Создан администратор: логин "${login}", пароль "${password}"`);
-  console.log('[init] ⚠️  ПОМЕНЯЙ ПАРОЛЬ ПОСЛЕ ПЕРВОГО ВХОДА!');
+  console.log(`[init] ✅ Создан администратор с логином "${login}". Требуется смена временного пароля.`);
 }
 
 function seedContent() {

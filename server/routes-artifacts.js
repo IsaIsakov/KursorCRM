@@ -9,9 +9,33 @@ const { authRequired } = require('./auth');
 const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
 const storage = require('./storage');
+const { z, id: idSchema, optionalText, validateBody } = require('./validation');
+const { validateGroupStudents, sessionTimestamp } = require('./group-scope');
+const { parseMultipart, isMultipart } = require('./multipart');
 
 const router = express.Router();
-router.use(authRequired);
+const artifactSchema = z.strictObject({
+  lessonSessionId: idSchema, studentId: idSchema, type: z.enum(['video','screenshot','file','link']),
+  title: optionalText(500), dataUrl: z.string().max(70 * 1024 * 1024).optional(),
+  url: z.string().url().max(2048).refine(v => /^https?:\/\//i.test(v), 'Разрешены только http/https ссылки').optional(),
+}).superRefine((v, ctx) => {
+  if (v.type === 'link' && !v.url) ctx.addIssue({ code: 'custom', path: ['url'], message: 'Для ссылки нужен url' });
+  if (v.type !== 'link' && !v.dataUrl) ctx.addIssue({ code: 'custom', path: ['dataUrl'], message: 'Для файла нужен dataUrl' });
+  if (v.type === 'link' && v.dataUrl) ctx.addIssue({ code: 'custom', path: ['dataUrl'], message: 'Для ссылки dataUrl не используется' });
+  if (v.type !== 'link' && v.url) ctx.addIssue({ code: 'custom', path: ['url'], message: 'Для файла url не используется' });
+});
+const artifactMultipartSchema = z.strictObject({
+  lessonSessionId: idSchema, studentId: idSchema, type: z.enum(['video','screenshot','file']),
+  title: optionalText(500),
+});
+const multipartArtifact = parseMultipart({ maxFileBytes: 50 * 1024 * 1024, maxFields: 8 });
+function validateArtifact(req, res, next) {
+  if (isMultipart(req)) {
+    if (!req.upload || !req.upload.size) return res.status(400).json({ error: 'Файл обязателен' });
+    return validateBody(artifactMultipartSchema)(req, res, next);
+  }
+  return validateBody(artifactSchema)(req, res, next);
+}
 
 const VIDEO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 const MAX_BYTES = 50 * 1024 * 1024;            // 50 МБ на файл (base64)
@@ -34,7 +58,7 @@ function rowToArtifact(r) {
     o.url = null;
     o.unavailable = r.type === 'video' ? 'Видео больше не доступно (срок хранения истёк)' : 'Файл удалён';
   } else {
-    o.url = r.url || (r.file_path ? storage.getUrl(r.file_path) : null);
+    o.url = r.url || (r.file_path ? storage.getUrl(r.id) : null);
   }
   return o;
 }
@@ -65,9 +89,33 @@ router.get('/', (req, res) => {
   res.json(filtered.map(rowToArtifact));
 });
 
-// POST — загрузка артефакта. Тело:
-//  { lessonSessionId, studentId, type, title?, dataUrl?, url? }
-router.post('/', (req, res) => {
+// Signed file delivery. The signature is issued only by an API response that
+// already checked the current user's role/relationship and expires quickly.
+router.get('/:id/content', (req, res) => {
+  if (!storage.verifyUrl(req.params.id, req.query.expires, req.query.signature)) {
+    return res.status(403).json({ error: 'Ссылка недействительна или истекла' });
+  }
+  const row = db.prepare('SELECT id, type, title, file_path, deleted, expires_at FROM session_artifacts WHERE id = ?').get(req.params.id);
+  if (!row || row.deleted || !row.file_path) return res.status(404).json({ error: 'Файл недоступен' });
+  if (row.type === 'video' && row.expires_at && row.expires_at < Date.now()) {
+    return res.status(410).json({ error: 'Срок хранения видео истёк' });
+  }
+  let full;
+  try { full = storage.resolveFile(row.file_path); }
+  catch { return res.status(400).json({ error: 'Некорректный путь файла' }); }
+  if (!full) return res.status(404).json({ error: 'Файл не найден' });
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.sendFile(full);
+});
+
+// All ordinary artifact operations require the HttpOnly session. The content
+// route above uses a short-lived signature for media elements.
+router.use(authRequired);
+
+// POST — multipart stream for files; JSON remains only for links and temporary
+// backwards compatibility with small legacy dataUrl clients.
+router.post('/', multipartArtifact, validateArtifact, (req, res) => {
   const { lessonSessionId, studentId, type, title, dataUrl, url } = req.body || {};
   if (!['admin', 'teacher', 'assistant'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
   if (!lessonSessionId || !studentId || !['video', 'screenshot', 'file', 'link'].includes(type)) {
@@ -76,6 +124,8 @@ router.post('/', (req, res) => {
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
   if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
   if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  const membership = validateGroupStudents(db, ls.group_id, [studentId], sessionTimestamp(ls.date));
+  if (!membership.valid) return res.status(400).json({ error: 'Ученик не состоит в группе этого занятия' });
   if (req.user.role !== 'admin' && !hasPermission(req.user, 'upload_artifacts')) {
     return res.status(403).json({ error: 'Нет права загружать материалы' });
   }
@@ -96,6 +146,22 @@ router.post('/', (req, res) => {
   if (type === 'link') {
     if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Для ссылки нужен корректный url (http/https)' });
     linkUrl = url;
+  } else if (req.upload) {
+    const mimeExt = {
+      'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+      'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
+      'application/pdf': 'pdf', 'text/plain': 'txt', 'application/zip': 'zip',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    };
+    if (type === 'video' && !req.upload.mime.startsWith('video/')) return res.status(400).json({ error: 'Для видео нужен видеофайл' });
+    if (type === 'screenshot' && !req.upload.mime.startsWith('image/')) return res.status(400).json({ error: 'Для скриншота нужно изображение' });
+    const ext = mimeExt[req.upload.mime] || 'bin';
+    const safeStudent = String(studentId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeSession = String(lessonSessionId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const rel = `sessions/${safeStudent}/${safeSession}/${id}.${ext}`;
+    storage.importFile(req.upload.tempPath, rel);
+    filePath = rel;
   } else {
     // dataUrl: "data:<mime>;base64,...."
     const m = /^data:([\w.+/-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');

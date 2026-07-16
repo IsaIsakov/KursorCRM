@@ -12,18 +12,18 @@
 <div class="login-page">
   <div class="login-box">
     <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><span id="langSlot"></span></div>
-    <img src="https://salamalekum.sirv.com/_1_1.png.webp" alt="Курсор" class="logo">
+    <div class="brand-wordmark" aria-label="KURSOR">KURSOR</div>
     <img class="mascot-lg" src="/uploads/mascot/happy.png" alt="Маскот КУРСОР" style="display:block;margin:0 auto 8px">
     <h1 data-i18n="dash.greeting">Привет!</h1>
     <p data-i18n="auth.title">Войди и начнём программировать!</p>
 
     <form id="loginForm">
       <div class="form-group">
-        <label data-i18n="auth.login_ph">Логин</label>
+        <label for="login" data-i18n="auth.login_ph">Логин</label>
         <input class="form-input" type="text" id="login" placeholder="твой логин" data-i18n-ph="auth.login_ph" required autofocus autocomplete="username">
       </div>
       <div class="form-group">
-        <label data-i18n="auth.password_ph">Пароль</label>
+        <label for="password" data-i18n="auth.password_ph">Пароль</label>
         <input class="form-input" type="password" id="password" placeholder="пароль" data-i18n-ph="auth.password_ph" required autocomplete="current-password">
       </div>
       <button type="submit" class="btn btn-lg" id="submitBtn" style="width:100%" data-i18n="auth.signin">Войти</button>
@@ -33,7 +33,7 @@
       Нет аккаунта? Попроси администратора создать его для тебя.
     </p>
 
-    <div id="msg" style="margin-top:14px;color:#ef4444;font-weight:700;text-align:center"></div>
+    <div id="msg" role="alert" aria-live="assertive" style="margin-top:14px;color:#ef4444;font-weight:700;text-align:center"></div>
   </div>
 </div>
 
@@ -45,8 +45,13 @@ document.getElementById('langSlot').innerHTML = I18N.switcherHtml();
 
 (function () {
   const u = API.getCurrentUser();
-  if (u && API.getToken()) redirectByRole(u.role);
+  if (u) API.refreshCurrentUser().then(redirectUser).catch(() => {});
 })();
+
+function redirectUser(user) {
+  if (user.mustChangePassword) location.href = '/change-password.html';
+  else redirectByRole(user.role);
+}
 
 function redirectByRole(role) {
   if (role === 'admin') location.href = '/admin/index.html';
@@ -65,7 +70,7 @@ document.getElementById('loginForm').addEventListener('submit', async function (
   btn.disabled = true; btn.textContent = I18N.t('common.loading');
   try {
     const user = await API.login(login, password);
-    redirectByRole(user.role);
+    redirectUser(user);
   } catch (err) {
     msg.textContent = err.message || I18N.t('auth.error');
     btn.disabled = false; btn.textContent = I18N.t('auth.signin');

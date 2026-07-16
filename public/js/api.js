@@ -2,20 +2,38 @@
    KURSOR — API-клиент (заменяет localStorage-Storage).
    ============================================================ */
 (function () {
-  const TOKEN_KEY = 'kursor_jwt';
+  const LEGACY_TOKEN_KEY = 'kursor_jwt';
   const USER_KEY = 'kursor_user_cache';
+  const CSRF_KEY = 'kursor_csrf';
+  // One-time migration: JWTs must never remain readable by JavaScript.
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
+
+  function csrfToken() {
+    const match = document.cookie.match(/(?:^|;\s*)(?:__Host-kursor_csrf|kursor_csrf)=([^;]+)/);
+    if (match) { try { return decodeURIComponent(match[1]); } catch {} }
+    return sessionStorage.getItem(CSRF_KEY) || '';
+  }
 
   async function request(method, url, body) {
-    const headers = { 'Content-Type': 'application/json' };
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-    const resp = await fetch(url, {
-      method, headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    const headers = isForm ? {} : { 'Content-Type': 'application/json' };
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers['X-CSRF-Token'] = csrfToken();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), isForm ? 120000 : 30000);
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method, headers, signal: controller.signal,
+        credentials: 'same-origin',
+        body: body !== undefined ? (isForm ? body : JSON.stringify(body)) : undefined,
+      });
+    } catch (error) {
+      if (error.name === 'AbortError') throw new Error('Сервер не ответил вовремя. Попробуйте ещё раз.');
+      throw new Error('Нет соединения с сервером. Проверьте интернет и повторите.');
+    } finally { clearTimeout(timeout); }
     if (resp.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
+      sessionStorage.removeItem(CSRF_KEY);
       if (!location.pathname.endsWith('/index.html') && location.pathname !== '/') {
         location.href = '/index.html';
       }
@@ -24,7 +42,11 @@
     let data = null;
     try { data = await resp.json(); } catch {}
     if (!resp.ok) {
-      const msg = (data && data.error) ? data.error : `Ошибка ${resp.status}`;
+      if (data && data.code === 'PASSWORD_CHANGE_REQUIRED' && !location.pathname.endsWith('/change-password.html')) {
+        location.href = '/change-password.html';
+      }
+      const detail = data && Array.isArray(data.details) && data.details[0] ? `: ${data.details[0].message}` : '';
+      const msg = (data && data.error) ? data.error + detail : `Ошибка ${resp.status}`;
       throw new Error(msg);
     }
     return data;
@@ -37,28 +59,40 @@
     del: (u) => request('DELETE', u),
   };
 
+  function multipart(data) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(data || {})) {
+      if (value === undefined || value === null) continue;
+      form.append(key, value);
+    }
+    return form;
+  }
+
   async function login(loginStr, password) {
-    const { token, user } = await API_.post('/api/auth/login', { login: loginStr, password });
-    localStorage.setItem(TOKEN_KEY, token);
+    const { user, csrfToken: csrf } = await API_.post('/api/auth/login', { login: loginStr, password });
+    if (csrf) sessionStorage.setItem(CSRF_KEY, csrf);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     return user;
   }
 
-  function getToken() { return localStorage.getItem(TOKEN_KEY); }
+  function getToken() { return null; }
 
   function getCurrentUser() {
     try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { return null; }
   }
 
   async function refreshCurrentUser() {
-    const { user } = await API_.get('/api/auth/me');
+    const { user, csrfToken: csrf } = await API_.get('/api/auth/me');
+    if (csrf) sessionStorage.setItem(CSRF_KEY, csrf);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     return user;
   }
 
   function logout() {
-    localStorage.removeItem(TOKEN_KEY);
+    const headers = { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() };
+    fetch('/api/auth/logout', { method: 'POST', headers, body: '{}', credentials: 'same-origin', keepalive: true }).catch(() => {});
     localStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(CSRF_KEY);
   }
 
   let _modules = null, _tasks = null, _users = null;
@@ -94,6 +128,7 @@
   const recordAttempt     = (taskId) => API_.post('/api/progress/attempt', { taskId });
   const recordComplete    = (taskId, points, usedHint, submission) =>
                               API_.post('/api/progress/complete', { taskId, points, usedHint, submission });
+  const reviewSubmission = (userId, taskId, approved) => API_.post('/api/progress/review/' + encodeURIComponent(userId) + '/' + encodeURIComponent(taskId), { approved });
 
 
   const getLesson      = (mid) => API_.get('/api/lessons/' + encodeURIComponent(mid));
@@ -115,10 +150,8 @@
   let _ws = null;
   function connectWS(onMessage) {
     if (_ws) try { _ws.close(); } catch {}
-    const token = getToken();
-    if (!token) return null;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    _ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+    _ws = new WebSocket(`${proto}://${location.host}/ws`);
     _ws.onmessage = (ev) => {
       try { onMessage(JSON.parse(ev.data)); } catch {}
     };
@@ -129,6 +162,9 @@
   function requireAuth(allowedRoles) {
     const u = getCurrentUser();
     if (!u) { location.href = '/index.html'; return null; }
+    if (u.mustChangePassword && !location.pathname.endsWith('/change-password.html')) {
+      location.href = '/change-password.html'; return null;
+    }
     if (allowedRoles && !allowedRoles.includes(u.role)) {
       alert('Доступ запрещён'); location.href = '/index.html'; return null;
     }
@@ -141,8 +177,8 @@
   const deleteFeedback = (id) => API_.del('/api/feedback/' + encodeURIComponent(id));
 
   const getMaterials   = (q) => API_.get('/api/materials' + (q ? ('?' + q) : ''));
-  const createMaterial = (data) => API_.post('/api/materials', data);
-  const updateMaterial = (id, data) => API_.put('/api/materials/' + encodeURIComponent(id), data);
+  const createMaterial = (data) => data && data.file ? request('POST', '/api/materials', multipart(data)) : API_.post('/api/materials', data);
+  const updateMaterial = (id, data) => data && data.file ? request('PUT', '/api/materials/' + encodeURIComponent(id), multipart(data)) : API_.put('/api/materials/' + encodeURIComponent(id), data);
   const deleteMaterial = (id) => API_.del('/api/materials/' + encodeURIComponent(id));
 
   const getCourseAccess    = (q) => API_.get('/api/teacher-course-access' + (q ? ('?' + q) : ''));
@@ -200,7 +236,7 @@
 
   /* ---------- Фаза 4: артефакты занятий ---------- */
   const getArtifacts    = (q) => API_.get('/api/session-artifacts' + (q ? ('?' + q) : ''));
-  const createArtifact  = (data) => API_.post('/api/session-artifacts', data);
+  const createArtifact  = (data) => data && data.file ? request('POST', '/api/session-artifacts', multipart(data)) : API_.post('/api/session-artifacts', data);
   const deleteArtifact  = (id) => API_.del('/api/session-artifacts/' + encodeURIComponent(id));
 
   /* ---------- Фаза 5: родительский кабинет ---------- */
@@ -222,9 +258,8 @@
     return '/api/export/' + dataset + '?format=' + (format || 'csv');
   }
   async function exportDownload(dataset, format) {
-    const token = getToken();
     const resp = await fetch(exportUrl(dataset, format), {
-      headers: token ? { Authorization: 'Bearer ' + token } : {},
+      credentials: 'same-origin',
     });
     if (!resp.ok) throw new Error('Ошибка экспорта (' + resp.status + ')');
     const blob = await resp.blob();
@@ -251,7 +286,7 @@
     createModule, updateModule, deleteModule,
     createTask, updateTask, deleteTask,
     getMyProgress, getAllProgress, getUserProgress,
-    recordAttempt, recordComplete,
+    recordAttempt, recordComplete, reviewSubmission,
     uploadAvatar, deleteAvatar,
     getLesson, listLessons, setIntroStep, submitMiniTask,
     connectWS, _request: request,

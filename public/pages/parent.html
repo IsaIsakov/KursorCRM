@@ -819,7 +819,7 @@ function emptyState(mascot, title, sub) {
 // Extend API if needed
 if (!window.API.get) {
   window.API.get = (url) => fetch(url, {
-    headers: { 'Authorization': 'Bearer ' + API.getToken() }
+    credentials: 'same-origin'
   }).then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); return d; });
 }
 </script>

@@ -2,38 +2,69 @@
    KURSOR — WebSocket: учителя/админы получают live-обновления
    ============================================================ */
 const { WebSocketServer } = require('ws');
-const { verifyToken } = require('./auth');
+const { verifyToken, tokenFromCookie } = require('./auth');
 const db = require('./db');
+const { canAccessStudent } = require('./access-scope');
+const { originAllowed } = require('./http-security');
 
 let wss = null;
+const MAX_CONNECTIONS_PER_SOURCE = 20;
+const MAX_TOTAL_CONNECTIONS = 1000;
+const sourceConnections = new Map();
 
 function recipientsForStudent(studentId) {
-  const student = db.prepare('SELECT teacher_id FROM users WHERE id = ?').get(studentId);
   const allowed = new Set();
   allowed.add(studentId);
-  if (student && student.teacher_id) allowed.add(student.teacher_id);
-  const everyone = db.prepare("SELECT id, role FROM users WHERE role IN ('admin','teacher')").all();
-  for (const u of everyone) {
-    if (u.role === 'admin') allowed.add(u.id);
-    if (u.role === 'teacher' && (!student || !student.teacher_id)) allowed.add(u.id);
-  }
+  const candidates = db.prepare("SELECT id, role FROM users WHERE role IN ('admin','teacher','assistant')").all();
+  for (const user of candidates) if (canAccessStudent(db, user, studentId)) allowed.add(user.id);
   return allowed;
 }
 
 function init(server) {
-  wss = new WebSocketServer({ server, path: '/ws' });
+  wss = new WebSocketServer({
+    server, path: '/ws',
+    maxPayload: 16 * 1024,
+    perMessageDeflate: false,
+    verifyClient(info, done) {
+      const allowed = process.env.NODE_ENV !== 'production'
+        ? originAllowed(info.origin)
+        : (!!info.origin && originAllowed(info.origin)) || (!info.origin && process.env.API_AUTH_BEARER === 'true');
+      done(allowed, allowed ? 200 : 403, 'Origin not allowed');
+    },
+  });
   wss.on('connection', (socket, req) => {
+    const source = req.socket.remoteAddress || 'unknown';
+    const count = sourceConnections.get(source) || 0;
+    if (wss.clients.size > MAX_TOTAL_CONNECTIONS || count >= MAX_CONNECTIONS_PER_SOURCE) {
+      socket.close(1013, 'capacity');
+      return;
+    }
+    sourceConnections.set(source, count + 1);
+    socket.once('close', () => {
+      const next = (sourceConnections.get(source) || 1) - 1;
+      if (next <= 0) sourceConnections.delete(source); else sourceConnections.set(source, next);
+    });
+    socket.on('error', () => {});
     const url = new URL(req.url, 'http://localhost');
-    const token = url.searchParams.get('token');
+    // Browsers authenticate the same-origin upgrade with the HttpOnly cookie.
+    // Query tokens remain opt-in for non-browser legacy clients only.
+    const queryToken = process.env.API_AUTH_BEARER === 'true' ? url.searchParams.get('token') : null;
+    const token = tokenFromCookie(req.headers.cookie) || queryToken;
     const payload = token ? verifyToken(token) : null;
     if (!payload) {
       socket.send(JSON.stringify({ type: 'error', error: 'unauthorized' }));
       socket.close();
       return;
     }
-    socket.userId = payload.sub;
-    socket.role = payload.role;
-    socket.send(JSON.stringify({ type: 'hello', userId: payload.sub, role: payload.role }));
+    const current = db.prepare('SELECT id, role, must_change_password FROM users WHERE id=?').get(payload.sub);
+    if (!current || current.must_change_password) {
+      socket.send(JSON.stringify({ type: 'error', error: 'unauthorized' }));
+      socket.close();
+      return;
+    }
+    socket.userId = current.id;
+    socket.role = current.role;
+    socket.send(JSON.stringify({ type: 'hello', userId: current.id, role: current.role }));
 
     socket.on('message', (raw) => {
       try {
@@ -56,4 +87,10 @@ function broadcastProgress(studentId, progress) {
   });
 }
 
-module.exports = { init, broadcastProgress };
+function close() {
+  if (!wss) return;
+  for (const client of wss.clients) try { client.close(1001, 'server shutdown'); } catch {}
+  wss.close(); wss = null; sourceConnections.clear();
+}
+
+module.exports = { init, close, broadcastProgress };

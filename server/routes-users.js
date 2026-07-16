@@ -6,12 +6,29 @@ const path = require('path');
 const fs = require('fs');
 const db = require('./db');
 const { authRequired, requireRole, hashPassword } = require('./auth');
+const { isAcceptablePassword } = require('./security-config');
+const { accessibleStudentIds } = require('./access-scope');
+const { z, id: idSchema, text, validateBody } = require('./validation');
 
 const router = express.Router();
 router.use(authRequired);
 
 // Допустимые роли (CHECK на уровне БД снят — валидируем здесь)
 const ROLES = ['admin', 'teacher', 'assistant', 'student', 'parent'];
+const roleSchema = z.enum(ROLES);
+const languagesSchema = z.array(z.string().trim().min(1).max(50)).max(30);
+const createUserSchema = z.strictObject({
+  name: text(200), login: text(100), password: z.string().min(10).max(1024), role: roleSchema,
+  age: z.coerce.number().int().min(0).max(130).optional(), group: z.coerce.number().int().min(0).max(1000000).optional(),
+  languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(),
+});
+const updateUserSchema = z.strictObject({
+  name: text(200).optional(), login: text(100).optional(), password: z.string().min(10).max(1024).optional(), role: roleSchema.optional(),
+  age: z.coerce.number().int().min(0).max(130).optional(), group: z.coerce.number().int().min(0).max(1000000).optional(),
+  languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(),
+}).refine(v => Object.keys(v).length > 0, 'Нужно передать хотя бы одно поле');
+const avatarSchema = z.strictObject({ dataUrl: z.string().min(32).max(3_000_000) });
+const childrenSchema = z.strictObject({ children: z.array(idSchema).max(500) });
 
 const AVATARS_DIR = path.join(__dirname, '..', 'public', 'uploads', 'avatars');
 if (!fs.existsSync(AVATARS_DIR)) fs.mkdirSync(AVATARS_DIR, { recursive: true });
@@ -42,23 +59,22 @@ function randomId() {
 }
 
 router.get('/', (req, res) => {
-  if (req.user.role === 'student') {
-    return res.json([rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id))]);
+  if (req.user.role === 'admin') {
+    return res.json(db.prepare('SELECT * FROM users ORDER BY role, name').all().map(rowToUser));
   }
-  const rows = db.prepare('SELECT * FROM users ORDER BY role, name').all();
+  const allowed = new Set([req.user.id, ...accessibleStudentIds(db, req.user)]);
+  const rows = [...allowed].map(id => db.prepare('SELECT * FROM users WHERE id=?').get(id)).filter(Boolean);
   res.json(rows.map(rowToUser));
 });
 
-router.get('/students', requireRole('teacher', 'admin'), (req, res) => {
+router.get('/students', requireRole('teacher', 'assistant', 'admin'), (req, res) => {
   let rows;
-  if (req.user.role === 'teacher') {
-    rows = db.prepare(`
-      SELECT * FROM users
-      WHERE role='student' AND (teacher_id IS NULL OR teacher_id = ?)
-      ORDER BY name
-    `).all(req.user.id);
-  } else {
+  if (req.user.role === 'admin') {
     rows = db.prepare("SELECT * FROM users WHERE role='student' ORDER BY name").all();
+  } else {
+    rows = accessibleStudentIds(db, req.user)
+      .map(id => db.prepare("SELECT * FROM users WHERE id=? AND role='student'").get(id))
+      .filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   }
   const q = (req.query.q || '').toString().trim().toLowerCase();
   if (q) {
@@ -71,9 +87,10 @@ router.get('/students', requireRole('teacher', 'admin'), (req, res) => {
   res.json(rows.map(rowToUser));
 });
 
-router.post('/', requireRole('admin'), (req, res) => {
+router.post('/', requireRole('admin'), validateBody(createUserSchema), (req, res) => {
   const { name, login, password, role, age, group, languages, teacher_id } = req.body || {};
   if (!name || !login || !password) return res.status(400).json({ error: 'Имя, логин, пароль обязательны' });
+  if (!isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 10 символов' });
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'Некорректная роль' });
 
   const exists = db.prepare('SELECT 1 FROM users WHERE login = ?').get(String(login).trim());
@@ -81,8 +98,8 @@ router.post('/', requireRole('admin'), (req, res) => {
 
   const id = randomId();
   db.prepare(`
-    INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, teacher_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, teacher_id, must_change_password, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
   `).run(
     id, String(login).trim(), hashPassword(password), String(name).trim(), role,
     parseInt(age) || 0, parseInt(group) || 0,
@@ -95,7 +112,7 @@ router.post('/', requireRole('admin'), (req, res) => {
   res.status(201).json(rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', validateBody(updateUserSchema), (req, res) => {
   const targetId = req.params.id;
   const isAdmin = req.user.role === 'admin';
   const isSelf = req.user.id === targetId;
@@ -105,6 +122,7 @@ router.put('/:id', (req, res) => {
   if (!cur) return res.status(404).json({ error: 'Пользователь не найден' });
 
   const { name, password, age, group, languages, role, teacher_id, login } = req.body || {};
+  if (!isAdmin && password) return res.status(400).json({ error: 'Используйте защищённую форму смены пароля' });
   const patch = {
     name: name !== undefined ? String(name).trim() : cur.name,
     age: age !== undefined ? (parseInt(age) || 0) : cur.age,
@@ -128,12 +146,14 @@ router.put('/:id', (req, res) => {
     patch.teacher_id = cur.teacher_id;
   }
 
+  if (password && !isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 10 символов' });
   const passwordHash = password ? hashPassword(password) : cur.password_hash;
+  const mustChangePassword = password ? 1 : (cur.must_change_password || 0);
 
   db.prepare(`
-    UPDATE users SET login=?, password_hash=?, name=?, role=?, age=?, group_id=?, languages=?, teacher_id=?
+    UPDATE users SET login=?, password_hash=?, name=?, role=?, age=?, group_id=?, languages=?, teacher_id=?, must_change_password=?
     WHERE id=?
-  `).run(patch.login, passwordHash, patch.name, patch.role, patch.age, patch.group_id, patch.languages, patch.teacher_id, targetId);
+  `).run(patch.login, passwordHash, patch.name, patch.role, patch.age, patch.group_id, patch.languages, patch.teacher_id, mustChangePassword, targetId);
 
   res.json(rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(targetId)));
 });
@@ -158,7 +178,7 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
    POST /api/users/:id/avatar   — боди { dataUrl: "data:image/png;base64,..." }
    DELETE /api/users/:id/avatar — удалить
    ============================================================ */
-router.post('/:id/avatar', (req, res) => {
+router.post('/:id/avatar', validateBody(avatarSchema), (req, res) => {
   if (req.user.id !== req.params.id) {
     return res.status(403).json({ error: 'Менять аватарку может только владелец аккаунта' });
   }
@@ -220,7 +240,7 @@ router.get('/:id/children', requireRole('admin'), (req, res) => {
 });
 
 // PUT /api/users/:id/children — установить список детей (заменяет всё)
-router.put('/:id/children', requireRole('admin'), (req, res) => {
+router.put('/:id/children', requireRole('admin'), validateBody(childrenSchema), (req, res) => {
   const parentId = req.params.id;
   const parent = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'parent'").get(parentId);
   if (!parent) return res.status(400).json({ error: 'Пользователь не является родителем' });

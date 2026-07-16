@@ -355,7 +355,7 @@ async function recordCompleteSafe(taskId, pts, usedHint, submission) {
   if (user.role !== 'student') return { ok: true };
   try {
     state.progress = await API.recordComplete(taskId, pts, usedHint, submission);
-    return { ok: true };
+    return { ok: true, reviewRequired: !!state.progress.reviewRequired };
   } catch (e) {
     console.error('recordComplete failed:', e);
     return { ok: false, error: e && e.message ? e.message : String(e) };
@@ -480,7 +480,8 @@ async function checkAnswer() {
   if (correct) {
     let pts = points[task.type];
     if (!state.hintUsed) pts += 5;
-    const r = await recordCompleteSafe(task.id, pts, state.hintUsed);
+    const serverSubmission = task.type === 'order' ? JSON.stringify(userAnswer) : userAnswer;
+    const r = await recordCompleteSafe(task.id, pts, state.hintUsed, serverSubmission);
     if (!r.ok) {
       showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.');
       return;
@@ -537,7 +538,7 @@ async function runPython(autoCheck = false) {
       const correct = normalize(result) === normalize(expected);
       if (correct) {
         let pts = 25; if (!state.hintUsed) pts += 5;
-        const r = await recordCompleteSafe(task.id, pts, state.hintUsed);
+        const r = await recordCompleteSafe(task.id, pts, state.hintUsed, code);
         if (!r.ok) {
           showFeedback(false, 'Ошибка сохранения прогресса: ' + r.error + '. Очки не зачтены, попробуй ещё раз.');
         } else {

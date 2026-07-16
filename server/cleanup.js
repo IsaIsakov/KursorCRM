@@ -8,6 +8,7 @@
 const db = require('./db');
 const storage = require('./storage');
 const { genId } = require('./util');
+let timer = null;
 
 function cleanupExpiredVideos() {
   try {
@@ -63,9 +64,12 @@ function runAll() {
 }
 
 function start() {
+  if (timer) return;
   runAll(); // при старте
-  setInterval(runAll, 24 * 60 * 60 * 1000); // раз в сутки
+  timer = setInterval(runAll, 24 * 60 * 60 * 1000); // раз в сутки
+  timer.unref();
   console.log('[cleanup] Фоновые задачи запущены (раз в сутки).');
 }
+function stop() { if (timer) clearInterval(timer); timer = null; }
 
-module.exports = { start, runAll, cleanupExpiredVideos, generateNotifications };
+module.exports = { start, stop, runAll, cleanupExpiredVideos, generateNotifications };

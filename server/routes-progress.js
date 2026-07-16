@@ -5,6 +5,9 @@ const express = require('express');
 const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const ws = require('./ws');
+const { gradeTask } = require('./task-grader');
+const { accessibleStudentIds, canAccessStudent } = require('./access-scope');
+const { gradeCode, consumeRunnerQuota } = require('./code-runner');
 
 const router = express.Router();
 router.use(authRequired);
@@ -56,19 +59,14 @@ router.get('/leaderboard', (req, res) => {
   })));
 });
 
-router.get('/', requireRole('teacher', 'admin'), (req, res) => {
-  let students;
-  if (req.user.role === 'teacher') {
-    students = db.prepare(`
-      SELECT id FROM users WHERE role='student' AND (teacher_id IS NULL OR teacher_id = ?)
-    `).all(req.user.id);
-  } else {
-    students = db.prepare("SELECT id FROM users WHERE role='student'").all();
-  }
-  res.json(students.map(s => buildProgress(s.id)));
+router.get('/', requireRole('teacher', 'assistant', 'admin'), (req, res) => {
+  res.json(accessibleStudentIds(db, req.user).map(id => buildProgress(id)));
 });
 
-router.get('/:userId', requireRole('teacher', 'admin'), (req, res) => {
+router.get('/:userId', requireRole('teacher', 'assistant', 'admin'), (req, res) => {
+  const student = db.prepare("SELECT id FROM users WHERE id=? AND role='student'").get(req.params.userId);
+  if (!student) return res.status(404).json({ error: 'Ученик не найден' });
+  if (!canAccessStudent(db, req.user, req.params.userId)) return res.status(403).json({ error: 'Ученик не относится к вашим группам' });
   res.json(buildProgress(req.params.userId));
 });
 
@@ -98,13 +96,46 @@ router.post('/attempt', requireRole('student'), (req, res) => {
   res.json(progress);
 });
 
-router.post('/complete', requireRole('student'), (req, res) => {
+router.post('/complete', requireRole('student'), async (req, res, next) => {
+ try {
   const { taskId, points, usedHint, submission } = req.body || {};
   if (!taskId) return res.status(400).json({ error: 'taskId обязателен' });
   const tid = parseInt(taskId);
 
-  const task = db.prepare('SELECT id, type FROM tasks WHERE id = ?').get(tid);
+  const task = db.prepare('SELECT id, type, answer, items, expected_output, stdin FROM tasks WHERE id = ?').get(tid);
   if (!task) return res.status(404).json({ error: 'Задача не найдена' });
+
+  // Объективные задания всегда перепроверяются сервером. Раньше браузер сам
+  // сообщал, что ответ верный, поэтому ученик мог начислить баллы прямым API-запросом.
+  const grade = gradeTask(task, submission);
+  if (grade.gradable && !grade.correct) {
+    return res.status(422).json({ error: 'Ответ неверный', correct: false });
+  }
+  if (['code', 'java', 'cpp'].includes(task.type)) {
+    if (!task.expected_output) return res.status(400).json({ error: 'Для задачи не настроен ожидаемый вывод' });
+    const quota = consumeRunnerQuota(req.user.id);
+    if (!quota.allowed) { res.setHeader('Retry-After', String(quota.retryAfter)); return res.status(429).json({ error: 'Слишком много запусков кода. Попробуйте позже' }); }
+    const codeGrade = await gradeCode(task, submission);
+    if (!codeGrade.correct) return res.status(422).json({ error: codeGrade.error ? 'Код завершился с ошибкой' : 'Вывод программы не совпадает', correct: false });
+  }
+
+  // Creative work cannot be honestly auto-graded. Store it for review without
+  // marking completion or awarding points.
+  const needsReview = ['project', 'scratch'].includes(task.type) || (['htmlcss', 'blockly'].includes(task.type) && !grade.gradable);
+  if (needsReview) {
+    if (typeof submission !== 'string' || submission.trim().length < 5) return res.status(400).json({ error: 'Опишите работу подробнее' });
+    const userId = req.user.id;
+    ensureProgress(userId);
+    db.prepare(`INSERT INTO task_progress (user_id,task_id,status,points,attempts,used_hint,submission,completed_at,updated_at)
+      VALUES (?,?,'progress',0,1,?,?,?,?)
+      ON CONFLICT(user_id,task_id) DO UPDATE SET status='progress', points=0,
+      attempts=attempts+1, used_hint=excluded.used_hint, submission=excluded.submission,
+      completed_at=excluded.completed_at, updated_at=excluded.updated_at`)
+      .run(userId, tid, usedHint ? 1 : 0, submission.trim(), Date.now(), Date.now());
+    const pending = buildProgress(userId); pending.reviewRequired = true;
+    ws.broadcastProgress(userId, pending);
+    return res.json(pending);
+  }
 
   // Серверная политика начисления очков — не доверяем клиенту
   const POINTS = { quiz: 10, fill: 15, order: 20, code: 25, project: 50 };
@@ -161,6 +192,29 @@ router.post('/complete', requireRole('student'), (req, res) => {
   const progress = buildProgress(userId);
   ws.broadcastProgress(userId, progress);
   res.json(progress);
+ } catch (error) { next(error); }
+});
+
+router.post('/review/:userId/:taskId', requireRole('teacher', 'assistant', 'admin'), (req, res) => {
+  const { userId, taskId } = req.params;
+  if (!canAccessStudent(db, req.user, userId)) return res.status(403).json({ error: 'Ученик не относится к вашим группам' });
+  const task = db.prepare('SELECT id,type FROM tasks WHERE id=?').get(Number(taskId));
+  if (!task || !['project', 'scratch', 'htmlcss', 'blockly'].includes(task.type)) return res.status(400).json({ error: 'Эта работа не требует ручной проверки' });
+  const item = db.prepare("SELECT * FROM task_progress WHERE user_id=? AND task_id=? AND status='progress' AND submission IS NOT NULL").get(userId, Number(taskId));
+  if (!item) return res.status(404).json({ error: 'Работа на проверку не найдена' });
+  const approved = req.body && req.body.approved === true;
+  if (approved) {
+    const points = ({ project: 50, scratch: 40, htmlcss: 25, blockly: 25 })[task.type];
+    db.transaction(() => {
+      db.prepare("UPDATE task_progress SET status='done',points=?,updated_at=? WHERE user_id=? AND task_id=?").run(points, Date.now(), userId, Number(taskId));
+      db.prepare('UPDATE progress SET points=points+?,last_active=? WHERE user_id=?').run(points, Date.now(), userId);
+    })();
+  } else {
+    db.prepare("UPDATE task_progress SET submission=NULL,completed_at=NULL,updated_at=? WHERE user_id=? AND task_id=?").run(Date.now(), userId, Number(taskId));
+  }
+  const progress = buildProgress(userId);
+  ws.broadcastProgress(userId, progress);
+  res.json({ ok: true, approved, progress });
 });
 
 module.exports = router;

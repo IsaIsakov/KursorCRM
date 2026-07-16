@@ -6,6 +6,8 @@ const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
+const { accessibleStudentIds, canAccessStudent } = require('./access-scope');
+const { validateGroupStudents, sessionTimestamp } = require('./group-scope');
 
 const router = express.Router();
 router.use(authRequired);
@@ -29,6 +31,7 @@ function rowToFeedback(r) {
 // student видит только свои и только is_internal=0; parent — через /api/parent.
 router.get('/', (req, res) => {
   const { student_id, teacher_id } = req.query;
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
   const where = [];
   const params = [];
 
@@ -40,9 +43,10 @@ router.get('/', (req, res) => {
     where.push('f.student_id = ?'); params.push(req.user.id);
     where.push('f.is_internal = 0');
   } else if (req.user.role === 'teacher' || req.user.role === 'assistant') {
-    // учитель видит отзывы по своим ученикам (teacher_id ученика = он) или написанные им
-    where.push('(f.teacher_id = ? OR EXISTS (SELECT 1 FROM users u WHERE u.id=f.student_id AND u.teacher_id = ?))');
-    params.push(req.user.id, req.user.id);
+    const ids = accessibleStudentIds(db, req.user);
+    if (!ids.length) return res.json([]);
+    where.push(`f.student_id IN (${ids.map(() => '?').join(',')})`);
+    params.push(...ids);
   } else if (req.user.role === 'parent') {
     return res.status(403).json({ error: 'Используйте /api/parent/feedback' });
   }
@@ -52,9 +56,9 @@ router.get('/', (req, res) => {
     FROM feedback f
     LEFT JOIN users t ON t.id = f.teacher_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY f.created_at DESC
+    ORDER BY f.created_at DESC LIMIT ?
   `;
-  res.json(db.prepare(sql).all(...params).map(rowToFeedback));
+  res.json(db.prepare(sql).all(...params, limit).map(rowToFeedback));
 });
 
 // Создать отзыв — teacher/assistant (с правом write_feedback) или admin
@@ -69,8 +73,17 @@ router.post('/', (req, res) => {
   if (!studentId || !text || !['lesson', 'course', 'general'].includes(type)) {
     return res.status(400).json({ error: 'studentId, корректный type и text обязательны' });
   }
-  const student = db.prepare("SELECT id FROM users WHERE id = ?").get(studentId);
+  const student = db.prepare("SELECT id FROM users WHERE id = ? AND role='student'").get(studentId);
   if (!student) return res.status(404).json({ error: 'Ученик не найден' });
+  if (req.user.role !== 'admin' && !canAccessStudent(db, req.user, studentId)) {
+    return res.status(403).json({ error: 'Ученик не относится к вашим группам' });
+  }
+  if (lessonSessionId) {
+    const lesson = db.prepare('SELECT group_id, date FROM lesson_sessions WHERE id=?').get(lessonSessionId);
+    if (!lesson) return res.status(404).json({ error: 'Занятие не найдено' });
+    const membership = validateGroupStudents(db, lesson.group_id, [studentId], sessionTimestamp(lesson.date));
+    if (!membership.valid) return res.status(400).json({ error: 'Ученик не состоит в группе этого занятия' });
+  }
 
   const id = genId('fb');
   db.prepare(`
@@ -85,10 +98,10 @@ router.post('/', (req, res) => {
   res.status(201).json(rowToFeedback(row));
 });
 
-router.delete('/:id', requireRole('admin', 'teacher'), (req, res) => {
+router.delete('/:id', requireRole('admin', 'teacher', 'assistant'), (req, res) => {
   const fb = db.prepare('SELECT * FROM feedback WHERE id = ?').get(req.params.id);
   if (!fb) return res.status(404).json({ error: 'Не найден' });
-  if (req.user.role === 'teacher' && fb.teacher_id !== req.user.id) {
+  if (req.user.role !== 'admin' && fb.teacher_id !== req.user.id) {
     return res.status(403).json({ error: 'Можно удалять только свои отзывы' });
   }
   db.prepare('DELETE FROM feedback WHERE id = ?').run(req.params.id);

@@ -13,6 +13,9 @@ if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
+db.pragma('synchronous = NORMAL');
+db.pragma('temp_store = MEMORY');
 
 // HOTFIX: добавляем group_id если нет (старые базы на Railway)
 try {
@@ -24,6 +27,10 @@ try {
   if (_uc.length && !_uc.some(c => c.name === 'avatar_url')) {
     db.prepare("ALTER TABLE users ADD COLUMN avatar_url TEXT").run();
     console.log('[db] HOTFIX: добавлена колонка avatar_url');
+  }
+  if (_uc.length && !_uc.some(c => c.name === 'must_change_password')) {
+    db.prepare("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0").run();
+    console.log('[db] HOTFIX: добавлена колонка must_change_password');
   }
 } catch(e) { console.error('[db] HOTFIX error:', e.message); }
 
@@ -38,6 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
   group_id      INTEGER DEFAULT 0,
   languages     TEXT DEFAULT '[]',
   teacher_id    TEXT,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
   FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -225,7 +233,7 @@ try {
   if (needsRoleMigration) {
     const oldCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
     const wantCols = ['id','login','password_hash','name','role','age','group_id',
-                      'languages','teacher_id','avatar_url','created_at'];
+                      'languages','teacher_id','avatar_url','must_change_password','created_at'];
     const copyCols = wantCols.filter(c => oldCols.includes(c)).join(',');
     // ВАЖНО: db.exec() с DDL нельзя запускать внутри db.transaction() в better-sqlite3 —
     // это создаёт транзакцию внутри транзакции и роняет миграцию с ошибкой, оставляя
@@ -253,12 +261,14 @@ try {
       languages     TEXT DEFAULT '[]',
       teacher_id    TEXT,
       avatar_url    TEXT,
+      must_change_password INTEGER NOT NULL DEFAULT 0,
       created_at    INTEGER NOT NULL,
       FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE SET NULL
     )`);
      // Убедиться что group_id есть в users_old перед копированием
 try { db.exec('ALTER TABLE users_old ADD COLUMN group_id INTEGER DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE users_old ADD COLUMN avatar_url TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE users_old ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
      
     db.exec(`INSERT INTO users (${copyCols}) SELECT ${copyCols} FROM users_old`);
     db.exec(`DROP TABLE users_old`);
@@ -944,5 +954,108 @@ try {
   console.error('[db] Ошибка миграции attendance:', e.message);
 }
 
+// Subscriptions are first-class records. students_crm.visits_left remains
+// a compatibility cache for the existing UI; subscription_transactions is the
+// authoritative, append-only history of every balance change.
+db.exec(`
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  tariff_id TEXT,
+  starts_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  visits_total INTEGER NOT NULL CHECK(visits_total >= 0),
+  status TEXT NOT NULL CHECK(status IN ('active','frozen','expired','cancelled')),
+  created_by TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (tariff_id) REFERENCES tariffs(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_student ON subscriptions(student_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status, expires_at);
+
+CREATE TABLE IF NOT EXISTS subscription_transactions (
+  id TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  delta INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL CHECK(balance_after >= 0),
+  type TEXT NOT NULL CHECK(type IN ('issue','attendance','refund','adjustment','migration')),
+  reference_type TEXT,
+  reference_id TEXT,
+  actor_id TEXT,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE RESTRICT,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sub_tx_subscription ON subscription_transactions(subscription_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sub_tx_student ON subscription_transactions(student_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_tx_reference
+  ON subscription_transactions(subscription_id, type, reference_type, reference_id)
+  WHERE reference_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS subscription_transactions_no_update BEFORE UPDATE ON subscription_transactions
+BEGIN SELECT RAISE(ABORT, 'subscription transactions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS subscription_transactions_no_delete BEFORE DELETE ON subscription_transactions
+BEGIN SELECT RAISE(ABORT, 'subscription transactions are append-only'); END;
+
+CREATE TABLE IF NOT EXISTS subscription_payments (
+  id TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK(amount > 0),
+  currency TEXT NOT NULL DEFAULT 'KZT',
+  method TEXT NOT NULL CHECK(method IN ('cash','card','transfer','other')),
+  status TEXT NOT NULL DEFAULT 'paid' CHECK(status IN ('paid','refunded','void')),
+  paid_at INTEGER NOT NULL,
+  created_by TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE RESTRICT,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sub_payments_subscription ON subscription_payments(subscription_id, paid_at DESC);
+
+CREATE TABLE IF NOT EXISTS subscription_freezes (
+  id TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL,
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER,
+  reason TEXT,
+  created_by TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sub_freezes_subscription ON subscription_freezes(subscription_id, starts_at DESC);
+`);
+
+// Append-only security/business audit trail. Triggers prevent accidental or
+// malicious rewriting through any future route that receives the db handle.
+db.exec(`
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  actor_id TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  status_code INTEGER NOT NULL,
+  source_hash TEXT,
+  request_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id, created_at DESC);
+CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+`);
+
+// Every subsequent schema change must be registered here. The runner records
+// an immutable checksum and applies each version atomically.
+require('./migrations').runMigrations(db);
 
 module.exports = db;

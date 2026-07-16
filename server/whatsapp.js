@@ -4,6 +4,7 @@
    ============================================================ */
 const db = require('./db');
 const { genId } = require('./util');
+const { decrypt } = require('./settings-crypto');
 
 /* ---- Нормализация номера ---- */
 function normalizePhone(raw) {
@@ -25,7 +26,10 @@ function normalizePhone(raw) {
 function getSettings() {
   try {
     const row = db.prepare("SELECT value FROM app_settings WHERE key='whatsapp'").get();
-    return row ? JSON.parse(row.value) : {};
+    if (!row) return {};
+    const value = JSON.parse(row.value);
+    value.apiToken = decrypt(value.apiToken);
+    return value;
   } catch { return {}; }
 }
 
@@ -207,6 +211,8 @@ function formatWeekday(n) {
 
 /* ---- Планировщик (проверяет время каждую минуту) ---- */
 let _schedulerInterval = null;
+let _schedulerRunning = false;
+let _lastScheduledKey = null;
 function startScheduler() {
   if (_schedulerInterval) return;
   _schedulerInterval = setInterval(async () => {
@@ -214,11 +220,17 @@ function startScheduler() {
     if (!cfg.enabled) return;
     const now = new Date();
     if (now.getHours() === (cfg.sendHour ?? 18) && now.getMinutes() === (cfg.sendMinute ?? 0)) {
+      const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
+      if (_schedulerRunning || _lastScheduledKey === key) return;
+      _schedulerRunning = true; _lastScheduledKey = key;
       console.log('[whatsapp] Запуск по расписанию...');
       try { await sendWhatsAppReminders(); } catch (e) { console.error('[whatsapp] Ошибка планировщика:', e.message); }
+      finally { _schedulerRunning = false; }
     }
   }, 60 * 1000);
+  _schedulerInterval.unref();
   console.log('[whatsapp] Планировщик запущен (проверка каждую минуту).');
 }
+function stopScheduler() { if (_schedulerInterval) clearInterval(_schedulerInterval); _schedulerInterval = null; _schedulerRunning = false; }
 
-module.exports = { sendWhatsAppReminders, sendTestMessage, normalizePhone, startScheduler, getInstanceState };
+module.exports = { sendWhatsAppReminders, sendTestMessage, normalizePhone, startScheduler, stopScheduler, getInstanceState };

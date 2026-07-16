@@ -11,7 +11,7 @@
 <div class="admin-layout">
   <aside class="admin-sidebar">
     <div class="logo">
-      <img src="https://salamalekum.sirv.com/_1_1.png.webp" alt="KURSOR" style="height:36px;background:white;border-radius:8px;padding:4px;">
+      <span class="brand-wordmark brand-wordmark-light" aria-label="KURSOR">KURSOR</span>
     </div>
     <div id="navLangSlot" style="padding:0 16px 12px"></div>
     <div class="nav-search">
@@ -314,7 +314,7 @@ async function openUserForm(id) {
     <div class="form-group"><label>Логин</label><input class="form-input" id="f_login" value="${escapeHtml(u.login||'')}" placeholder="aliya"></div>
     <div class="form-group">
       <label>Пароль ${id ? '<small style="color:#64748b">(оставь пустым, чтобы не менять)</small>' : ''}</label>
-      <input class="form-input" id="f_password" type="text" value="" placeholder="${id ? 'не менять' : 'минимум 4 символа'}">
+      <input class="form-input" id="f_password" type="password" value="" placeholder="${id ? 'не менять' : 'минимум 10 символов'}" autocomplete="new-password">
     </div>
     <div class="form-group"><label>Роль</label>
       <select class="form-input" id="f_role" onchange="toggleStudentFields()">
@@ -455,6 +455,7 @@ async function saveUser(id) {
   err.textContent = '';
   if (!data.name || !data.login) { err.textContent = 'Введи имя и логин'; return; }
   if (!id && !pwd) { err.textContent = 'Пароль обязателен при создании'; return; }
+  if (pwd && pwd.length < 10) { err.textContent = 'Временный пароль должен содержать минимум 10 символов'; return; }
   try {
     let savedId = id;
     if (id) await API.updateUser(id, data);
@@ -893,22 +894,14 @@ async function saveMaterial(id) {
   };
   const err = document.getElementById('modalErr');
   if (!data.title) { err.textContent = I18N.t('common.error'); return; }
-  // Если выбран файл — читаем его в base64 dataUrl и отправляем
+  // Файл отправляется потоковым multipart-запросом, без base64-копии в памяти.
   const fileInput = document.getElementById('mt_file');
   const file = fileInput && fileInput.files && fileInput.files[0];
   if (file) {
     if (file.size > 50 * 1024 * 1024) { err.textContent = 'Файл больше 50 МБ'; return; }
     err.textContent = 'Загрузка файла…';
-    try {
-      data.dataUrl = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result);
-        r.onerror = () => reject(new Error('Не удалось прочитать файл'));
-        r.readAsDataURL(file);
-      });
-      data.fileName = file.name;
-      if (data.type === 'text') data.type = 'file'; // файл не может быть типом «текст»
-    } catch (e) { err.textContent = e.message; return; }
+    data.file = file;
+    if (data.type === 'text') data.type = 'file'; // файл не может быть типом «текст»
   }
   try {
     if (id) await API.updateMaterial(id, data); else await API.createMaterial(data);
@@ -1667,15 +1660,9 @@ async function uploadArtifact(studentId, kind, inputEl) {
   const type = kind === 'video' ? 'video' : (file.type.startsWith('image/') ? 'screenshot' : 'file');
   err.textContent = I18N.t('session.uploading');
   try {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(r.result);
-      r.onerror = () => reject(new Error('Не удалось прочитать файл'));
-      r.readAsDataURL(file);
-    });
     const art = await API.createArtifact({
       lessonSessionId: _lesson.sessionId, studentId, type,
-      title: desc || null, dataUrl,
+      title: desc || null, file,
     });
     _lesson.artifacts.push(art);
     refreshArtList(studentId);
@@ -1917,7 +1904,7 @@ async function renderWhatsapp() {
         </div>
         <div class="form-group">
           <label>API Token</label>
-          <input class="form-input" id="wa_tok" type="password" placeholder="••••••••••••" value="${escapeHtml(cfg.apiToken||'')}">
+          <input class="form-input" id="wa_tok" type="password" placeholder="${cfg.apiTokenConfigured?'Токен сохранён — оставьте пустым':'Введите API token'}" value="">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-group">

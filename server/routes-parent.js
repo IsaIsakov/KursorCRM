@@ -120,7 +120,7 @@ router.get('/artifacts/:studentId', guard, (req, res) => {
     id: r.id, type: r.type, title: r.title || null, sessionDate: r.session_date || null,
     topic: r.topic || '', createdAt: r.created_at, expiresAt: r.expires_at || null,
     deleted: !!r.deleted, isImage: !r.deleted && isImageArtifact(r),
-    url: r.deleted ? null : (r.url || (r.file_path ? storage.getUrl(r.file_path) : null)),
+    url: r.deleted ? null : (r.url || (r.file_path ? storage.getUrl(r.id) : null)),
     unavailable: r.deleted ? (r.type === 'video' ? 'Видео больше не доступно (срок хранения истёк)' : 'Файл удалён') : null,
   })));
 });
@@ -151,7 +151,7 @@ router.get('/feed/:studentId', guard, (req, res) => {
       id: a.id, type: a.type, title: a.title || null,
       createdAt: a.created_at, expiresAt: a.expires_at || null,
       deleted: !!a.deleted, isImage: !a.deleted && isImageArtifact(a),
-      url: a.deleted ? null : (a.url || (a.file_path ? storage.getUrl(a.file_path) : null)),
+      url: a.deleted ? null : (a.url || (a.file_path ? storage.getUrl(a.id) : null)),
       unavailable: a.deleted ? (a.type === 'video' ? 'Видео больше не доступно (срок хранения истёк)' : 'Файл удалён') : null,
     };
   }

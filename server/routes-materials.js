@@ -3,11 +3,13 @@
    /api/materials, /api/teacher-course-access
    ============================================================ */
 const express = require('express');
+const path = require('path');
 const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
 const storage = require('./storage');
+const { parseMultipart } = require('./multipart');
 
 const MAT_MAX_BYTES = 50 * 1024 * 1024; // 50 МБ на файл материала
 // Разрешённые расширения для загружаемых файлов материалов
@@ -22,8 +24,14 @@ const MAT_EXT = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
   'text/plain': 'txt', 'application/zip': 'zip',
 };
+const multipartMaterial = parseMultipart({ maxFileBytes: MAT_MAX_BYTES, maxFields: 10 });
 
-// Декодирует dataUrl и сохраняет файл материала. Возвращает публичный URL.
+function materialContent(r) {
+  return r.content && r.content.startsWith('materials/') ? `/api/materials/${encodeURIComponent(r.id)}/content` : (r.content || '');
+}
+
+// Legacy path for small old clients. The current frontend uses multipart and
+// never creates a base64 copy of a file in browser/server memory.
 function saveMaterialFile(dataUrl, matId, fileName) {
   const m = /^data:([\w.+/-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');
   if (!m) throw { code: 400, msg: 'Ожидается dataUrl с base64-содержимым файла' };
@@ -46,7 +54,7 @@ router.use(authRequired);
 function rowToMaterial(r) {
   return {
     id: r.id, courseId: r.course_id, type: r.type, title: r.title,
-    content: r.content || '', createdBy: r.created_by, createdAt: r.created_at,
+    content: materialContent(r), createdBy: r.created_by, createdAt: r.created_at,
     courseTitle: r.course_title || null,
   };
 }
@@ -98,7 +106,19 @@ router.get('/materials', (req, res) => {
   res.json(rows.map(rowToMaterial));
 });
 
-router.post('/materials', (req, res) => {
+router.get('/materials/:id/content', (req, res) => {
+  const row = db.prepare('SELECT * FROM materials WHERE id=?').get(req.params.id);
+  if (!row || !row.content || !row.content.startsWith('materials/')) return res.status(404).json({ error: 'Файл не найден' });
+  if (req.user.role !== 'admin' && !teacherHasActiveAccess(req.user.id, row.course_id)) return res.status(403).json({ error: 'Нет доступа к материалу' });
+  let full;
+  try { full = storage.resolveFile(row.content); } catch { return res.status(400).json({ error: 'Некорректный путь' }); }
+  if (!full) return res.status(404).json({ error: 'Файл не найден' });
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.download(full, path.basename(full));
+});
+
+router.post('/materials', multipartMaterial, (req, res) => {
   const { courseId, type, title, content, dataUrl, fileName } = req.body || {};
   if (!['admin', 'teacher', 'assistant'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Недостаточно прав' });
@@ -117,7 +137,12 @@ router.post('/materials', (req, res) => {
   const id = genId('mat');
   // Если передан файл (dataUrl) — сохраняем его и кладём публичный URL в content.
   let finalContent = content || '';
-  if (dataUrl) {
+  if (req.upload) {
+    const ext = MAT_EXT[req.upload.mime];
+    if (!ext) return res.status(400).json({ error: 'Тип файла не разрешён' });
+    const rel = `materials/${id}.${ext}`;
+    storage.importFile(req.upload.tempPath, rel); finalContent = rel;
+  } else if (dataUrl) {
     try { finalContent = saveMaterialFile(dataUrl, id, fileName); }
     catch (e) { return res.status(e.code || 400).json({ error: e.msg || 'Ошибка загрузки файла' }); }
   }
@@ -128,7 +153,7 @@ router.post('/materials', (req, res) => {
   res.status(201).json(rowToMaterial(db.prepare('SELECT * FROM materials WHERE id = ?').get(id)));
 });
 
-router.put('/materials/:id', (req, res) => {
+router.put('/materials/:id', multipartMaterial, (req, res) => {
   const cur = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найден' });
   if (req.user.role !== 'admin') {
@@ -136,8 +161,15 @@ router.put('/materials/:id', (req, res) => {
     if (!teacherHasActiveAccess(req.user.id, cur.course_id)) return res.status(403).json({ error: 'Нет активного доступа к этому курсу' });
   }
   const { type, title, content, dataUrl, fileName } = req.body || {};
-  let finalContent = content !== undefined ? content : cur.content;
-  if (dataUrl) {
+  const currentDownloadUrl = `/api/materials/${encodeURIComponent(req.params.id)}/content`;
+  let finalContent = content !== undefined && content !== currentDownloadUrl ? content : cur.content;
+  if (req.upload) {
+    const ext = MAT_EXT[req.upload.mime];
+    if (!ext) return res.status(400).json({ error: 'Тип файла не разрешён' });
+    if (cur.content && cur.content.startsWith('materials/')) storage.deleteFile(cur.content);
+    const rel = `materials/${req.params.id}.${ext}`;
+    storage.importFile(req.upload.tempPath, rel); finalContent = rel;
+  } else if (dataUrl) {
     try { finalContent = saveMaterialFile(dataUrl, req.params.id, fileName); }
     catch (e) { return res.status(e.code || 400).json({ error: e.msg || 'Ошибка загрузки файла' }); }
   }
@@ -157,6 +189,7 @@ router.delete('/materials/:id', (req, res) => {
     if (!hasPermission(req.user, 'edit_materials')) return res.status(403).json({ error: 'Нет права редактировать материалы' });
     if (!teacherHasActiveAccess(req.user.id, cur.course_id)) return res.status(403).json({ error: 'Нет активного доступа к этому курсу' });
   }
+  if (cur.content && cur.content.startsWith('materials/')) storage.deleteFile(cur.content);
   db.prepare('DELETE FROM materials WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

@@ -25,6 +25,7 @@ const { authRequired } = require('./auth');
 const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
 const { sendWhatsAppReminders, sendTestMessage, getInstanceState } = require('./whatsapp');
+const { encrypt, decrypt } = require('./settings-crypto');
 
 const router = express.Router();
 router.use(authRequired);
@@ -77,19 +78,27 @@ router.get('/state', async (req, res) => {
 router.get('/settings', (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
   const row = db.prepare("SELECT value FROM app_settings WHERE key = 'whatsapp'").get();
-  res.json(row ? JSON.parse(row.value) : {
+  const value = row ? JSON.parse(row.value) : {
     enabled: false, instanceId: '', apiToken: '', sendHour: 18, sendMinute: 0,
     daysAhead: 1, sendOnlyActive: true,
-  });
+  };
+  let configured = false;
+  try { configured = !!decrypt(value.apiToken); } catch {}
+  delete value.apiToken;
+  res.json({ ...value, apiTokenConfigured: configured });
 });
 
 router.put('/settings', (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
   const s = req.body || {};
+  const previousRow = db.prepare("SELECT value FROM app_settings WHERE key='whatsapp'").get();
+  const previous = previousRow ? JSON.parse(previousRow.value) : {};
+  const suppliedToken = String(s.apiToken || '').trim();
+  const storedToken = suppliedToken ? encrypt(suppliedToken) : (previous.apiToken || '');
   const val = JSON.stringify({
     enabled:        !!s.enabled,
     instanceId:     String(s.instanceId || '').trim(),
-    apiToken:       String(s.apiToken || '').trim(),
+    apiToken:       storedToken,
     sendHour:       Math.max(0, Math.min(23, parseInt(s.sendHour) || 18)),
     sendMinute:     Math.max(0, Math.min(59, parseInt(s.sendMinute) || 0)),
     daysAhead:      Math.max(0, Math.min(7, parseInt(s.daysAhead) || 1)),

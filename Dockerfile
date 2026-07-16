@@ -4,7 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM node:22-bookworm-slim
-ENV NODE_ENV=production PORT=3000 DB_PATH=/data/kursor.sqlite FILE_STORAGE_DIR=/data/files BACKUP_DIR=/data/backups
+ENV NODE_ENV=production PORT=3000 PERSISTENT_DATA_DIR=/data DB_PATH=/data/kursor.sqlite FILE_STORAGE_DIR=/data/files BACKUP_DIR=/data/backups REQUIRE_PERSISTENT_STORAGE=true
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --chown=node:node . .

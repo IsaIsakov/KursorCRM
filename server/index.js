@@ -4,6 +4,7 @@
 require('dotenv').config();
 // Fail closed before touching the database or starting background jobs.
 require('./security-config').assertSecurityConfig();
+const persistence = require('./persistence-config').assertPersistenceConfig();
 
 const path = require('path');
 const fs = require('fs');
@@ -65,7 +66,7 @@ app.get('/api/ready', (_req, res) => {
     const latest = require('./migrations').MIGRATIONS.at(-1).version;
     if (version !== latest) throw new Error(`schema ${version}/${latest}`);
     fs.accessSync(require('./storage').PRIVATE_ROOT, fs.constants.R_OK | fs.constants.W_OK);
-    res.json({ status: 'ready', schemaVersion: version });
+    res.json({ status: 'ready', schemaVersion: version, persistentDataRoot: persistence.root });
   } catch (error) {
     logger.error('readiness_failed', { message: error.message });
     res.status(503).json({ status: 'not_ready' });
@@ -84,6 +85,7 @@ app.use('/api/session-artifacts', require('./routes-artifacts'));
 app.use('/api/parent',            require('./routes-parent'));
 app.use('/api/notifications',     require('./routes-notifications'));
 app.use('/api/whatsapp',          require('./routes-whatsapp'));
+app.use('/api',                   require('./routes-onboarding'));
 app.use('/api', require('./routes-materials'));       // /api/materials, /api/teacher-course-access
 app.use('/api', require('./routes-crm'));             // /api/branches, /api/tariffs, /api/groups, /api/students-crm
 app.use('/api', require('./routes-subscriptions'));   // /api/subscriptions, payments, freezes, ledger
@@ -146,7 +148,8 @@ try { whatsapp.startScheduler(); } catch (e) { console.error('[whatsapp] пла�
 const backup = require('./backup');
 try { backup.startScheduler(); } catch (e) { console.error('[backup] планировщик не запущен:', e.message); }
 
-server.requestTimeout = 120_000;
+// 150 MB lesson videos from mobile connections may take several minutes.
+server.requestTimeout = 10 * 60_000;
 server.headersTimeout = 65_000;
 server.keepAliveTimeout = 60_000;
 

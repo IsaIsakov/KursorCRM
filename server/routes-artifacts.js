@@ -12,6 +12,7 @@ const storage = require('./storage');
 const { z, id: idSchema, optionalText, validateBody } = require('./validation');
 const { validateGroupStudents, sessionTimestamp } = require('./group-scope');
 const { parseMultipart, isMultipart } = require('./multipart');
+const { notifyParentAboutArtifact } = require('./whatsapp');
 
 const router = express.Router();
 const artifactSchema = z.strictObject({
@@ -28,7 +29,8 @@ const artifactMultipartSchema = z.strictObject({
   lessonSessionId: idSchema, studentId: idSchema, type: z.enum(['video','screenshot','file']),
   title: optionalText(500),
 });
-const multipartArtifact = parseMultipart({ maxFileBytes: 50 * 1024 * 1024, maxFields: 8 });
+const ARTIFACT_MAX_BYTES = 150 * 1024 * 1024;
+const multipartArtifact = parseMultipart({ maxFileBytes: ARTIFACT_MAX_BYTES, maxFields: 8 });
 function validateArtifact(req, res, next) {
   if (isMultipart(req)) {
     if (!req.upload || !req.upload.size) return res.status(400).json({ error: 'Файл обязателен' });
@@ -38,7 +40,7 @@ function validateArtifact(req, res, next) {
 }
 
 const VIDEO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
-const MAX_BYTES = 50 * 1024 * 1024;            // 50 МБ на файл (base64)
+const MAX_BYTES = ARTIFACT_MAX_BYTES;           // 150 МБ на файл
 
 function canManageGroup(user, groupId) {
   if (user.role === 'admin') return true;
@@ -169,7 +171,7 @@ router.post('/', multipartArtifact, validateArtifact, (req, res) => {
     let buf;
     try { buf = Buffer.from(m[2], 'base64'); } catch { return res.status(400).json({ error: 'Некорректный base64' }); }
     if (!buf.length) return res.status(400).json({ error: 'Пустой файл' });
-    if (buf.length > MAX_BYTES) return res.status(413).json({ error: 'Файл больше 50 МБ' });
+    if (buf.length > MAX_BYTES) return res.status(413).json({ error: 'Файл больше 150 МБ' });
     const mime = m[1];
     const ext = (mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin';
     const safeStudent = String(studentId).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -183,6 +185,20 @@ router.post('/', multipartArtifact, validateArtifact, (req, res) => {
     (id, lesson_session_id, student_id, type, title, file_path, url, created_at, expires_at, deleted)
     VALUES (?,?,?,?,?,?,?,?,?,0)`)
     .run(id, lessonSessionId, studentId, type, title || null, filePath, linkUrl, now, expiresAt);
+
+  const student = db.prepare(`SELECT u.name,sc.parent_name,sc.parent_phone FROM users u
+    LEFT JOIN students_crm sc ON sc.user_id=u.id WHERE u.id=?`).get(studentId);
+  const parents = db.prepare('SELECT parent_id FROM parent_children WHERE student_id=?').all(studentId);
+  const notificationText = type === 'video'
+    ? `Опубликован видеоотчёт с занятия ${student?.name || ''}`
+    : `Опубликована новая работа с занятия ${student?.name || ''}`;
+  const insertNotification = db.prepare(`INSERT INTO notifications (id,user_id,type,text,link,channel,read,created_at)
+    VALUES (?,?, 'lesson_report', ?, '/pages/parent.html', 'in_app', 0, ?)`);
+  for (const parent of parents) insertNotification.run(genId('ntf'), parent.parent_id, notificationText, now);
+  // Загрузка не должна завершаться ошибкой из-за внешнего WhatsApp API.
+  if (student?.parent_phone) setImmediate(() => notifyParentAboutArtifact({ phone:student.parent_phone,
+    studentName:student.name, parentName:student.parent_name, artifactType:type, sessionDate:ls.date })
+    .catch(error => console.error('[whatsapp] Не удалось уведомить об отчёте:', error.message)));
 
   const row = db.prepare(`
     SELECT sa.*, ls.date AS session_date, ls.topic FROM session_artifacts sa

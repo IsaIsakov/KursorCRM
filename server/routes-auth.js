@@ -84,6 +84,8 @@ router.post('/change-password', authRequired, validateBody(changePasswordSchema)
     return res.status(401).json({ error: 'Старый пароль неверен' });
   }
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(newPassword), req.user.id);
+  // A temporary password must never remain revealable after the owner changes it.
+  db.prepare('UPDATE account_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(Date.now(), req.user.id);
   res.json({ ok: true });
 });
 

@@ -49,7 +49,7 @@
       'lb.its_you': 'это ты!', 'lb.no_participants': 'Пока нет участников',
       'lb.tasks': 'задач', 'lb.days': 'дн.', 'lb.badges': 'значков',
 
-      'admin.dashboard': 'Обзор', 'admin.users': 'Пользователи', 'admin.modules': 'Модули',
+      'admin.dashboard': 'Обзор', 'admin.users': 'Пользователи', 'admin.modules': 'Модули', 'admin.sales': 'Продажи и задачи',
       'admin.tasks': 'Задачи', 'admin.materials': 'Материалы', 'admin.branches': 'Филиалы',
       'admin.tariffs': 'Тарифы', 'admin.groups': 'Группы', 'admin.clients': 'Клиенты (CRM)',
       'admin.permissions': 'Права доступа', 'admin.sessions': 'Журнал занятий',
@@ -183,7 +183,7 @@
       'lb.its_you': 'бұл сенсің!', 'lb.no_participants': 'Әзірге қатысушы жоқ',
       'lb.tasks': 'тапсырма', 'lb.days': 'күн', 'lb.badges': 'төсбелгі',
 
-      'admin.dashboard': 'Шолу', 'admin.users': 'Пайдаланушылар', 'admin.modules': 'Модульдер',
+      'admin.dashboard': 'Шолу', 'admin.users': 'Пайдаланушылар', 'admin.modules': 'Модульдер', 'admin.sales': 'Сату және міндеттер',
       'admin.tasks': 'Тапсырмалар', 'admin.materials': 'Материалдар', 'admin.branches': 'Филиалдар',
       'admin.tariffs': 'Тарифтер', 'admin.groups': 'Топтар', 'admin.clients': 'Клиенттер (CRM)',
       'admin.permissions': 'Қол жеткізу құқықтары', 'admin.sessions': 'Сабақ журналы',

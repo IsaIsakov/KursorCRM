@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 5);
+  assert.equal((await ready.json()).schemaVersion, 6);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -54,6 +54,11 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   await api('POST', '/api/auth/change-password', { oldPassword: 'admin', newPassword: 'Admin-test-2026!' });
   const branch = (await api('POST', '/api/branches', { name: 'E2E branch', address: '' }, 201)).body;
   const tariff = (await api('POST', '/api/tariffs', { name: 'E2E tariff', visitsCount: 4, durationDays: 30, price: 10000 }, 201)).body;
+  const lead = (await api('POST', '/api/crm/leads', { childName:'Lead Child', parentName:'Lead Parent', phone:'+77770000000', status:'new' }, 201)).body;
+  await api('PUT', `/api/crm/leads/${lead.id}`, { status:'trial', nextContactAt:Date.now()+86400000 });
+  const crmTask = (await api('POST', '/api/crm/tasks', { title:'Confirm trial lesson', leadId:lead.id, dueAt:Date.now()+3600000 }, 201)).body;
+  await api('PUT', `/api/crm/tasks/${crmTask.id}`, { status:'done' });
+  assert.equal((await api('GET','/api/crm/overview')).body.leads.trial, 1);
   const student = (await api('POST', '/api/users', { name: 'E2E Student', login: `student_${port}`, password: 'Student-2026!', role: 'student', languages: [] }, 201)).body;
 
   // Routers mounted at /api must not apply admin guards to unrelated student
@@ -77,6 +82,17 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
     tariffId: tariff.id, subscriptionIssuedAt: Date.now(), videoConsent: true }, 201);
   const modules = (await api('GET', '/api/modules')).body;
   const group = (await api('POST', '/api/groups', { name: 'E2E group', branchId: branch.id, courseId: modules[0].id }, 201)).body;
+  const onboarded = (await api('POST', '/api/import/clients', { format: 'json', data: [{
+    student_name: 'Тестовый Ребёнок', parent_name: 'Тестовый Родитель', parent_phone: '+7 777 123 45 67',
+    branch_id: branch.id, tariff_id: tariff.id, group_id: group.id, languages: 'python', video_consent: 'да',
+  }] })).body;
+  assert.equal(onboarded.created, 1);
+  assert.equal(onboarded.credentials.length, 1);
+  assert.ok(onboarded.credentials[0].student.password.length >= 10);
+  assert.ok(onboarded.credentials[0].parent.password.length >= 10);
+  const generatedCredentials = (await api('GET', `/api/client-credentials?student_id=${encodeURIComponent(onboarded.credentials[0].studentId)}`)).body;
+  assert.equal(generatedCredentials.length, 2);
+
   await api('POST', `/api/groups/${group.id}/members`, { studentId: student.id, since: Date.now() - 1000 }, 201);
   const lesson = (await api('POST', '/api/lesson-sessions', { groupId: group.id, date: Date.now(), topic: 'Integration' }, 201)).body;
   await api('POST', '/api/attendance', { lessonSessionId: lesson.id, records: [{ studentId: student.id, status: 'present' }] });

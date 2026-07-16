@@ -53,6 +53,7 @@ const NAV_ICONS = {
   branches:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="4" r="2"/><circle cx="4" cy="16" r="2"/><circle cx="16" cy="16" r="2"/><path d="M10 6v3M10 9l-4 5M10 9l4 5"/></svg>`,
   tariffs:       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="16" height="11" rx="2"/><path d="M2 9h16"/><path d="M6 13h.01M9 13h3"/></svg>`,
   clients:       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="7" r="3"/><path d="M2 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M14 6a3 3 0 0 1 0 6M18 17c0-2.2-1.3-4.1-3.2-5"/></svg>`,
+  sales:         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 16V9h4v7M8 16V5h4v11M13 16V2h4v14"/><path d="M2 18h16"/></svg>`,
   groups:        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="2.5"/><path d="M5.5 17c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5"/><circle cx="3.5" cy="8" r="1.8"/><path d="M1 16c0-1.9 1.1-3.2 2.5-3.2"/><circle cx="16.5" cy="8" r="1.8"/><path d="M19 16c0-1.9-1.1-3.2-2.5-3.2"/></svg>`,
   sessions:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="14" height="13" rx="2"/><path d="M3 8h14M7 2v2M13 2v2M7 12h2M11 12h2M7 15h2"/></svg>`,
   homework:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h5l5 5v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4z"/><path d="M7 11h6M7 14h4"/></svg>`,
@@ -79,6 +80,7 @@ const NAV_GROUPS = [
   { id:'crm', titleKey:'admin.grp_crm', adminOnly:true, items:[
     { tab:'branches', i18n:'admin.branches', iconKey:'branches', adminOnly:true },
     { tab:'tariffs', i18n:'admin.tariffs', iconKey:'tariffs', adminOnly:true },
+    { tab:'sales', i18n:'admin.sales', iconKey:'sales', adminOnly:true },
     { tab:'clients', i18n:'admin.clients', iconKey:'clients', adminOnly:true },
   ]},
   { id:'whatsapp_grp', titleKey:'admin.grp_whatsapp', show:() => isAdmin || (userPerms && userPerms.manage_whatsapp), items:[
@@ -166,7 +168,7 @@ async function loadBase(force) {
 }
 
 // Какие вкладки требуют базовый кэш (users/modules/tasks/progress)
-const BASE_TABS = ['dashboard','users','modules','tasks','materials','access','permissions','groups','sessions','homework','clients'];
+const BASE_TABS = ['dashboard','users','modules','tasks','materials','access','permissions','groups','sessions','homework','sales','clients'];
 
 const TAB_RENDERERS = {
   dashboard: () => renderDashboard(),
@@ -180,6 +182,7 @@ const TAB_RENDERERS = {
   tariffs: () => renderTariffs(),
   groups: () => renderGroups(),
   clients: () => renderClients(),
+  sales: () => renderSales(),
   permissions: () => renderPermissions(),
   sessions: () => renderSessions(),
   homework: () => renderHomeworkAdmin(),
@@ -809,8 +812,8 @@ function openImport(dataset) {
 function parseImportInput() {
   const raw = document.getElementById('imp_data').value.trim();
   if (!raw) throw new Error('Пусто');
-  if (raw[0] === '[' || raw[0] === '{') { return { json: JSON.parse(raw) }; }
-  return { csv: raw };
+  if (raw[0] === '[' || raw[0] === '{') { return { format:'json', data:JSON.parse(raw) }; }
+  return { format:'csv', data:raw };
 }
 async function runImport(dataset, dryRun) {
   const err = document.getElementById('modalErr');
@@ -820,7 +823,7 @@ async function runImport(dataset, dryRun) {
     const r = await API.importData(dataset, payload, dryRun);
     if (dryRun) {
       document.getElementById('imp_preview').innerHTML =
-        `<div class="card" style="padding:12px">Всего строк: <b>${r.total}</b> · Новых: <b>${r.toCreate}</b> · Обновлений: <b>${r.toUpdate}</b>` +
+        `<div class="card" style="padding:12px">Всего строк: <b>${r.total}</b> · Новых: <b>${r.toCreate ?? r.created ?? r.items?.length ?? 0}</b> · Обновлений: <b>${r.toUpdate ?? 0}</b>` +
         (r.errors && r.errors.length ? `<div style="color:#ef4444;margin-top:6px">Ошибок: ${r.errors.length}<br>${r.errors.slice(0,5).map(e=>escapeHtml(JSON.stringify(e))).join('<br>')}</div>` : '') + `</div>`;
     } else {
       closeModal(); showToast(I18N.t('common.saved'),'success'); _baseLoaded=false; await render();
@@ -1203,14 +1206,79 @@ async function removeGroupSchedule(gid, sid) {
   try { await API.deleteSchedule(gid, sid); openGroupDetail(gid); } catch (e) { alert(e.message); }
 }
 
+// ---------- Продажи и задачи CRM ----------
+const LEAD_LABELS = { new:'Новая', contacted:'Связались', trial:'Пробное занятие', decision:'Решение', won:'Зачислен', lost:'Отказ' };
+async function renderSales() {
+  const [overview, leads, tasks] = await Promise.all([API.getCrmOverview(), API.getCrmLeads(), API.getCrmTasks()]);
+  window._crmLeads = leads; window._crmTasks = tasks;
+  const columns = Object.keys(LEAD_LABELS);
+  tabEl().innerHTML = `
+    <div class="page-head"><div><h1>Продажи и задачи</h1><p>Воронка обращений и ежедневная очередь менеджера</p></div>
+      <div class="head-actions"><button class="btn btn-outline" onclick="openCrmTaskForm()">+ Задача</button><button class="btn" onclick="openLeadForm()">+ Заявка</button></div></div>
+    <div class="stats-grid crm-stats">
+      <div class="stat-card"><div><div class="stat-value">${overview.activeStudents}</div><div class="stat-label">Активных учеников</div></div></div>
+      <div class="stat-card"><div><div class="stat-value">${overview.openTasks}</div><div class="stat-label">Открытых задач</div></div></div>
+      <div class="stat-card ${overview.overdueTasks?'stat-alert':''}"><div><div class="stat-value">${overview.overdueTasks}</div><div class="stat-label">Просрочено</div></div></div>
+      <div class="stat-card"><div><div class="stat-value">${overview.expiringSubscriptions}</div><div class="stat-label">Абонементы истекают за 7 дней</div></div></div>
+    </div>
+    <h2 class="section-title">Воронка продаж</h2>
+    <div class="crm-board">${columns.map(status => `<section class="crm-column"><header>${LEAD_LABELS[status]} <b>${leads.filter(l=>l.status===status).length}</b></header>
+      <div>${leads.filter(l=>l.status===status).map(leadCardHtml).join('') || '<p class="crm-empty">Нет заявок</p>'}</div></section>`).join('')}</div>
+    <div class="page-head" style="margin-top:28px"><div><h2>Рабочая очередь</h2><p>Звонки, оплаты, пробные занятия и другие действия</p></div></div>
+    <div class="crm-task-list">${tasks.length ? tasks.map(crmTaskHtml).join('') : '<div class="card">Нет задач — очередь чистая.</div>'}</div>`;
+}
+function leadCardHtml(l) {
+  const due = l.nextContactAt ? new Date(l.nextContactAt).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+  return `<article class="crm-lead-card" onclick="openLeadForm('${l.id}')"><b>${escapeHtml(l.childName)}</b><span>${escapeHtml(l.parentName||'Родитель не указан')}</span>
+    <a href="tel:${escapeHtml(l.phone)}" onclick="event.stopPropagation()">${escapeHtml(l.phone)}</a>${l.courseInterest?`<small>${escapeHtml(l.courseInterest)}</small>`:''}
+    ${due?`<small class="crm-next">Контакт: ${due}</small>`:''}</article>`;
+}
+function crmTaskHtml(t) {
+  const overdue = t.status==='open' && t.dueAt && t.dueAt < Date.now();
+  return `<div class="crm-task ${t.status==='done'?'done':''} ${overdue?'overdue':''}"><input type="checkbox" ${t.status==='done'?'checked':''} onchange="toggleCrmTask('${t.id}',this.checked)">
+    <div style="flex:1"><b>${escapeHtml(t.title)}</b><small>${escapeHtml(t.leadName||t.studentName||'Общая задача')} ${t.assignedName?'· '+escapeHtml(t.assignedName):''}</small></div>
+    <span>${t.dueAt?new Date(t.dueAt).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Без срока'}</span>
+    <button class="btn btn-ghost btn-sm" onclick="deleteCrmTask('${t.id}')">×</button></div>`;
+}
+async function toggleCrmTask(id, done) { await API.updateCrmTask(id,{status:done?'done':'open'}); await renderSales(); }
+async function deleteCrmTask(id) { if(confirm('Удалить задачу?')) { await API.deleteCrmTask(id); await renderSales(); } }
+function openCrmTaskForm() {
+  const leads=window._crmLeads||[]; const managers=cache.users.filter(u=>u.role==='admin'||u.role==='teacher');
+  document.getElementById('modalContent').innerHTML=`<h2>Новая задача</h2>
+    <div class="form-group"><label>Что нужно сделать</label><input class="form-input" id="ct_title" placeholder="Позвонить родителю"></div>
+    <div class="form-group"><label>Срок</label><input class="form-input" id="ct_due" type="datetime-local"></div>
+    <div class="form-group"><label>Заявка</label><select class="form-input" id="ct_lead"><option value="">—</option>${leads.map(l=>`<option value="${l.id}">${escapeHtml(l.childName)}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Ответственный</label><select class="form-input" id="ct_manager"><option value="">—</option>${managers.map(m=>`<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
+    <div id="modalErr" class="form-error"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn" onclick="saveCrmTask()">Создать</button></div>`;
+  document.getElementById('modal').classList.add('active');
+}
+async function saveCrmTask(){try{await API.createCrmTask({title:document.getElementById('ct_title').value.trim(),dueAt:document.getElementById('ct_due').value?new Date(document.getElementById('ct_due').value).getTime():null,leadId:document.getElementById('ct_lead').value||null,assignedTo:document.getElementById('ct_manager').value||null});closeModal();await renderSales();}catch(e){document.getElementById('modalErr').textContent=e.message;}}
+function openLeadForm(id) {
+  const l=id?(window._crmLeads||[]).find(x=>x.id===id):null; const managers=cache.users.filter(u=>u.role==='admin'||u.role==='teacher');
+  document.getElementById('modalContent').innerHTML=`<h2>${l?'Карточка заявки':'Новая заявка'}</h2><div class="form-grid">
+    <div class="form-group"><label>Имя ребёнка *</label><input class="form-input" id="ld_child" value="${escapeHtml(l?.childName||'')}"></div>
+    <div class="form-group"><label>Имя родителя</label><input class="form-input" id="ld_parent" value="${escapeHtml(l?.parentName||'')}"></div>
+    <div class="form-group"><label>Телефон *</label><input class="form-input" id="ld_phone" value="${escapeHtml(l?.phone||'')}"></div>
+    <div class="form-group"><label>Источник</label><input class="form-input" id="ld_source" value="${escapeHtml(l?.source||'')}"></div>
+    <div class="form-group"><label>Интересующий курс</label><input class="form-input" id="ld_course" value="${escapeHtml(l?.courseInterest||'')}"></div>
+    <div class="form-group"><label>Этап</label><select class="form-input" id="ld_status">${Object.entries(LEAD_LABELS).map(([k,v])=>`<option value="${k}" ${l?.status===k?'selected':''}>${v}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Следующий контакт</label><input class="form-input" id="ld_next" type="datetime-local" value="${l?.nextContactAt?new Date(l.nextContactAt-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):''}"></div>
+    <div class="form-group"><label>Ответственный</label><select class="form-input" id="ld_manager"><option value="">—</option>${managers.map(m=>`<option value="${m.id}" ${l?.responsibleManagerId===m.id?'selected':''}>${escapeHtml(m.name)}</option>`).join('')}</select></div></div>
+    <div class="form-group"><label>Комментарий</label><textarea class="form-input" id="ld_comment" rows="3">${escapeHtml(l?.comment||'')}</textarea></div>
+    <div id="modalErr" class="form-error"></div><div class="modal-actions">${l?`<button class="btn btn-ghost" style="color:#ef4444" onclick="removeLead('${l.id}')">Удалить</button>`:''}<span style="flex:1"></span><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn" onclick="saveLead('${id||''}')">Сохранить</button></div>`;
+  document.getElementById('modal').classList.add('active');
+}
+async function saveLead(id){const d={childName:document.getElementById('ld_child').value.trim(),parentName:document.getElementById('ld_parent').value.trim(),phone:document.getElementById('ld_phone').value.trim(),source:document.getElementById('ld_source').value.trim(),courseInterest:document.getElementById('ld_course').value.trim(),status:document.getElementById('ld_status').value,nextContactAt:document.getElementById('ld_next').value?new Date(document.getElementById('ld_next').value).getTime():null,responsibleManagerId:document.getElementById('ld_manager').value||null,comment:document.getElementById('ld_comment').value.trim()};try{id?await API.updateCrmLead(id,d):await API.createCrmLead(d);closeModal();await renderSales();}catch(e){document.getElementById('modalErr').textContent=e.message;}}
+async function removeLead(id){if(confirm('Удалить заявку?')){await API.deleteCrmLead(id);closeModal();await renderSales();}}
+
 // ---------- Клиенты (CRM ученики) ----------
 async function renderClients() {
-  const [list, tariffs, branches] = await Promise.all([API.getCrmStudents(), API.getTariffs(), API.getBranches()]);
-  window._tariffs = tariffs; window._branches = branches;
+  const [list, tariffs, branches, groups] = await Promise.all([API.getCrmStudents(), API.getTariffs(), API.getBranches(), API.getGroups()]);
+  window._tariffs = tariffs; window._branches = branches; window._groups = groups;
   tabEl().innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-      <h1 data-i18n="admin.clients">Клиенты (CRM)</h1>
-      <button class="btn" onclick="openClientForm()">${I18N.t('common.add')}</button>
+    <div class="page-head">
+      <div><h1 data-i18n="admin.clients">Клиенты (CRM)</h1><p>Карточки учеников, родители, доступы и абонементы</p></div>
+      <div class="head-actions"><button class="btn btn-outline" onclick="openClientImport()">Импорт + аккаунты</button><button class="btn" onclick="openClientForm()">${I18N.t('common.add')}</button></div>
     </div>
     <input class="form-input" id="clSearch" placeholder="${I18N.t('common.search')}" style="margin-bottom:14px" oninput="filterClients()">
     <table class="table" id="clTable"><thead><tr>
@@ -1224,7 +1292,8 @@ async function renderClients() {
         <td>${c.visitsLeft ?? 0}</td>
         <td><span class="badge badge-${c.status==='active'?'success':c.status==='frozen'?'warning':'danger'}">${I18N.t('crm.status_'+(c.status||'inactive'))}</span></td>
         <td>${escapeHtml(c.parentPhone||'—')}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="openClientForm('${c.userId}')">${I18N.t('common.edit')}</button>
+        <td><button class="btn btn-ghost btn-sm" onclick="showClientCredentials('${c.userId}')">🔑 Доступы</button>
+          <button class="btn btn-ghost btn-sm" onclick="openClientForm('${c.userId}')">${I18N.t('common.edit')}</button>
           <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeClient('${c.userId}')">${I18N.t('common.delete')}</button></td>
       </tr>`;
     }).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
@@ -1232,6 +1301,33 @@ async function renderClients() {
   I18N.applyI18n(tabEl());
   window._clients = list;
 }
+function openClientImport() {
+  const refs = `<details class="notice-box"><summary><b>Справочник ID для импорта</b></summary>
+    <small>Филиалы: ${(window._branches||[]).map(x=>`${escapeHtml(x.name)} = <code>${escapeHtml(x.id)}</code>`).join(' · ')||'нет'}</small>
+    <small>Тарифы: ${(window._tariffs||[]).map(x=>`${escapeHtml(x.name)} = <code>${escapeHtml(x.id)}</code>`).join(' · ')||'нет'}</small>
+    <small>Группы: ${(window._groups||[]).map(x=>`${escapeHtml(x.name)} = <code>${escapeHtml(x.id)}</code>`).join(' · ')||'нет'}</small></details>`;
+  document.getElementById('modalContent').innerHTML = `<h2>Импорт клиентов и аккаунтов</h2>
+    <p style="color:#64748b">Одна строка создаёт ученика, CRM-карточку, родителя, связь между ними и при необходимости добавляет ребёнка в группу.</p>
+    <div class="notice-box"><b>Колонки CSV</b><code>student_name,parent_name,parent_phone,branch_id,tariff_id,group_id,languages,birth_date,video_consent,comment</code></div>${refs}
+    <textarea class="form-input" id="imp_data" rows="9" style="font-family:Fira Code,monospace;font-size:12px" placeholder="student_name,parent_name,parent_phone,branch_id,tariff_id,group_id,languages,video_consent&#10;Иван Иванов,Анна Иванова,+77771234567,br_...,tf_...,grp_...,python,да"></textarea>
+    <div id="imp_preview" style="margin-top:10px"></div><div id="modalErr" class="form-error"></div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn btn-secondary" onclick="runClientImport(true)">Проверить</button><button class="btn" onclick="runClientImport(false)">Создать аккаунты</button></div>`;
+  document.getElementById('modal').classList.add('active');
+}
+async function runClientImport(dryRun) {
+  const err=document.getElementById('modalErr'); err.textContent='';
+  try {
+    const r=await API.importData('clients',parseImportInput(),dryRun);
+    if(dryRun){document.getElementById('imp_preview').innerHTML=`<div class="card" style="padding:12px">Строк: <b>${r.total}</b> · Готово к созданию: <b>${r.items.length}</b>${r.errors.length?`<div class="form-error">${r.errors.map(e=>`Строка ${e.line}: ${escapeHtml(e.error)}`).join('<br>')}</div>`:''}</div>`;return;}
+    _baseLoaded=false;
+    document.getElementById('modalContent').innerHTML=`<h2>Создано клиентов: ${r.created}</h2><p>Скопируйте доступы или отправьте их через Green API. Они также доступны в карточке клиента до первой смены пароля.</p>
+      <div class="credentials-list">${r.credentials.map(credentialsCardHtml).join('')}</div><div class="modal-actions"><button class="btn" onclick="closeModal();render()">Готово</button></div>`;
+  } catch(e){err.textContent=e.message;}
+}
+function credentialsCardHtml(c){const parts=[`Ученик: ${c.student.login} / ${c.student.password}`];if(c.parent&&!c.parent.reused)parts.push(`Родитель: ${c.parent.login} / ${c.parent.password}`);else if(c.parent)parts.push(`Родитель: ${c.parent.login} (существующий аккаунт)`);const text=parts.join('\n');return `<div class="credential-card"><b>${escapeHtml(c.studentName)}</b><pre>${escapeHtml(text)}</pre><div><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(text)})'>Копировать</button>${c.phone?`<button class="btn btn-success btn-sm" onclick="sendCredentials('${c.studentId}',this)">WhatsApp</button>`:''}</div></div>`;}
+async function showClientCredentials(studentId){try{const rows=await API.getClientCredentials(studentId);document.getElementById('modalContent').innerHTML=`<h2>Временные доступы</h2>${rows.length?`<div class="credentials-list">${rows.map(r=>`<div class="credential-card"><b>${r.kind==='parent'?'Родитель':'Ученик'}</b><pre>${escapeHtml(r.login+'\n'+r.password)}</pre><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(r.login+'\n'+r.password)})'>Копировать</button></div>`).join('')}</div><div class="modal-actions"><button class="btn btn-success" onclick="sendCredentials('${studentId}',this)">Отправить в WhatsApp</button><button class="btn" onclick="closeModal()">Закрыть</button></div>`:'<div class="notice-box">Временный пароль уже изменён или доступы создавались вручную. Из соображений безопасности действующий пароль показать нельзя.</div><div class="modal-actions"><button class="btn" onclick="closeModal()">Закрыть</button></div>'}`;document.getElementById('modal').classList.add('active');}catch(e){alert(e.message);}}
+async function sendCredentials(studentId,button){button.disabled=true;try{await API.sendClientCredentials({studentId});showToast('Доступы отправлены в WhatsApp','success');}catch(e){alert(e.message);}finally{button.disabled=false;}}
+async function copyText(text){try{await navigator.clipboard.writeText(text);showToast('Скопировано','success');}catch{prompt('Скопируйте данные',text);}}
 function filterClients() {
   const q = document.getElementById('clSearch').value.toLowerCase();
   document.querySelectorAll('#clTable tbody tr').forEach(tr => {
@@ -1599,7 +1695,8 @@ async function openAttendance(sessionId, groupId) {
 
   document.getElementById('modalContent').innerHTML = `
     <h2 data-i18n="session.conduct">Проведение занятия</h2>
-    <p style="color:#64748b;font-size:13px">Отметка «${I18N.t('session.present')}» списывает одно занятие у активного абонемента. Возле каждого ученика можно добавить его работу (скрин/файл с описанием) и видеоотчёт.</p>
+    <div class="lesson-help"><b>Как закрыть занятие</b><span>1. Отметьте посещаемость</span><span>2. Добавьте работу или отчёт каждому присутствующему</span><span>3. Сохраните занятие</span></div>
+    <p style="color:#64748b;font-size:13px;margin:10px 0">Видео и файлы — до 150 МБ. Материалы сразу появляются в защищённой ленте родителя.</p>
     <div id="att_list">${roster.length ? roster.map(r=>lessonRowHtml(r, existMap[r.studentId] || 'present')).join('')
       : `<div style="color:#64748b">${I18N.t('common.none')} — в группе нет учеников</div>`}</div>
     <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
@@ -1614,7 +1711,7 @@ async function openAttendance(sessionId, groupId) {
 // Разметка строки одного ученика в окне проведения занятия
 function lessonRowHtml(r, st) {
   const arts = _lesson.artifacts.filter(a => a.studentId === r.studentId);
-  return `<div class="lesson-row" data-row="${r.studentId}" style="padding:10px 0;border-bottom:1px solid #eef2f7">
+  return `<div class="lesson-row" data-row="${r.studentId}">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
       <span style="font-weight:600">${escapeHtml(r.name)}</span>
       <select class="form-input att_sel" data-student="${r.studentId}" style="width:170px">
@@ -1629,8 +1726,8 @@ function lessonRowHtml(r, st) {
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
       <input class="form-input art_desc" data-student="${r.studentId}" placeholder="${I18N.t('session.work_desc')}" style="flex:1;min-width:160px;font-size:13px">
-      <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('wf_${r.studentId}').click()">📎 ${I18N.t('session.add_work')}</button>
-      <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('vf_${r.studentId}').click()">🎬 ${I18N.t('session.add_video')}</button>
+      <button class="btn btn-outline btn-sm lesson-upload" type="button" onclick="document.getElementById('wf_${r.studentId}').click()">📎 ${I18N.t('session.add_work')}</button>
+      <button class="btn btn-outline btn-sm lesson-upload" type="button" onclick="document.getElementById('vf_${r.studentId}').click()">🎬 ${I18N.t('session.add_video')}</button>
       <input id="wf_${r.studentId}" type="file" style="display:none" accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip" onchange="uploadArtifact('${r.studentId}','work',this)">
       <input id="vf_${r.studentId}" type="file" style="display:none" accept="video/*" onchange="uploadArtifact('${r.studentId}','video',this)">
     </div>
@@ -1654,11 +1751,13 @@ async function uploadArtifact(studentId, kind, inputEl) {
   const file = inputEl.files && inputEl.files[0];
   if (!file) return;
   const err = document.getElementById('modalErr');
-  if (file.size > 50 * 1024 * 1024) { err.textContent = 'Файл больше 50 МБ'; inputEl.value=''; return; }
+  if (file.size > 150 * 1024 * 1024) { err.textContent = 'Файл больше 150 МБ'; inputEl.value=''; return; }
   const descEl = document.querySelector(`.art_desc[data-student="${studentId}"]`);
   const desc = descEl ? descEl.value.trim() : '';
   const type = kind === 'video' ? 'video' : (file.type.startsWith('image/') ? 'screenshot' : 'file');
-  err.textContent = I18N.t('session.uploading');
+  const sizeMb = (file.size / 1024 / 1024).toFixed(1);
+  err.style.color = '#4f46e5';
+  err.textContent = `Загружаем «${file.name}» (${sizeMb} МБ). Не закрывайте окно…`;
   try {
     const art = await API.createArtifact({
       lessonSessionId: _lesson.sessionId, studentId, type,
@@ -1668,9 +1767,9 @@ async function uploadArtifact(studentId, kind, inputEl) {
     refreshArtList(studentId);
     clearMissingForStudent(studentId);
     if (descEl) descEl.value = '';
-    err.textContent = '';
+    err.textContent = ''; err.style.color = '#ef4444';
     showToast(I18N.t('common.saved'), 'success');
-  } catch (e) { err.textContent = e.message; }
+  } catch (e) { err.style.color = '#ef4444'; err.textContent = e.message; }
   finally { inputEl.value = ''; }
 }
 

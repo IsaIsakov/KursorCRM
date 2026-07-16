@@ -425,4 +425,92 @@ router.delete('/students-crm/:id', requireRole('admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+/* ============================================================
+   ВОРОНКА ПРОДАЖ И РАБОЧАЯ ОЧЕРЕДЬ CRM
+   ============================================================ */
+router.get('/crm/overview', requireRole('admin'), (_req, res) => {
+  const leadCounts = Object.fromEntries(db.prepare('SELECT status,COUNT(*) count FROM crm_leads GROUP BY status').all().map(r => [r.status, r.count]));
+  const now = Date.now();
+  res.json({
+    leads: leadCounts,
+    openTasks: db.prepare("SELECT COUNT(*) count FROM crm_tasks WHERE status='open'").get().count,
+    overdueTasks: db.prepare("SELECT COUNT(*) count FROM crm_tasks WHERE status='open' AND due_at IS NOT NULL AND due_at < ?").get(now).count,
+    activeStudents: db.prepare("SELECT COUNT(*) count FROM students_crm WHERE status='active'").get().count,
+    expiringSubscriptions: db.prepare("SELECT COUNT(*) count FROM subscriptions WHERE status='active' AND expires_at IS NOT NULL AND expires_at BETWEEN ? AND ?").get(now, now + 7 * 86400000).count,
+  });
+});
+
+router.get('/crm/leads', requireRole('admin'), (req, res) => {
+  const status = String(req.query.status || '');
+  const rows = status
+    ? db.prepare('SELECT * FROM crm_leads WHERE status=? ORDER BY updated_at DESC').all(status)
+    : db.prepare('SELECT * FROM crm_leads ORDER BY updated_at DESC').all();
+  res.json(rows.map(r => ({ id:r.id, childName:r.child_name, parentName:r.parent_name, phone:r.phone, source:r.source,
+    courseInterest:r.course_interest, status:r.status, responsibleManagerId:r.responsible_manager_id,
+    nextContactAt:r.next_contact_at, comment:r.comment, createdAt:r.created_at, updatedAt:r.updated_at })));
+});
+
+router.post('/crm/leads', requireRole('admin'), (req, res) => {
+  const b = req.body || {}; const childName = String(b.childName || '').trim(); const phone = String(b.phone || '').trim();
+  if (!childName || !phone) return res.status(400).json({ error: 'Имя ребёнка и телефон обязательны' });
+  const id = genId('lead'); const now = Date.now();
+  db.prepare(`INSERT INTO crm_leads (id,child_name,parent_name,phone,source,course_interest,status,responsible_manager_id,next_contact_at,comment,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, childName, b.parentName || null, phone, b.source || null, b.courseInterest || null,
+      ['new','contacted','trial','decision','won','lost'].includes(b.status) ? b.status : 'new', b.responsibleManagerId || null,
+      Number(b.nextContactAt) || null, b.comment || null, now, now);
+  res.status(201).json({ id });
+});
+
+router.put('/crm/leads/:id', requireRole('admin'), (req, res) => {
+  const cur = db.prepare('SELECT * FROM crm_leads WHERE id=?').get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Заявка не найдена' });
+  const b = req.body || {}; const pick = (key, col) => b[key] !== undefined ? b[key] : cur[col];
+  const status = pick('status','status');
+  if (!['new','contacted','trial','decision','won','lost'].includes(status)) return res.status(400).json({ error: 'Некорректный статус' });
+  db.prepare(`UPDATE crm_leads SET child_name=?,parent_name=?,phone=?,source=?,course_interest=?,status=?,responsible_manager_id=?,next_contact_at=?,comment=?,updated_at=? WHERE id=?`)
+    .run(pick('childName','child_name'), pick('parentName','parent_name'), pick('phone','phone'), pick('source','source'),
+      pick('courseInterest','course_interest'), status, pick('responsibleManagerId','responsible_manager_id'),
+      pick('nextContactAt','next_contact_at') || null, pick('comment','comment'), Date.now(), req.params.id);
+  res.json({ ok:true });
+});
+
+router.delete('/crm/leads/:id', requireRole('admin'), (req, res) => {
+  const info = db.prepare('DELETE FROM crm_leads WHERE id=?').run(req.params.id);
+  if (!info.changes) return res.status(404).json({ error:'Заявка не найдена' });
+  res.json({ ok:true });
+});
+
+router.get('/crm/tasks', requireRole('admin'), (_req, res) => {
+  res.json(db.prepare(`SELECT t.*,u.name assigned_name,l.child_name lead_name,s.name student_name FROM crm_tasks t
+    LEFT JOIN users u ON u.id=t.assigned_to LEFT JOIN crm_leads l ON l.id=t.lead_id LEFT JOIN users s ON s.id=t.student_id
+    ORDER BY t.status ASC, CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END, t.due_at ASC`).all().map(r => ({
+      id:r.id,title:r.title,dueAt:r.due_at,priority:r.priority,status:r.status,assignedTo:r.assigned_to,
+      assignedName:r.assigned_name,studentId:r.student_id,studentName:r.student_name,leadId:r.lead_id,leadName:r.lead_name,
+      createdAt:r.created_at,completedAt:r.completed_at,
+    })));
+});
+
+router.post('/crm/tasks', requireRole('admin'), (req, res) => {
+  const b=req.body||{}; const title=String(b.title||'').trim(); if(!title) return res.status(400).json({error:'Название задачи обязательно'});
+  const id=genId('ct'); db.prepare(`INSERT INTO crm_tasks (id,title,due_at,priority,status,assigned_to,student_id,lead_id,created_by,created_at)
+    VALUES (?,?,?,?,'open',?,?,?,?,?)`).run(id,title,Number(b.dueAt)||null,['low','normal','high'].includes(b.priority)?b.priority:'normal',
+      b.assignedTo||null,b.studentId||null,b.leadId||null,req.user.id,Date.now());
+  res.status(201).json({id});
+});
+
+router.put('/crm/tasks/:id', requireRole('admin'), (req,res)=>{
+  const cur=db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(req.params.id); if(!cur) return res.status(404).json({error:'Задача не найдена'});
+  const b=req.body||{}; const status=b.status!==undefined?b.status:cur.status; if(!['open','done'].includes(status)) return res.status(400).json({error:'Некорректный статус'});
+  db.prepare(`UPDATE crm_tasks SET title=?,due_at=?,priority=?,status=?,assigned_to=?,student_id=?,lead_id=?,completed_at=? WHERE id=?`).run(
+    b.title!==undefined?String(b.title).trim():cur.title,b.dueAt!==undefined?(Number(b.dueAt)||null):cur.due_at,
+    b.priority!==undefined?b.priority:cur.priority,status,b.assignedTo!==undefined?(b.assignedTo||null):cur.assigned_to,
+    b.studentId!==undefined?(b.studentId||null):cur.student_id,b.leadId!==undefined?(b.leadId||null):cur.lead_id,
+    status==='done'?(cur.completed_at||Date.now()):null,req.params.id);
+  res.json({ok:true});
+});
+
+router.delete('/crm/tasks/:id', requireRole('admin'), (req,res)=>{
+  const info=db.prepare('DELETE FROM crm_tasks WHERE id=?').run(req.params.id); if(!info.changes) return res.status(404).json({error:'Задача не найдена'}); res.json({ok:true});
+});
+
 module.exports = router;

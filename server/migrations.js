@@ -70,6 +70,65 @@ const MIGRATIONS = [
       db.prepare("UPDATE app_settings SET value=? WHERE key='whatsapp'").run(JSON.stringify(value));
     },
   },
+  {
+    version: 6,
+    name: 'crm_onboarding_and_work_queue',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS account_credentials (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          login TEXT NOT NULL,
+          password_encrypted TEXT NOT NULL,
+          account_kind TEXT NOT NULL CHECK(account_kind IN ('student','parent')),
+          created_by TEXT,
+          created_at INTEGER NOT NULL,
+          revealed_at INTEGER,
+          revoked_at INTEGER,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_credentials_active ON account_credentials(user_id, revoked_at);
+
+        CREATE TABLE IF NOT EXISTS crm_leads (
+          id TEXT PRIMARY KEY,
+          child_name TEXT NOT NULL,
+          parent_name TEXT,
+          phone TEXT NOT NULL,
+          source TEXT,
+          course_interest TEXT,
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','contacted','trial','decision','won','lost')),
+          responsible_manager_id TEXT,
+          next_contact_at INTEGER,
+          comment TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (responsible_manager_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_leads_status_next ON crm_leads(status, next_contact_at);
+        CREATE INDEX IF NOT EXISTS idx_leads_manager ON crm_leads(responsible_manager_id, status);
+
+        CREATE TABLE IF NOT EXISTS crm_tasks (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          due_at INTEGER,
+          priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high')),
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done')),
+          assigned_to TEXT,
+          student_id TEXT,
+          lead_id TEXT,
+          created_by TEXT,
+          created_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
+          FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (lead_id) REFERENCES crm_leads(id) ON DELETE CASCADE,
+          FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_crm_tasks_queue ON crm_tasks(status, due_at, assigned_to);
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

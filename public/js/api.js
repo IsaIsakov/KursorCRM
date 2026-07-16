@@ -19,7 +19,9 @@
     const headers = isForm ? {} : { 'Content-Type': 'application/json' };
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers['X-CSRF-Token'] = csrfToken();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), isForm ? 120000 : 30000);
+    // Mobile uploads of a 150 MB lesson video can legitimately take several
+    // minutes. Ordinary JSON requests retain the short timeout.
+    const timeout = setTimeout(() => controller.abort(), isForm ? 10 * 60 * 1000 : 30000);
     let resp;
     try {
       resp = await fetch(url, {
@@ -215,6 +217,17 @@
   const createCrmStudent   = (data) => API_.post('/api/students-crm', data);
   const updateCrmStudent   = (id, data) => API_.put('/api/students-crm/' + encodeURIComponent(id), data);
   const deleteCrmStudent   = (id) => API_.del('/api/students-crm/' + encodeURIComponent(id));
+  const getCrmOverview     = () => API_.get('/api/crm/overview');
+  const getCrmLeads        = () => API_.get('/api/crm/leads');
+  const createCrmLead      = data => API_.post('/api/crm/leads', data);
+  const updateCrmLead      = (id,data) => API_.put('/api/crm/leads/' + encodeURIComponent(id), data);
+  const deleteCrmLead      = id => API_.del('/api/crm/leads/' + encodeURIComponent(id));
+  const getCrmTasks        = () => API_.get('/api/crm/tasks');
+  const createCrmTask      = data => API_.post('/api/crm/tasks', data);
+  const updateCrmTask      = (id,data) => API_.put('/api/crm/tasks/' + encodeURIComponent(id), data);
+  const deleteCrmTask      = id => API_.del('/api/crm/tasks/' + encodeURIComponent(id));
+  const getClientCredentials = sid => API_.get('/api/client-credentials?student_id=' + encodeURIComponent(sid));
+  const sendClientCredentials = data => API_.post('/api/client-credentials/send', data);
 
   /* ---------- Права преподавателей ---------- */
   const getPermissionKeys = () => API_.get('/api/teacher-permissions/keys');
@@ -302,6 +315,8 @@
     getMembers, addMember, removeMember,
     getCrmStudents, getCrmStudent, getMyGroupStudents,
     createCrmStudent, updateCrmStudent, deleteCrmStudent,
+    getCrmOverview, getCrmLeads, createCrmLead, updateCrmLead, deleteCrmLead,
+    getCrmTasks, createCrmTask, updateCrmTask, deleteCrmTask, getClientCredentials, sendClientCredentials,
     getPermissionKeys, getPermissions, setPermissions,
     // фаза 3
     getSessions, getCalendar, createSession, deleteSession, getSessionAttendance, saveAttendance,

@@ -60,6 +60,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   await api('PUT', `/api/crm/tasks/${crmTask.id}`, { status:'done' });
   assert.equal((await api('GET','/api/crm/overview')).body.leads.trial, 1);
   const student = (await api('POST', '/api/users', { name: 'E2E Student', login: `student_${port}`, password: 'Student-2026!', role: 'student', languages: [] }, 201)).body;
+  const teacher = (await api('POST', '/api/users', { name: 'E2E Teacher', login: `teacher_${port}`, password: 'Teacher-2026!', role: 'teacher', languages: [] }, 201)).body;
 
   // Routers mounted at /api must not apply admin guards to unrelated student
   // endpoints such as /tasks. This reproduces the student dashboard requests.
@@ -81,7 +82,8 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   await api('POST', '/api/students-crm', { userId: student.id, fullName: student.name, branchId: branch.id,
     tariffId: tariff.id, subscriptionIssuedAt: Date.now(), videoConsent: true }, 201);
   const modules = (await api('GET', '/api/modules')).body;
-  const group = (await api('POST', '/api/groups', { name: 'E2E group', branchId: branch.id, courseId: modules[0].id }, 201)).body;
+  const group = (await api('POST', '/api/groups', { name: 'E2E group', branchId: branch.id, courseId: modules[0].id,
+    teacherId: teacher.id, assistantId: null, lessonKind: 'main' }, 201)).body;
   const onboarded = (await api('POST', '/api/import/clients', { format: 'json', data: [{
     student_name: 'Тестовый Ребёнок', parent_name: 'Тестовый Родитель', parent_phone: '+7 777 123 45 67',
     branch_id: branch.id, tariff_id: tariff.id, group_id: group.id, languages: 'python', video_consent: 'да',

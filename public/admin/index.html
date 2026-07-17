@@ -1111,11 +1111,14 @@ async function renderGroups() {
 }
 async function openGroupForm(id) {
   const g = id ? _byId(window._groups||[], id) : { name:'', branchId:(window._branches&&window._branches[0]?.id)||'', teacherId:'', assistantId:'', courseId:'', lessonKind:'main', status:'active' };
-  const staff = isAdmin ? cache.users : await API.getStaff();
+  // Связанные справочники запрашиваем непосредственно перед открытием формы:
+  // старый кэш мог содержать уже удалённого преподавателя/филиал и приводил к FK-ошибке.
+  const [staff, freshBranches, freshModules] = await Promise.all([API.getStaff(), API.getBranches(), API.getModules(true)]);
   const teachers = staff.filter(u=>u.role==='teacher');
   const assistants = staff.filter(u=>u.role==='assistant');
-  const branches = window._branches || [];
-  const ensureBranches = branches.length ? Promise.resolve(branches) : API.getBranches();
+  const branches = freshBranches;
+  cache.modules = freshModules;
+  const ensureBranches = Promise.resolve(branches);
   Promise.resolve(ensureBranches).then(brs => {
     window._branches = brs;
     document.getElementById('modalContent').innerHTML = `

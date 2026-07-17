@@ -198,16 +198,29 @@ router.get('/groups/:id', (req, res) => {
   res.json(rowToGroup(g));
 });
 
-router.post('/groups', requireRole('admin'), validateBody(groupCreateSchema), (req, res) => {
+router.post('/groups', requireRole('admin'), validateBody(groupCreateSchema), (req, res, next) => {
   const { name, courseId, branchId, teacherId, assistantId, lessonKind, status } = req.body || {};
   if (!name || !branchId) return res.status(400).json({ error: 'name, branchId обязательны' });
-  const id = genId('grp');
-  db.prepare(`INSERT INTO groups (id, name, course_id, branch_id, teacher_id, assistant_id, lesson_kind, status)
-              VALUES (?,?,?,?,?,?,?,?)`)
-    .run(id, String(name).trim(), courseId || null, branchId, teacherId || null, assistantId || null,
-         ['main', 'extra'].includes(lessonKind) ? lessonKind : 'main',
-         ['active', 'archived'].includes(status) ? status : 'active');
-  res.status(201).json(rowToGroup(db.prepare(`${GROUP_SELECT} WHERE g.id = ?`).get(id)));
+  if (!db.prepare('SELECT 1 FROM branches WHERE id=?').get(branchId)) return res.status(400).json({ error: 'Выбранный филиал больше не существует. Обновите страницу.' });
+  if (courseId && !db.prepare('SELECT 1 FROM modules WHERE id=?').get(courseId)) return res.status(400).json({ error: 'Выбранный курс больше не существует. Обновите страницу.' });
+  if (teacherId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(teacherId)) return res.status(400).json({ error: 'Выбранный преподаватель не найден или имеет другую роль.' });
+  if (assistantId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='assistant'").get(assistantId)) return res.status(400).json({ error: 'Выбранный ассистент не найден или имеет другую роль.' });
+  try {
+    const id = genId('grp');
+    db.prepare(`INSERT INTO groups (id, name, course_id, branch_id, teacher_id, assistant_id, lesson_kind, status)
+                VALUES (?,?,?,?,?,?,?,?)`)
+      .run(id, String(name).trim(), courseId || null, branchId, teacherId || null, assistantId || null,
+           ['main', 'extra'].includes(lessonKind) ? lessonKind : 'main',
+           ['active', 'archived'].includes(status) ? status : 'active');
+    const created = db.prepare(`${GROUP_SELECT} WHERE g.id = ?`).get(id);
+    if (!created) throw new Error('Созданная группа не найдена при повторном чтении');
+    res.status(201).json(rowToGroup(created));
+  } catch (error) {
+    if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
+      return res.status(409).json({ error: 'Не удалось создать группу: одна из выбранных связей устарела. Обновите страницу и повторите.' });
+    }
+    next(error);
+  }
 });
 
 router.put('/groups/:id', requireRole('admin','assistant'), validateBody(groupUpdateSchema), (req, res) => {

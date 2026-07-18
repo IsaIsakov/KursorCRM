@@ -109,7 +109,9 @@ app.use('/uploads/sessions', (_req, res) => res.status(404).end());
 app.use(express.static(publicDir, {
   etag: true, maxAge: '1h',
   setHeaders(res, file) {
-    if (/\.html$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
+    // HTML and executable frontend assets must always revalidate. Otherwise a
+    // deploy can combine a new page with an hour-old API client in the browser.
+    if (/\.(html|js|css)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
 

@@ -2,12 +2,18 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8"><title>Админ — КУРСОР</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/style.css?v=9">
 </head>
-<body>
+<body class="admin-page">
+<header class="admin-mobile-header">
+  <button class="admin-menu-toggle" type="button" onclick="toggleMobileAdminNav()" aria-label="Открыть меню">☰</button>
+  <span class="brand-wordmark">KURSOR</span>
+  <a href="/pages/profile.html" class="admin-mobile-profile" aria-label="Профиль">👤</a>
+</header>
+<div class="admin-nav-scrim" onclick="closeMobileAdminNav()"></div>
 <div class="admin-layout">
   <aside class="admin-sidebar">
     <div class="logo">
@@ -113,13 +119,16 @@ function buildNav() {
         <span>${I18N.t(g.titleKey)}</span><span class="chev">▼</span>
       </div>
       <div class="nav-group-items">
-        ${items.map(it => `<a href="#" data-tab="${it.tab}" data-label="${I18N.t(it.i18n).toLowerCase()}" onclick="switchTab('${it.tab}');return false;">
+        ${items.map(it => `<a href="#" data-tab="${it.tab}" data-label="${I18N.t(it.i18n).toLowerCase()}" onclick="switchTab('${it.tab}');closeMobileAdminNav();return false;">
           ${navIcon(it.iconKey)}<span>${I18N.t(it.i18n)}</span></a>`).join('')}
       </div>
     </div>`;
   }).join('');
   highlightActiveNav();
 }
+
+function toggleMobileAdminNav(){document.body.classList.toggle('admin-nav-open')}
+function closeMobileAdminNav(){document.body.classList.remove('admin-nav-open')}
 function toggleNavGroup(id) {
   const collapsed = JSON.parse(localStorage.getItem('kursor_nav_collapsed') || '{}');
   collapsed[id] = !collapsed[id];

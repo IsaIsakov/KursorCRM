@@ -30,7 +30,7 @@
       'nav.dashboard': 'Главная', 'nav.tasks': 'Задачи', 'nav.leaderboard': 'Рейтинг',
       'nav.profile': 'Профиль', 'nav.students': 'Ученики', 'nav.manage': 'Управление',
       'nav.admin': 'Админ-панель', 'nav.logout': 'Выйти', 'nav.my_profile': 'Мой профиль',
-      'nav.parent': 'Кабинет родителя', 'nav.notifications': 'Уведомления',
+      'nav.parent': 'Кабинет родителя', 'nav.chats': 'Чаты', 'nav.notifications': 'Уведомления',
 
       'auth.title': 'Вход в КУРСОР', 'auth.login_ph': 'Логин', 'auth.password_ph': 'Пароль',
       'auth.signin': 'Войти', 'auth.error': 'Неверный логин или пароль',
@@ -165,7 +165,7 @@
       'nav.dashboard': 'Басты бет', 'nav.tasks': 'Тапсырмалар', 'nav.leaderboard': 'Рейтинг',
       'nav.profile': 'Профиль', 'nav.students': 'Оқушылар', 'nav.manage': 'Басқару',
       'nav.admin': 'Әкімші панелі', 'nav.logout': 'Шығу', 'nav.my_profile': 'Менің профилім',
-      'nav.parent': 'Ата-ана кабинеті', 'nav.notifications': 'Хабарламалар',
+      'nav.parent': 'Ата-ана кабинеті', 'nav.chats': 'Чаттар', 'nav.notifications': 'Хабарламалар',
 
       'auth.title': 'КУРСОР-ға кіру', 'auth.login_ph': 'Логин', 'auth.password_ph': 'Құпиясөз',
       'auth.signin': 'Кіру', 'auth.error': 'Логин не құпиясөз қате',

@@ -181,6 +181,63 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 8,
+    name: 'group_chats_and_parent_teacher_dialogs',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS group_chat_messages (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL,
+          sender_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          edited_at INTEGER,
+          deleted_at INTEGER,
+          FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
+          FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_group_chat_messages ON group_chat_messages(group_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS parent_teacher_threads (
+          id TEXT PRIMARY KEY,
+          parent_id TEXT NOT NULL,
+          student_id TEXT NOT NULL,
+          teacher_id TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          closed_at INTEGER,
+          FOREIGN KEY(parent_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(teacher_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_parent_threads_parent ON parent_teacher_threads(parent_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_parent_threads_teacher ON parent_teacher_threads(teacher_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS parent_teacher_messages (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          sender_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          read_at INTEGER,
+          FOREIGN KEY(thread_id) REFERENCES parent_teacher_threads(id) ON DELETE CASCADE,
+          FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_parent_messages_thread ON parent_teacher_messages(thread_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS chat_read_state (
+          user_id TEXT NOT NULL,
+          channel_type TEXT NOT NULL CHECK(channel_type IN ('group','parent_thread')),
+          channel_id TEXT NOT NULL,
+          read_at INTEGER NOT NULL,
+          PRIMARY KEY(user_id, channel_type, channel_id),
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

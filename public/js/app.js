@@ -15,13 +15,16 @@ function renderNavbar(activePage) {
     { href:'/pages/dashboard.html', icon:'https://cdn-icons-png.flaticon.com/512/1946/1946436.png', label:T('nav.dashboard'), key:'dashboard' },
     { href:'/pages/catalog.html', icon:'https://cdn-icons-png.flaticon.com/512/2232/2232688.png', label:T('nav.tasks'), key:'catalog' },
     { href:'/pages/leaderboard.html', icon:'https://cdn-icons-png.flaticon.com/512/2583/2583344.png', label:T('nav.leaderboard'), key:'leaderboard' },
+    { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Чаты', key:'chats' },
     { href:'/pages/profile.html', icon:'https://cdn-icons-png.flaticon.com/512/1144/1144760.png', label:T('nav.profile'), key:'profile' },
   ] : (user.role === 'teacher' || user.role === 'assistant') ? [
     { href:'/pages/teacher.html', icon:'https://cdn-icons-png.flaticon.com/512/1995/1995450.png', label:T('nav.students'), key:'teacher' },
+    { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Чаты', key:'chats' },
     { href:'/pages/catalog.html', icon:'https://cdn-icons-png.flaticon.com/512/2232/2232688.png', label:T('nav.tasks'), key:'catalog' },
     { href:'/admin/index.html', icon:'https://cdn-icons-png.flaticon.com/512/3524/3524388.png', label:T('nav.manage'), key:'admin' },
   ] : user.role === 'parent' ? [
     { href:'/pages/parent.html', icon:'https://cdn-icons-png.flaticon.com/512/1946/1946436.png', label:T('nav.parent'), key:'parent' },
+    { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Написать преподавателю', key:'chats' },
   ] : [
     { href:'/admin/index.html', icon:'https://cdn-icons-png.flaticon.com/512/3524/3524388.png', label:T('nav.admin'), key:'admin' },
   ];
@@ -35,7 +38,7 @@ function renderNavbar(activePage) {
     </a>
     <div class="navbar-menu">
       ${links.map(l => `<a href="${l.href}" class="${l.key === activePage ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:8px"><img class="ic ic-20" src="${l.icon}" alt=""> <span data-i18n="${
-        l.key==='dashboard'?'nav.dashboard':l.key==='catalog'?'nav.tasks':l.key==='leaderboard'?'nav.leaderboard':l.key==='profile'?'nav.profile':l.key==='teacher'?'nav.students':l.key==='admin'?'nav.admin':l.key==='parent'?'nav.parent':'nav.manage'
+        l.key==='dashboard'?'nav.dashboard':l.key==='catalog'?'nav.tasks':l.key==='leaderboard'?'nav.leaderboard':l.key==='profile'?'nav.profile':l.key==='teacher'?'nav.students':l.key==='admin'?'nav.admin':l.key==='parent'?'nav.parent':l.key==='chats'?'nav.chats':'nav.manage'
       }">${l.label}</span></a>`).join('')}
     </div>
     <div class="navbar-right" style="display:flex;align-items:center;gap:14px">

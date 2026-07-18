@@ -87,10 +87,21 @@ function broadcastProgress(studentId, progress) {
   });
 }
 
+function broadcastToUsers(userIds, payload) {
+  if (!wss) return;
+  const recipients = new Set(userIds || []);
+  const data = JSON.stringify({ ...payload, t: Date.now() });
+  wss.clients.forEach(client => {
+    if (client.readyState === 1 && recipients.has(client.userId)) {
+      try { client.send(data); } catch {}
+    }
+  });
+}
+
 function close() {
   if (!wss) return;
   for (const client of wss.clients) try { client.close(1001, 'server shutdown'); } catch {}
   wss.close(); wss = null; sourceConnections.clear();
 }
 
-module.exports = { init, close, broadcastProgress };
+module.exports = { init, close, broadcastProgress, broadcastToUsers };

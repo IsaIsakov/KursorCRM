@@ -277,6 +277,14 @@
   const markAllNotifRead  = () => API_.put('/api/notifications/read-all');
   const deleteNotif       = (id) => API_.del('/api/notifications/' + encodeURIComponent(id));
 
+  /* ---------- Чаты ---------- */
+  const getChats = () => API_.get('/api/chats');
+  const getGroupMessages = (id) => API_.get('/api/chats/groups/' + encodeURIComponent(id) + '/messages');
+  const sendGroupMessage = (id, body) => API_.post('/api/chats/groups/' + encodeURIComponent(id) + '/messages', { body });
+  const createParentThread = data => API_.post('/api/chats/parent-threads', data);
+  const getParentThreadMessages = id => API_.get('/api/chats/parent-threads/' + encodeURIComponent(id) + '/messages');
+  const sendParentThreadMessage = (id, body) => API_.post('/api/chats/parent-threads/' + encodeURIComponent(id) + '/messages', { body });
+
   /* ---------- Импорт / экспорт ---------- */
   function exportUrl(dataset, format) {
     return '/api/export/' + dataset + '?format=' + (format || 'csv');
@@ -341,6 +349,7 @@
     getCareRequests, decideCareRequest, getAbsenceNotices,
     // фаза 6
     getNotifications, markNotifRead, markAllNotifRead, deleteNotif,
+    getChats, getGroupMessages, sendGroupMessage, createParentThread, getParentThreadMessages, sendParentThreadMessage,
     // WhatsApp
     getWaMeta:       ()       => request('GET',  '/api/whatsapp/meta'),
     getWaState:      ()       => request('GET',  '/api/whatsapp/state'),

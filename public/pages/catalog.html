@@ -181,12 +181,29 @@ function render() {
     return;
   }
 
+  let currentTrack = null;
   document.getElementById('tasksContainer').innerHTML = Object.entries(byModule).map(([modId, tList]) => {
     const m = modules.find(m => m.id === modId);
     const lang = m ? KURSOR_DB.LANGS[m.lang] : null;
     const hasLesson = m && state.lessonsMap && state.lessonsMap[m.id];
+    let trackHeader = '';
+    if (m?.track && m.track !== currentTrack) {
+      currentTrack = m.track;
+      const trackModules = modules.filter(x => x.track === m.track);
+      const trackTasks = tasks.filter(t => trackModules.some(x => x.id === t.module));
+      const done = trackTasks.filter(t => progress?.tasks[t.id]?.status === 'done').length;
+      const percent = trackTasks.length ? Math.round(done * 100 / trackTasks.length) : 0;
+      trackHeader = `<section class="card" style="padding:22px;margin:8px 0 24px;background:linear-gradient(135deg,#eef2ff,#f0fdf4);border:1px solid #c7d2fe">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap">
+          <div><div style="font-size:13px;color:#6366f1;font-weight:800;text-transform:uppercase">Учебная траектория</div>
+          <h1 style="margin:4px 0">${escapeHtml(m.track)}</h1><div style="color:#64748b">${trackModules.length} модулей · ${trackTasks.length} задач</div></div>
+          <strong style="font-size:22px">${percent}%</strong>
+        </div>
+        <div style="height:9px;background:#fff;border-radius:99px;margin-top:14px;overflow:hidden"><div style="height:100%;width:${percent}%;background:linear-gradient(90deg,#6366f1,#10b981)"></div></div>
+      </section>`;
+    }
 
-    return `
+    return `${trackHeader}
       <div style="margin-bottom:32px">
         <div class="module-header">
           <div class="module-header-left">
@@ -198,7 +215,8 @@ function render() {
             Открыть урок
           </a>` : ''}
         </div>
-        ${m?.description ? `<p style="color:#64748b;margin-bottom:14px;margin-top:-6px">${escapeHtml(m.description)}</p>` : ''}
+        ${m?.description ? `<p style="color:#64748b;margin-bottom:8px;margin-top:-6px">${escapeHtml(m.description)}</p>` : ''}
+        ${m?.track ? `<div style="font-size:13px;color:#64748b;margin-bottom:14px">${escapeHtml(m.level)} · примерно ${m.estimatedMin} минут${m.prerequisiteId ? ' · продолжение предыдущего модуля' : ''}</div>` : ''}
         <div class="tasks-grid">
           ${tList.sort((a,b)=>(a.difficulty||1)-(b.difficulty||1)).map(t => renderTaskCard(t, progress, m, lang)).join('')}
         </div>

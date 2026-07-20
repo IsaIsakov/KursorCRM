@@ -27,6 +27,8 @@ function buildLesson(moduleId, userId) {
 
   return {
     moduleId: mod.id, lang: mod.lang, title: mod.title, description: mod.description || '',
+    track: mod.track || '', level: mod.level || '', estimatedMin: mod.estimated_min || 60,
+    prerequisiteId: mod.prerequisite_id || null,
     intro: lessonRow ? JSON.parse(lessonRow.intro || '[]') : [],
     miniTask: lessonRow && lessonRow.mini_task ? JSON.parse(lessonRow.mini_task) : null,
     tasks: taskRows,

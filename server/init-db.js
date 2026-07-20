@@ -82,10 +82,12 @@ function seedContent() {
   `);
 
   const txn = db.transaction(() => {
-    (KDB.MODULES || []).forEach((m, i) => {
+    const legacyModules = (KDB.MODULES || []).filter(m => m.lang !== 'python');
+    const allowedModuleIds = new Set(legacyModules.map(m => m.id));
+    legacyModules.forEach((m, i) => {
       insertMod.run(m.id, m.lang, m.title, m.description || '', m.video || '', m.explanation || '', i);
     });
-    (KDB.TASKS || []).forEach(t => {
+    (KDB.TASKS || []).filter(t => allowedModuleIds.has(t.module)).forEach(t => {
       try {
         insertTask.run(
           t.id, t.module, t.type, t.title, t.description || '',
@@ -104,7 +106,7 @@ function seedContent() {
     });
   });
   txn();
-  console.log(`[init] ✅ Загружено модулей: ${KDB.MODULES?.length || 0}, задач: ${KDB.TASKS?.length || 0}`);
+  console.log('[init] ✅ Загружен базовый контент остальных языков; Python загружается из новой программы.');
 }
 
 
@@ -112,21 +114,35 @@ function seedLessons() {
   const dir = path.join(__dirname, '..', 'data', 'lessons');
   if (!fs.existsSync(dir)) return;
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
-  if (!files.length) return;
-  const insertMod = db.prepare(`INSERT OR IGNORE INTO modules (id, lang, title, description, video, explanation, position)
-    VALUES (?, ?, ?, ?, '', '', COALESCE((SELECT MAX(position)+1 FROM modules), 0))`);
+  const pythonLessons = require('../data/python-curriculum');
+  const insertMod = db.prepare(`INSERT INTO modules
+      (id, lang, title, description, video, explanation, position, track, level, estimated_min, prerequisite_id)
+    VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET lang=excluded.lang, title=excluded.title,
+      description=excluded.description, video=excluded.video, position=excluded.position,
+      track=excluded.track, level=excluded.level, estimated_min=excluded.estimated_min,
+      prerequisite_id=excluded.prerequisite_id`);
   const insertLesson = db.prepare(`INSERT OR REPLACE INTO lessons (module_id, intro, mini_task, updated_at) VALUES (?, ?, ?, ?)`);
   const findTask = db.prepare('SELECT id FROM tasks WHERE module_id = ? AND title = ?');
   const insertTask = db.prepare(`INSERT INTO tasks (module_id, type, title, description, difficulty, explain, options, answer, items, expected_output, starter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const updateTask = db.prepare(`UPDATE tasks SET type=?, description=?, difficulty=?, explain=?, options=?, answer=?, items=?, expected_output=?, starter=? WHERE id=?`);
   let lessonsLoaded = 0, tasksLoaded = 0;
   const txn = db.transaction(() => {
+    const lessonData = [];
     for (const file of files) {
       let data;
       try { data = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')); }
       catch (e) { console.warn('[init] Ошибка в ' + file + ':', e.message); continue; }
+      // The legacy Python JSON files are deliberately superseded by the two
+      // curated tracks below. Other languages keep using the existing format.
+      if (data.lang !== 'python') lessonData.push(data);
+    }
+    lessonData.push(...pythonLessons);
+    for (const [position, data] of lessonData.entries()) {
       if (!data.moduleId || !data.lang || !data.title) continue;
-      insertMod.run(data.moduleId, data.lang, data.title, data.description || '');
+      insertMod.run(data.moduleId, data.lang, data.title, data.description || '', data.intro?.[0]?.video || '',
+        data.lang === 'python' ? 1000 + position : position,
+        data.track || '', data.level || '', data.estimatedMin || 60, data.prerequisiteId || null);
       insertLesson.run(data.moduleId, JSON.stringify(Array.isArray(data.intro) ? data.intro : []),
         data.miniTask ? JSON.stringify(data.miniTask) : null, Date.now());
       lessonsLoaded++;
@@ -147,7 +163,7 @@ function seedLessons() {
     }
   });
   txn();
-  if (lessonsLoaded) console.log(`[init] ✅ Уроки: ${lessonsLoaded} из ${files.length} файлов, новых задач: ${tasksLoaded}`);
+  if (lessonsLoaded) console.log(`[init] ✅ Уроки: ${lessonsLoaded} (${pythonLessons.length} новых Python), новых задач: ${tasksLoaded}`);
 }
 
 function seedCrm() {

@@ -27,7 +27,9 @@ function requireManageTasks(req, res, next) {
 function moduleRow(r) {
   return {
     id: r.id, lang: r.lang, title: r.title,
-    description: r.description || '', video: r.video || '', explanation: r.explanation || ''
+    description: r.description || '', video: r.video || '', explanation: r.explanation || '',
+    track: r.track || '', level: r.level || '', estimatedMin: r.estimated_min || 60,
+    prerequisiteId: r.prerequisite_id || null
   };
 }
 

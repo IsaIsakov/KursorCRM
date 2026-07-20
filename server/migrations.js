@@ -238,6 +238,46 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 9,
+    name: 'python_curriculum_reset_and_admin_only',
+    up(db) {
+      // This release intentionally starts a clean pilot: the owner requested
+      // removal of every account except administrators and replacement of the
+      // legacy Python course. Keep this as an immutable, one-shot migration so
+      // a restart can never repeat or broaden the deletion.
+      const totalUsers = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+      const admins = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin'").get().n;
+      // A brand-new database is migrated before seedAdmin() runs; there is
+      // nothing to delete there. Existing databases must retain an admin.
+      if (totalUsers && !admins) throw new Error('Очистка пользователей отменена: в базе нет администратора');
+
+      const moduleCols = db.prepare('PRAGMA table_info(modules)').all().map(c => c.name);
+      if (!moduleCols.includes('track')) db.exec("ALTER TABLE modules ADD COLUMN track TEXT NOT NULL DEFAULT ''");
+      if (!moduleCols.includes('level')) db.exec("ALTER TABLE modules ADD COLUMN level TEXT NOT NULL DEFAULT ''");
+      if (!moduleCols.includes('estimated_min')) db.exec('ALTER TABLE modules ADD COLUMN estimated_min INTEGER NOT NULL DEFAULT 60');
+      if (!moduleCols.includes('prerequisite_id')) db.exec('ALTER TABLE modules ADD COLUMN prerequisite_id TEXT');
+
+      // Append-only accounting protects normal application traffic. During the
+      // explicitly requested full account reset we temporarily remove only its
+      // delete guard and restore it before the migration commits.
+      db.exec('DROP TRIGGER IF EXISTS subscription_transactions_no_delete');
+      db.exec(`
+        DELETE FROM subscription_transactions WHERE student_id IN (SELECT id FROM users WHERE role<>'admin');
+        DELETE FROM subscription_payments WHERE student_id IN (SELECT id FROM users WHERE role<>'admin');
+        DELETE FROM subscription_freezes WHERE subscription_id IN (SELECT id FROM subscriptions WHERE student_id IN (SELECT id FROM users WHERE role<>'admin'));
+        DELETE FROM subscriptions WHERE student_id IN (SELECT id FROM users WHERE role<>'admin');
+        DELETE FROM crm_tasks;
+        DELETE FROM crm_leads;
+        DELETE FROM groups;
+        UPDATE users SET teacher_id=NULL WHERE role<>'admin';
+        DELETE FROM users WHERE role<>'admin';
+        DELETE FROM modules WHERE lang='python';
+        CREATE TRIGGER IF NOT EXISTS subscription_transactions_no_delete BEFORE DELETE ON subscription_transactions
+        BEGIN SELECT RAISE(ABORT, 'subscription transactions are append-only'); END;
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

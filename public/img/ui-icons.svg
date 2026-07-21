@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="calendar" viewBox="0 0 24 24"><path d="M6 2v3M18 2v3M3 9h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/></symbol>
+  <symbol id="student" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0M19 4v6M16 7h6"/></symbol>
+  <symbol id="groups" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M14 16a5 5 0 0 1 7.5 4"/></symbol>
+  <symbol id="tasks" viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11M3.5 5.2l1.3 1.3L7 4M3.5 12.2l1.3 1.3L7 11M3.5 19.2l1.3 1.3L7 18"/></symbol>
+  <symbol id="book" viewBox="0 0 24 24"><path d="M4 4.5A3.5 3.5 0 0 1 7.5 1H12v19H7.5A3.5 3.5 0 0 0 4 23V4.5ZM20 4.5A3.5 3.5 0 0 0 16.5 1H12v19h4.5A3.5 3.5 0 0 1 20 23V4.5Z"/></symbol>
+  <symbol id="chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 22h4"/></symbol>
+  <symbol id="menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="logout" viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 8l4 4-4 4M18 12H8"/></symbol>
+  <symbol id="building" viewBox="0 0 24 24"><path d="M3 21h18M5 21V5l7-3v19M12 8h7v13M8 7v2M8 12v2M8 17v2M16 11v2M16 16v2"/></symbol>
+  <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 7V3l-2 2a9 9 0 1 0 2.3 9M20 3h-4"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/></symbol>
+  <symbol id="close" viewBox="0 0 24 24"><path d="m5 5 14 14M19 5 5 19"/></symbol>
+  <symbol id="warning" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3ZM12 9v5M12 18h.01"/></symbol>
+  <symbol id="feed" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"/></symbol>
+  <symbol id="edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L20 8l-4-4L4 16ZM14 6l4 4"/></symbol>
+  <symbol id="video" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/></symbol>
+  <symbol id="snowflake" viewBox="0 0 24 24"><path d="M12 2v20M4 7l16 10M20 7 4 17M9 4l3 3 3-3M9 20l3-3 3 3"/></symbol>
+</svg>

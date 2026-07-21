@@ -6,29 +6,33 @@ function requireAuth(allowedRoles) {
   return API.requireAuth(allowedRoles);
 }
 
+function uiIcon(name, className='ui-icon') {
+  return `<svg class="${className}" aria-hidden="true"><use href="/img/ui-icons.svg#${name}"></use></svg>`;
+}
+
 function renderNavbar(activePage) {
   const user = API.getCurrentUser();
   if (!user) return '';
   const initial = (user.name || 'У').charAt(0).toUpperCase();
   const T = (window.I18N ? I18N.t : (k)=>k);
   const links = user.role === 'student' ? [
-    { href:'/pages/dashboard.html', icon:'https://cdn-icons-png.flaticon.com/512/1946/1946436.png', label:T('nav.dashboard'), key:'dashboard' },
-    { href:'/pages/catalog.html', icon:'https://cdn-icons-png.flaticon.com/512/2232/2232688.png', label:T('nav.tasks'), key:'catalog' },
-    { href:'/pages/leaderboard.html', icon:'https://cdn-icons-png.flaticon.com/512/2583/2583344.png', label:T('nav.leaderboard'), key:'leaderboard' },
-    { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Чаты', key:'chats' },
-    { href:'/pages/profile.html', icon:'https://cdn-icons-png.flaticon.com/512/1144/1144760.png', label:T('nav.profile'), key:'profile' },
+    { href:'/pages/dashboard.html', icon:'building', label:T('nav.dashboard'), key:'dashboard' },
+    { href:'/pages/catalog.html', icon:'book', label:T('nav.tasks'), key:'catalog' },
+    { href:'/pages/leaderboard.html', icon:'chart', label:T('nav.leaderboard'), key:'leaderboard' },
+    { href:'/pages/chats.html', icon:'groups', label:'Чаты', key:'chats' },
+    { href:'/pages/profile.html', icon:'student', label:T('nav.profile'), key:'profile' },
   ] : (user.role === 'teacher' || user.role === 'assistant') ? [
-    { href:'/pages/teacher.html', icon:'https://cdn-icons-png.flaticon.com/512/1995/1995450.png', label:T('nav.students'), key:'teacher' },
-    { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Чаты', key:'chats' },
-    { href:'/pages/catalog.html', icon:'https://cdn-icons-png.flaticon.com/512/2232/2232688.png', label:T('nav.tasks'), key:'catalog' },
-    { href:'/admin/index.html', icon:'https://cdn-icons-png.flaticon.com/512/3524/3524388.png', label:T('nav.manage'), key:'admin' },
+    { href:'/pages/teacher.html', icon:'student', label:T('nav.students'), key:'teacher' },
+    { href:'/pages/chats.html', icon:'groups', label:'Чаты', key:'chats' },
+    { href:'/pages/catalog.html', icon:'book', label:T('nav.tasks'), key:'catalog' },
+    { href:'/admin/index.html', icon:'tasks', label:T('nav.manage'), key:'admin' },
   ] : user.role === 'curator' ? [
-    { href:'/curator/index.html', icon:'https://cdn-icons-png.flaticon.com/512/1828/1828765.png', label:'Кабинет куратора', key:'curator' },
+    { href:'/curator/index.html', icon:'tasks', label:'Кабинет куратора', key:'curator' },
   ] : user.role === 'parent' ? [
-    { href:'/pages/parent.html', icon:'https://cdn-icons-png.flaticon.com/512/1946/1946436.png', label:T('nav.parent'), key:'parent' },
-    { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Написать преподавателю', key:'chats' },
+    { href:'/pages/parent.html', icon:'calendar', label:T('nav.parent'), key:'parent' },
+    { href:'/pages/chats.html', icon:'groups', label:'Написать преподавателю', key:'chats' },
   ] : [
-    { href:'/admin/index.html', icon:'https://cdn-icons-png.flaticon.com/512/3524/3524388.png', label:T('nav.admin'), key:'admin' },
+    { href:'/admin/index.html', icon:'tasks', label:T('nav.admin'), key:'admin' },
   ];
 
   const langHtml = window.I18N ? I18N.switcherHtml() : '';
@@ -36,17 +40,17 @@ function renderNavbar(activePage) {
   return `
   <nav class="navbar">
     <a class="navbar-logo" href="/index.html">
-      <span class="brand-wordmark brand-wordmark-light">KURSOR</span>
+      <img src="/img/kursor-logo.webp" alt="KURSOR">
     </a>
     <div class="navbar-menu">
-      ${links.map(l => `<a href="${l.href}" class="${l.key === activePage ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:8px"><img class="ic ic-20" src="${l.icon}" alt=""> <span data-i18n="${
+      ${links.map(l => `<a href="${l.href}" class="${l.key === activePage ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:8px"><svg class="ui-icon"><use href="/img/ui-icons.svg#${l.icon}"></use></svg><span data-i18n="${
         l.key==='dashboard'?'nav.dashboard':l.key==='catalog'?'nav.tasks':l.key==='leaderboard'?'nav.leaderboard':l.key==='profile'?'nav.profile':l.key==='teacher'?'nav.students':l.key==='admin'?'nav.admin':l.key==='parent'?'nav.parent':l.key==='chats'?'nav.chats':'nav.manage'
       }">${l.label}</span></a>`).join('')}
     </div>
     <div class="navbar-right" style="display:flex;align-items:center;gap:14px">
       ${langHtml}
       <span id="notifBell" class="notif-bell" onclick="toggleNotifPanel()" data-i18n-title="nav.notifications" style="position:relative;cursor:pointer;display:inline-flex">
-        <img class="ic ic-24" src="https://cdn-icons-png.flaticon.com/512/1827/1827347.png" alt="">
+        <svg class="ui-icon"><use href="/img/ui-icons.svg#bell"></use></svg>
         <span id="notifCount" class="notif-count" style="display:none"></span>
       </span>
       <div class="navbar-user" style="cursor:pointer">
@@ -60,7 +64,7 @@ function renderNavbar(activePage) {
           </div>
         </a>
         <span onclick="logout()" data-i18n-title="nav.logout" style="margin-left:8px;padding:6px;border-radius:6px;cursor:pointer;display:inline-flex">
-          <img class="ic ic-20" src="https://cdn-icons-png.flaticon.com/512/1828/1828479.png" alt="">
+          <svg class="ui-icon"><use href="/img/ui-icons.svg#logout"></use></svg>
         </span>
       </div>
     </div>
@@ -98,7 +102,7 @@ async function toggleNotifPanel() {
       <button class="btn btn-sm btn-ghost" onclick="markAllNotif()">${I18N.t('notif.mark_all')}</button></div>`;
     const list = items.map(n => `
       <a class="notif-item ${n.read ? '' : 'unread'} ${n.type === 'missing_report' ? 'urgent' : ''}" href="${n.link || '#'}" onclick="markNotif('${n.id}')">
-        <div class="notif-text">${n.type === 'missing_report' ? '⚠️ ' : ''}${escapeHtml(n.text)}</div>
+        <div class="notif-text">${n.type === 'missing_report' ? uiIcon('warning') : ''}${escapeHtml(n.text)}</div>
         <div class="notif-time">${fmtDateTime(n.createdAt)}</div>
       </a>`).join('');
     panel.innerHTML = head + `<div class="notif-list">${list}</div>`;
@@ -190,6 +194,7 @@ function getQueryParam(name) {
 window.requireAuth = requireAuth;
 window.renderNavbar = renderNavbar;
 window.logout = logout;
+window.uiIcon = uiIcon;
 window.showToast = showToast;
 window.fireConfetti = fireConfetti;
 window.escapeHtml = escapeHtml;

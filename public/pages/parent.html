@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=12">
+<link rel="stylesheet" href="/css/style.css?v=13">
 <style>
 /* ======= PARENT PANEL STYLES ======= */
 .parent-layout {
@@ -310,10 +310,10 @@
   <div class="p-loader">Загружаем кабинет…</div>
 </div>
 
-<script src="/data/database.js?v=12"></script>
-<script src="/js/i18n.js?v=12"></script>
-<script src="/js/api.js?v=12"></script>
-<script src="/js/app.js?v=12"></script>
+<script src="/data/database.js?v=13"></script>
+<script src="/js/i18n.js?v=13"></script>
+<script src="/js/api.js?v=13"></script>
+<script src="/js/app.js?v=13"></script>
 <script>
 const user = requireAuth(['parent']);
 let child = null;     // единственный ребёнок
@@ -362,12 +362,12 @@ function renderLayout() {
     : `<div class="child-avatar-lg">${child.name.charAt(0).toUpperCase()}</div>`;
 
   const navItems = [
-    { key: 'feed',       icon: '📰', label: 'Лента' },
-    { key: 'lessons',    icon: '📅', label: 'Уроки' },
-    { key: 'works',      icon: '📝', label: 'Работы' },
-    { key: 'videos',     icon: '🎥', label: 'Видеоотчёты' },
-    { key: 'care',       icon: '❄️', label: 'Пропуски и заморозка' },
-    { key: 'account',   icon: '👤', label: 'Аккаунт' },
+    { key: 'feed',       icon: 'feed', label: 'Лента' },
+    { key: 'lessons',    icon: 'calendar', label: 'Уроки' },
+    { key: 'works',      icon: 'edit', label: 'Работы' },
+    { key: 'videos',     icon: 'video', label: 'Видеоотчёты' },
+    { key: 'care',       icon: 'snowflake', label: 'Пропуски и заморозка' },
+    { key: 'account',   icon: 'student', label: 'Аккаунт' },
   ];
 
   document.getElementById('app').innerHTML = `
@@ -382,7 +382,7 @@ function renderLayout() {
         <nav class="sidebar-nav" id="sidebarNav">
           ${navItems.map(n => `
             <button class="sidebar-nav-item ${n.key === 'feed' ? 'active' : ''}" data-section="${n.key}" onclick="renderSection('${n.key}')">
-              <span class="nav-icon">${n.icon}</span> ${n.label}
+              <span class="nav-icon">${uiIcon(n.icon)}</span> ${n.label}
             </button>`).join('')}
         </nav>
       </aside>
@@ -415,6 +415,7 @@ async function loadAllData() {
 
 function renderSection(key) {
   activeSection = key;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
   // Update sidebar active state
   document.querySelectorAll('.sidebar-nav-item').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.section === key);
@@ -439,12 +440,12 @@ function requestStatus(status) {
 }
 function buildCare() {
   const lessons=(cachedData.calendar||[]).slice(0,30), reqs=cachedData.requests||{freezes:[],absences:[]};
-  return `<h1 class="section-heading"><span class="sh-icon">❄️</span> Пропуски и заморозка</h1>
+  return `<h1 class="section-heading"><span class="sh-icon">${uiIcon('snowflake')}</span> Пропуски и заморозка</h1>
   <div class="care-grid">
     <div class="care-card"><h3 style="margin:0 0 6px">📅 Ближайшие занятия</h3><p style="color:#64748b;margin:0 0 12px">Сообщите заранее, если ребёнок не сможет прийти.</p>
       ${lessons.length?lessons.map(l=>`<div class="care-lesson"><div class="care-date">${new Date(l.lessonAt).toLocaleDateString('ru-RU',{day:'2-digit',month:'short'})}</div><div style="flex:1"><b>${escapeHtml(l.groupName)}</b><div style="font-size:12px;color:#64748b">${new Date(l.lessonAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})} · ${l.durationMin} мин · ${l.lessonKind==='extra'?'Дополнительный':'Основной'}</div>${l.absenceNotice?`<div style="font-size:12px;color:#2563eb;margin-top:3px">Причина: ${escapeHtml(l.absenceNotice.reason)}</div>`:''}</div>${l.absenceNotice?requestStatus(l.absenceNotice.status):`<button class="btn btn-outline btn-sm" onclick="showAbsenceForm('${l.groupId}',${l.lessonAt},'${escapeHtml(l.groupName)}')">Не придём</button>`}</div>`).join(''):'<div class="empty-state" style="padding:30px">Нет занятий в ближайшие 90 дней</div>'}
     </div>
-    <div><div class="care-card"><h3 style="margin-top:0">❄️ Запросить заморозку</h3><div class="form-group"><label>С какого числа</label><input class="form-input" type="date" id="freezeFrom"></div><div class="form-group"><label>По какое число</label><input class="form-input" type="date" id="freezeTo"></div><div class="form-group"><label>Причина</label><textarea class="form-input" id="freezeReason" rows="3" placeholder="Например: отъезд, лечение"></textarea></div><div id="freezePreview" style="font-size:13px;color:#4f46e5;margin-bottom:10px"></div><button class="btn btn-outline" onclick="previewFreeze()">Посчитать уроки</button> <button class="btn" onclick="sendFreeze()">Отправить запрос</button><div id="careErr" style="color:#ef4444;margin-top:8px"></div></div>
+    <div><div class="care-card"><h3 style="margin-top:0;display:flex;gap:8px;align-items:center">${uiIcon('snowflake')} Запросить заморозку</h3><div class="form-group"><label>С какого числа</label><input class="form-input" type="date" id="freezeFrom"></div><div class="form-group"><label>По какое число</label><input class="form-input" type="date" id="freezeTo"></div><div class="form-group"><label>Причина</label><textarea class="form-input" id="freezeReason" rows="3" placeholder="Например: отъезд, лечение"></textarea></div><div id="freezePreview" style="font-size:13px;color:#4f46e5;margin-bottom:10px"></div><button class="btn btn-outline" onclick="previewFreeze()">Посчитать уроки</button> <button class="btn" onclick="sendFreeze()">Отправить запрос</button><div id="careErr" style="color:#ef4444;margin-top:8px"></div></div>
     <div class="care-card" style="margin-top:18px"><h3 style="margin-top:0">История заявок</h3>${(reqs.freezes||[]).length?reqs.freezes.map(r=>`<div style="padding:10px 0;border-bottom:1px solid #f1f5f9"><div style="display:flex;justify-content:space-between;gap:8px"><b>${fmtDate(r.starts_at)} — ${fmtDate(r.ends_at)}</b>${requestStatus(r.status)}</div><small>${r.lessons_count} занятий · ${escapeHtml(r.reason)}</small>${r.review_comment?`<div style="font-size:12px;margin-top:4px">Комментарий: ${escapeHtml(r.review_comment)}</div>`:''}</div>`).join(''):'<span style="color:#94a3b8">Заявок пока нет</span>'}</div></div>
   </div>`;
 }

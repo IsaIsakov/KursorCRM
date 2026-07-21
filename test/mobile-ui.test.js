@@ -15,7 +15,7 @@ test('every user-facing page opts into safe-area mobile layout and versioned CSS
   for (const file of pages) {
     const html = fs.readFileSync(path.join(root, file), 'utf8');
     assert.match(html, /viewport-fit=cover/, file);
-    assert.match(html, /\/css\/style\.css\?v=12/, file);
+    assert.match(html, /\/css\/style\.css\?v=13/, file);
   }
 });
 

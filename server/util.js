@@ -21,7 +21,7 @@ function toCsv(rows, columns) {
 }
 
 // Простой парсер CSV (поддерживает кавычки, экранирование "")
-function parseCsv(text) {
+function parseCsv(text, delimiter = ',') {
   const rows = [];
   let row = [], field = '', inQuotes = false;
   text = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -34,7 +34,7 @@ function parseCsv(text) {
       } else field += c;
     } else {
       if (c === '"') inQuotes = true;
-      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === delimiter) { row.push(field); field = ''; }
       else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
       else field += c;
     }

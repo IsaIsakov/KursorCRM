@@ -96,7 +96,7 @@ router.post('/import/users', requireRole('admin'), (req, res) => {
   const rows = parsePayload(req.body || {});
   if (!rows) return res.status(400).json({ error: 'Не удалось разобрать данные (JSON/CSV)' });
 
-  const ROLES = ['admin', 'teacher', 'assistant', 'student', 'parent'];
+  const ROLES = ['admin', 'teacher', 'assistant', 'curator', 'student', 'parent'];
   const result = { total: rows.length, toCreate: 0, toUpdate: 0, errors: [], items: [] };
   const existingLogins = new Map(db.prepare('SELECT id, login FROM users').all().map(u => [u.login, u.id]));
 

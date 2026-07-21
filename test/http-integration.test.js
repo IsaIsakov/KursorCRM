@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 9);
+  assert.equal((await ready.json()).schemaVersion, 10);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -61,6 +61,8 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.equal((await api('GET','/api/crm/overview')).body.leads.trial, 1);
   const student = (await api('POST', '/api/users', { name: 'E2E Student', login: `student_${port}`, password: 'Student-2026!', role: 'student', languages: [] }, 201)).body;
   const teacher = (await api('POST', '/api/users', { name: 'E2E Teacher', login: `teacher_${port}`, password: 'Teacher-2026!', role: 'teacher', languages: [] }, 201)).body;
+  const curator = (await api('POST', '/api/users', { name: 'E2E Curator', login: `curator_${port}`, password: 'Curator-2026!', role: 'curator', languages: [] }, 201)).body;
+  await api('PUT', `/api/curator/admin/${curator.id}/branches`, { branchIds: [branch.id] });
 
   // Routers mounted at /api must not apply admin guards to unrelated student
   // endpoints such as /tasks. This reproduces the student dashboard requests.
@@ -92,14 +94,45 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.equal(onboarded.credentials.length, 1);
   assert.ok(onboarded.credentials[0].student.password.length >= 10);
   assert.ok(onboarded.credentials[0].parent.password.length >= 10);
+  assert.equal(onboarded.credentials[0].student.login.split('.').length, 2);
+  assert.ok(onboarded.credentials[0].parent.login.startsWith('p.'));
   const generatedCredentials = (await api('GET', `/api/client-credentials?student_id=${encodeURIComponent(onboarded.credentials[0].studentId)}`)).body;
   assert.equal(generatedCredentials.length, 2);
+  const clientOverview = (await api('GET', `/api/students-crm/${encodeURIComponent(onboarded.credentials[0].studentId)}/overview`)).body;
+  assert.equal(clientOverview.groups.length, 1);
+  assert.equal(clientOverview.student.fullName, 'Тестовый Ребёнок');
 
   await api('POST', `/api/groups/${group.id}/members`, { studentId: student.id, since: Date.now() - 1000 }, 201);
   const lesson = (await api('POST', '/api/lesson-sessions', { groupId: group.id, date: Date.now(), topic: 'Integration' }, 201)).body;
   await api('POST', '/api/attendance', { lessonSessionId: lesson.id, records: [{ studentId: student.id, status: 'present' }] });
   const subscriptions = (await api('GET', `/api/subscriptions?student_id=${encodeURIComponent(student.id)}`)).body;
   assert.equal(subscriptions[0].visits_left, 3);
+
+  const absenceCase = (await api('POST', '/api/curator/cases', { studentId: student.id, category: 'absence', description: 'E2E absence' }, 201)).body;
+  const debtorCase = (await api('POST', '/api/curator/cases', { studentId: student.id, category: 'debtor', description: 'E2E debt' }, 201)).body;
+  const curatorLogin = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: `curator_${port}`, password: 'Curator-2026!' }) });
+  assert.equal(curatorLogin.status, 200);
+  const curatorLoginBody = await curatorLogin.json();
+  const curatorCookie = (curatorLogin.headers.getSetCookie ? curatorLogin.headers.getSetCookie() : [curatorLogin.headers.get('set-cookie')])
+    .filter(Boolean).map(line => line.split(';')[0]).join('; ');
+  async function curatorApi(method, url, body, expected = 200) {
+    const headers = { Cookie: curatorCookie };
+    if (!['GET', 'HEAD'].includes(method)) headers['X-CSRF-Token'] = curatorLoginBody.csrfToken;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const response = await fetch(base + url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await response.text();
+    assert.equal(response.status, expected, `${method} ${url}: ${text}`);
+    return text ? JSON.parse(text) : null;
+  }
+  await curatorApi('POST', '/api/auth/change-password', { oldPassword: 'Curator-2026!', newPassword: 'Curator-final-2026!' });
+  const curatorBootstrap = await curatorApi('GET', '/api/curator/bootstrap');
+  assert.deepEqual(curatorBootstrap.branches.map(item => item.id), [branch.id]);
+  assert.ok((await curatorApi('GET', '/api/curator/students')).some(item => item.user_id === student.id));
+  await curatorApi('POST', `/api/curator/cases/${absenceCase.id}/take`, { comment: 'Calling parent' });
+  await curatorApi('POST', `/api/curator/cases/${debtorCase.id}/take`, { comment: 'Second client' }, 409);
+  await curatorApi('POST', `/api/curator/cases/${absenceCase.id}/complete`, { comment: 'Parent confirmed the next lesson', outcome: 'resolved' });
+  await curatorApi('POST', `/api/curator/cases/${debtorCase.id}/take`, { comment: 'Now available' });
 
   const artifactForm = new FormData();
   for (const [key, value] of Object.entries({ lessonSessionId: lesson.id, studentId: student.id, type: 'screenshot', title: 'E2E image' })) artifactForm.append(key, value);

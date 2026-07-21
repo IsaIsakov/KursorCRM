@@ -4,6 +4,7 @@ const { genId } = require('./util');
 const { hashPassword } = require('./auth');
 const { encrypt, decrypt } = require('./settings-crypto');
 const { normalizePhone } = require('./whatsapp');
+const subscriptions = require('./subscriptions').createSubscriptionService(db);
 
 const CYRILLIC = {
   а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'i',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',
@@ -55,21 +56,50 @@ function parseLanguages(value) {
   return raw.split(/[;|,]/).map(v => v.trim()).filter(Boolean);
 }
 
+function firstAndLast(value, explicitFirst, explicitLast) {
+  if (explicitFirst || explicitLast) return [explicitFirst, explicitLast].filter(Boolean).join('.');
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).join('.');
+}
+
+function resolveNamedId(table, value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const direct = db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(raw);
+  if (direct) return direct.id;
+  const named = db.prepare(`SELECT id FROM ${table} WHERE lower(trim(name))=lower(trim(?))`).get(raw);
+  return named?.id || null;
+}
+
 function validateClientRow(row, line) {
   const studentName = String(row.student_name || row.studentName || row.name || '').trim();
   const parentName = String(row.parent_name || row.parentName || '').trim();
   const phoneRaw = String(row.parent_phone || row.parentPhone || row.phone || '').trim();
   const phone = normalizePhone(phoneRaw);
-  const branchId = String(row.branch_id || row.branchId || '').trim() || null;
+  const branchRaw = String(row.branch || row.branch_name || row.branch_id || row.branchId || '').trim();
+  const branchId = resolveNamedId('branches', branchRaw);
   const tariffId = String(row.tariff_id || row.tariffId || '').trim() || null;
-  const groupId = String(row.group_id || row.groupId || '').trim() || null;
+  const groupRaw = String(row.group || row.group_name || row.group_id || row.groupId || '').trim();
+  const groupId = resolveNamedId('groups', groupRaw);
   const errors = [];
   if (!studentName) errors.push('Не указано имя ребёнка');
+  if (row._strict_import === '1') {
+    if (!String(row.first_name || '').trim()) errors.push('Не указано имя');
+    if (!String(row.last_name || '').trim()) errors.push('Не указана фамилия');
+    if (!String(row.age || '').trim()) errors.push('Не указан возраст');
+    if (!parentName) errors.push('Не указано имя родителя');
+    if (!phoneRaw) errors.push('Не указан номер родителя');
+  }
   if (phoneRaw && !phone) errors.push('Некорректный телефон родителя');
-  if (branchId && !db.prepare('SELECT 1 FROM branches WHERE id=?').get(branchId)) errors.push('Филиал не найден');
+  if (branchRaw && !branchId) errors.push(`Филиал «${branchRaw}» не найден`);
   if (tariffId && !db.prepare('SELECT 1 FROM tariffs WHERE id=?').get(tariffId)) errors.push('Тариф не найден');
-  if (groupId && !db.prepare('SELECT 1 FROM groups WHERE id=?').get(groupId)) errors.push('Группа не найдена');
-  return { line, source: row, studentName, parentName, phone, phoneRaw, branchId, tariffId, groupId, errors };
+  if (groupRaw && !groupId) errors.push(`Группа «${groupRaw}» не найдена`);
+  const age = Number.parseInt(row.age, 10);
+  if (row.age !== undefined && row.age !== '' && (!Number.isInteger(age) || age < 3 || age > 99)) errors.push('Возраст должен быть от 3 до 99 лет');
+  const visitsLeft = Math.max(0, Number.parseInt(row.visits_left ?? row.visitsLeft, 10) || 0);
+  const genderRaw = String(row.gender || '').trim().toLowerCase();
+  const gender = ['м','муж','мужской','m','male'].includes(genderRaw) ? 'm' : ['ж','жен','женский','f','female'].includes(genderRaw) ? 'f' : null;
+  return { line, source: row, studentName, parentName, phone, phoneRaw, branchId, tariffId, groupId, age: age || 0, visitsLeft, gender, errors };
 }
 
 function findParentByPhone(phone) {
@@ -86,9 +116,9 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
   const result = { total: checked.length, created: 0, errors: [], items: [], credentials: [] };
   for (const item of checked) {
     if (item.errors.length) { result.errors.push({ line: item.line, error: item.errors.join('; ') }); continue; }
-    const studentLogin = uniqueLogin(item.studentName, reserved);
+    const studentLogin = uniqueLogin(firstAndLast(item.studentName, item.source.first_name, item.source.last_name), reserved);
     const existingParent = findParentByPhone(item.phone);
-    const parentLogin = existingParent ? existingParent.login : uniqueLogin(`${item.parentName || item.studentName}.parent`, reserved);
+    const parentLogin = existingParent ? existingParent.login : uniqueLogin(`p.${firstAndLast(item.parentName || item.studentName)}`, reserved);
     result.items.push({ line: item.line, studentName: item.studentName, studentLogin, parentName: item.parentName,
       parentLogin, parentReused: !!existingParent, groupId: item.groupId });
     if (dryRun) continue;
@@ -99,7 +129,7 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
       const studentPassword = temporaryPassword();
       db.prepare(`INSERT INTO users (id,login,password_hash,name,role,age,group_id,languages,teacher_id,must_change_password,created_at)
         VALUES (?,?,?,?, 'student', ?,?,?,NULL,1,?)`)
-        .run(studentId, studentLogin, hashPassword(studentPassword), item.studentName, Number(item.source.age) || 0, 0,
+        .run(studentId, studentLogin, hashPassword(studentPassword), item.studentName, item.age, 0,
           JSON.stringify(parseLanguages(item.source.languages)), now);
       db.prepare("INSERT INTO progress (user_id,points,streak,badges) VALUES (?,0,0,'[\"beginner\"]')").run(studentId);
 
@@ -120,10 +150,12 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
         responsible_manager_id,parent_name,parent_phone,comment,video_consent,video_consent_date)
         VALUES (?,?,?,?,?,?,?,'active',?,?,?,?,?,?)`)
         .run(studentId, item.studentName, item.source.birth_date || item.source.birthDate || null, item.branchId, item.tariffId,
-          item.tariffId ? now : null, tariff ? tariff.visits_count : 0, item.source.responsible_manager_id || actorId || null,
+          item.tariffId ? now : null, item.source.visits_left !== undefined ? item.visitsLeft : (tariff ? tariff.visits_count : 0), item.source.responsible_manager_id || actorId || null,
           item.parentName || null, item.phone || item.phoneRaw || null, item.source.comment || null, consent ? 1 : 0, consent ? now : null);
+      db.prepare('UPDATE students_crm SET gender=? WHERE user_id=?').run(item.gender, studentId);
       if (item.groupId) db.prepare('INSERT INTO group_members (id,student_id,group_id,since,until) VALUES (?,?,?,?,NULL)')
         .run(genId('gm'), studentId, item.groupId, now);
+      subscriptions.ensureLegacy(studentId, actorId);
       storeCredential({ userId: studentId, login: studentLogin, password: studentPassword, kind: 'student', actorId });
       return { studentId, parentId, phone: item.phone, student: { login: studentLogin, password: studentPassword },
         parent: parentPassword ? { login: parentLogin, password: parentPassword } : { login: parentLogin, reused: true } };

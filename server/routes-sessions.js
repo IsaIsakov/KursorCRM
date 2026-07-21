@@ -89,6 +89,7 @@ router.delete('/lesson-sessions/:id', (req, res) => {
     db.prepare('DELETE FROM lesson_sessions WHERE id = ?').run(req.params.id);
   });
   txn();
+
   res.json({ ok: true });
 });
 
@@ -100,14 +101,17 @@ router.get('/lesson-sessions/:id/attendance', (req, res) => {
     return res.status(403).json({ error: 'Недоступно' });
   }
   const rows = db.prepare(`
-    SELECT a.*, u.name FROM attendance a JOIN users u ON u.id = a.student_id
+    SELECT a.*, u.name,sa.class_score,sa.homework_score,sa.homework_status,sa.engagement,sa.difficulty,sa.interest,sa.private_comment
+    FROM attendance a JOIN users u ON u.id = a.student_id
+    LEFT JOIN student_assessments sa ON sa.lesson_session_id=a.lesson_session_id AND sa.student_id=a.student_id
     WHERE a.lesson_session_id = ? ORDER BY u.name
   `).all(req.params.id);
   const lessonAt = sessionTimestamp(ls.date);
   const notices = db.prepare("SELECT student_id,reason FROM absence_notices WHERE group_id=? AND lesson_at BETWEEN ? AND ? AND status!='cancelled'")
     .all(ls.group_id, lessonAt - 60000, lessonAt + 60000);
   const noticeMap = new Map(notices.map(n => [n.student_id, n.reason]));
-  const out = rows.map(r => ({ studentId: r.student_id, name: r.name, status: r.status, reason: r.reason || noticeMap.get(r.student_id) || '', parentNotice: noticeMap.has(r.student_id), markedAt: r.marked_at }));
+  const out = rows.map(r => ({ studentId: r.student_id, name: r.name, status: r.status, reason: r.reason || noticeMap.get(r.student_id) || '', parentNotice: noticeMap.has(r.student_id), markedAt: r.marked_at,
+    classScore:r.class_score,homeworkScore:r.homework_score,homeworkStatus:r.homework_status||'none',engagement:r.engagement,difficulty:r.difficulty,interest:r.interest,privateComment:r.private_comment||'' }));
   const seen = new Set(out.map(r => r.studentId));
   for (const studentId of activeMemberIds(db, ls.group_id, lessonAt)) {
     if (!noticeMap.has(studentId) || seen.has(studentId)) continue;
@@ -192,6 +196,15 @@ router.post('/attendance', validateBody(attendanceSchema), (req, res) => {
     }
   });
   txn();
+
+  try {
+    const { createCase } = require('./curator-cases');
+    for (const rec of records.filter(r => ['absent','excused'].includes(r.status))) {
+      createCase({ studentId:rec.studentId, category:'absence',
+        description:rec.status==='excused' ? `Уважительное отсутствие: ${rec.reason||'причина не указана'}` : `Неуважительный пропуск: ${rec.reason||'причина не указана'}`,
+        source:'attendance' });
+    }
+  } catch (e) { console.warn('[curator] Не удалось создать задачу по отсутствию:', e.message); }
 
   // -------- Проверка: всем присутствовавшим ученикам загружен отчёт (работа/видео)? --------
   // Если нет — предупреждаем того, кто проводил занятие, и всех админов (уведомление "красным").

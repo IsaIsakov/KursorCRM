@@ -4,6 +4,8 @@ const { authRequired, requireRole } = require('./auth');
 const { parseCsv } = require('./util');
 const { onboardClients, revealCredential } = require('./onboarding');
 const { sendAccessMessage, normalizePhone } = require('./whatsapp');
+const { parseMultipart } = require('./multipart');
+const { readClientFile, makeTemplate } = require('./client-import');
 
 const router = express.Router();
 router.use(authRequired);
@@ -18,12 +20,23 @@ function rowsFrom(body) {
   return null;
 }
 
-router.post('/import/clients', adminOnly, (req, res, next) => {
+const clientFile = parseMultipart({ maxFileBytes: 8 * 1024 * 1024, maxFields: 2 });
+router.post('/import/clients', adminOnly, clientFile, async (req, res, next) => {
   try {
-    const rows = rowsFrom(req.body || {});
-    if (!rows) return res.status(400).json({ error: 'Не удалось разобрать JSON/CSV' });
+    const rows = req.upload ? await readClientFile(req.upload) : rowsFrom(req.body || {});
+    if (!rows) return res.status(400).json({ error: 'Не удалось разобрать JSON/CSV/XLSX' });
+    if (!rows.length) return res.status(400).json({ error: 'В файле нет строк с клиентами' });
     if (rows.length > 500) return res.status(413).json({ error: 'За один импорт разрешено не более 500 клиентов' });
     res.json(onboardClients(rows, { dryRun: req.query.dryRun === 'true', actorId: req.user.id }));
+  } catch (error) { next(error); }
+});
+
+router.get('/import/clients/template', adminOnly, async (_req, res, next) => {
+  try {
+    const buffer = await makeTemplate();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="kursor-clients-template.xlsx"');
+    res.send(Buffer.from(buffer));
   } catch (error) { next(error); }
 });
 

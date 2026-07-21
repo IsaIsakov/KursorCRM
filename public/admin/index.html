@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=9">
+<link rel="stylesheet" href="/css/style.css?v=12">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -35,10 +35,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=8.1"></script>
-<script src="/js/i18n.js?v=8.1"></script>
-<script src="/js/api.js?v=8.1"></script>
-<script src="/js/app.js?v=8.1"></script>
+<script src="/data/database.js?v=12"></script>
+<script src="/js/i18n.js?v=12"></script>
+<script src="/js/api.js?v=12"></script>
+<script src="/js/app.js?v=12"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -296,6 +296,7 @@ function renderUsers() {
             <td>${KURSOR_DB.GROUPS[u.group]?.name || '—'}</td>
             <td>${(u.languages||[]).map(l=>KURSOR_DB.LANGS[l]?.icon ? `<img src="${KURSOR_DB.LANGS[l].icon}" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px;margin-right:2px">` : '').join('') || '—'}</td>
             <td>
+              ${u.role==='curator'?`<button class="btn btn-ghost" title="Назначить филиалы" onclick="openCuratorBranches('${u.id}')">🏢</button>`:''}
               <button class="btn btn-ghost" title="Редактировать" onclick="openUserForm('${u.id}')"><img src="https://cdn-icons-png.flaticon.com/512/1159/1159633.png" style="width:18px;height:18px;vertical-align:-3px"></button>
               ${u.id !== user.id ? `<button class="btn btn-ghost" title="Удалить" style="color:#ef4444" onclick="removeUser('${u.id}')"><img src="https://cdn-icons-png.flaticon.com/512/3221/3221897.png" style="width:18px;height:18px;vertical-align:-3px"></button>` : ''}
             </td>
@@ -304,6 +305,16 @@ function renderUsers() {
     </table>
   `;
 }
+
+async function openCuratorBranches(curatorId){
+  try{
+    const [branches,assigned]=await Promise.all([API.getBranches(),API._request('GET','/api/curator/admin/assignments')]);
+    const selected=new Set(assigned.filter(x=>x.curator_id===curatorId).map(x=>x.branch_id));
+    document.getElementById('modalContent').innerHTML=`<h2>Филиалы куратора</h2><p style="color:#64748b">Куратор увидит только студентов, группы, уроки и задачи выбранных филиалов.</p><div style="display:grid;gap:8px">${branches.map(b=>`<label class="notice-box" style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="curator-branch" value="${b.id}" ${selected.has(b.id)?'checked':''}> <b>${escapeHtml(b.name)}</b></label>`).join('')||'Сначала создайте филиал'}</div><div id="modalErr" class="form-error"></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn" onclick="saveCuratorBranches('${curatorId}')">Сохранить</button></div>`;
+    document.getElementById('modal').classList.add('active');
+  }catch(e){alert(e.message)}
+}
+async function saveCuratorBranches(id){try{const branchIds=[...document.querySelectorAll('.curator-branch:checked')].map(x=>x.value);await API._request('PUT',`/api/curator/admin/${id}/branches`,{branchIds});closeModal();showToast('Филиалы назначены','success')}catch(e){document.getElementById('modalErr').textContent=e.message}}
 
 async function openUserForm(id) {
   const u = id ? cache.users.find(x => x.id === id) : { role:'student', age:10, group:2, languages:[] };
@@ -335,6 +346,7 @@ async function openUserForm(id) {
         <option value="student" ${u.role==='student'?'selected':''}>Ученик</option>
         <option value="teacher" ${u.role==='teacher'?'selected':''}>Учитель</option>
         <option value="assistant" ${u.role==='assistant'?'selected':''}>Ассистент</option>
+        <option value="curator" ${u.role==='curator'?'selected':''}>Куратор</option>
         <option value="parent" ${u.role==='parent'?'selected':''}>Родитель</option>
         <option value="admin" ${u.role==='admin'?'selected':''}>Администратор</option>
       </select>
@@ -1295,45 +1307,55 @@ async function renderClients() {
       <div><h1 data-i18n="admin.clients">Клиенты (CRM)</h1><p>Карточки учеников, родители, доступы и абонементы</p></div>
       <div class="head-actions"><button class="btn btn-outline" onclick="openClientImport()">Импорт + аккаунты</button><button class="btn" onclick="openClientForm()">${I18N.t('common.add')}</button></div>
     </div>
-    <input class="form-input" id="clSearch" placeholder="${I18N.t('common.search')}" style="margin-bottom:14px" oninput="filterClients()">
-    <table class="table" id="clTable"><thead><tr>
-      <th data-i18n="crm.fullname">ФИО</th><th data-i18n="crm.tariff">Тариф</th><th data-i18n="crm.visits_left">Осталось</th><th data-i18n="common.status">Статус</th><th data-i18n="crm.parent_phone">Тел. родителя</th><th data-i18n="common.actions">Действия</th>
+    <div style="display:grid;grid-template-columns:minmax(220px,1fr) 180px 200px;gap:8px;margin-bottom:12px">
+      <input class="form-input" id="clSearch" placeholder="Поиск по имени или телефону" oninput="filterClients()">
+      <select class="form-input" id="clStatusFilter" onchange="filterClients()"><option value="">Все статусы</option><option value="active">Активные</option><option value="frozen">Замороженные</option><option value="inactive">Неактивные</option></select>
+      <select class="form-input" id="clBranchFilter" onchange="filterClients()"><option value="">Все филиалы</option>${branches.map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}</select>
+    </div>
+    <div style="font-size:13px;color:#64748b;margin:0 0 8px">Найдено: <b id="clVisibleCount">${list.length}</b> из ${list.length}</div>
+    <div class="table-wrap"><table class="table clients-table" id="clTable"><thead><tr>
+      <th data-i18n="crm.fullname">ФИО</th><th>Филиал</th><th data-i18n="crm.tariff">Тариф</th><th data-i18n="crm.visits_left">Осталось</th><th data-i18n="common.status">Статус</th><th data-i18n="crm.parent_phone">Тел. родителя</th><th data-i18n="common.actions">Действия</th>
     </tr></thead><tbody>
     ${list.length ? list.map(c=>{
       const tariff = _byId(tariffs, c.tariffId);
-      return `<tr data-search="${escapeHtml((c.fullName||'').toLowerCase())}">
-        <td><b>${escapeHtml(c.fullName||userName(c.userId))}</b></td>
+      return `<tr data-search="${escapeHtml(((c.fullName||'')+' '+(c.parentPhone||'')+' '+(c.parentName||'')).toLowerCase())}" data-status="${c.status}" data-branch="${c.branchId||''}">
+        <td><b class="client-name" onclick="openClientOverview('${c.userId}')">${escapeHtml(c.fullName||userName(c.userId))}</b><div style="font-size:11px;color:#94a3b8">${escapeHtml(c.login||'')}</div></td>
+        <td>${escapeHtml(c.branchName||'—')}</td>
         <td>${escapeHtml(tariff?tariff.name:'—')}</td>
         <td>${c.visitsLeft ?? 0}</td>
         <td><span class="badge badge-${c.status==='active'?'success':c.status==='frozen'?'warning':'danger'}">${I18N.t('crm.status_'+(c.status||'inactive'))}</span></td>
         <td>${escapeHtml(c.parentPhone||'—')}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="showClientCredentials('${c.userId}')">🔑 Доступы</button>
+        <td><div class="client-actions"><button class="btn btn-ghost btn-sm" onclick="openClientOverview('${c.userId}')">Открыть</button><button class="btn btn-ghost btn-sm" onclick="showClientCredentials('${c.userId}')">🔑</button>
           <button class="btn btn-ghost btn-sm" onclick="openClientForm('${c.userId}')">${I18N.t('common.edit')}</button>
-          <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeClient('${c.userId}')">${I18N.t('common.delete')}</button></td>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeClient('${c.userId}')">×</button></div></td>
       </tr>`;
-    }).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
-    </tbody></table>`;
+    }).join('') : `<tr><td colspan="7" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
+    </tbody></table></div>`;
   I18N.applyI18n(tabEl());
   window._clients = list;
 }
 function openClientImport() {
-  const refs = `<details class="notice-box"><summary><b>Справочник ID для импорта</b></summary>
-    <small>Филиалы: ${(window._branches||[]).map(x=>`${escapeHtml(x.name)} = <code>${escapeHtml(x.id)}</code>`).join(' · ')||'нет'}</small>
-    <small>Тарифы: ${(window._tariffs||[]).map(x=>`${escapeHtml(x.name)} = <code>${escapeHtml(x.id)}</code>`).join(' · ')||'нет'}</small>
-    <small>Группы: ${(window._groups||[]).map(x=>`${escapeHtml(x.name)} = <code>${escapeHtml(x.id)}</code>`).join(' · ')||'нет'}</small></details>`;
   document.getElementById('modalContent').innerHTML = `<h2>Импорт клиентов и аккаунтов</h2>
-    <p style="color:#64748b">Одна строка создаёт ученика, CRM-карточку, родителя, связь между ними и при необходимости добавляет ребёнка в группу.</p>
-    <div class="notice-box"><b>Колонки CSV</b><code>student_name,parent_name,parent_phone,branch_id,tariff_id,group_id,languages,birth_date,video_consent,comment</code></div>${refs}
-    <textarea class="form-input" id="imp_data" rows="9" style="font-family:Fira Code,monospace;font-size:12px" placeholder="student_name,parent_name,parent_phone,branch_id,tariff_id,group_id,languages,video_consent&#10;Иван Иванов,Анна Иванова,+77771234567,br_...,tf_...,grp_...,python,да"></textarea>
+    <p style="color:#64748b">Загрузите Excel/CSV или вставьте таблицу текстом. Система понимает русские названия колонок и находит филиал и группу по названию.</p>
+    <div class="notice-box"><b>Обязательные:</b> Имя, Фамилия, Возраст, Имя родителя, Номер родителя.<br><b>Необязательные:</b> Отчество, Пол, Филиал, Осталось уроков, Группа, Комментарий.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><a class="btn btn-outline" href="/api/import/clients/template">⬇ Скачать Excel-шаблон</a><button class="btn btn-outline" type="button" onclick="document.getElementById('imp_file').click()">📎 Выбрать файл</button><span id="imp_file_name" style="align-self:center;color:#64748b">Файл не выбран</span></div>
+    <input id="imp_file" type="file" accept=".xlsx,.xlsm,.csv,.txt" hidden onchange="document.getElementById('imp_file_name').textContent=this.files[0]?.name||'Файл не выбран'">
+    <details><summary style="cursor:pointer;font-weight:700;margin:10px 0">Или вставить CSV/JSON вручную</summary><textarea class="form-input" id="imp_data" rows="7" style="font-family:Fira Code,monospace;font-size:12px" placeholder="Имя,Фамилия,Возраст,Имя родителя,Номер родителя,Группа&#10;Иван,Иванов,12,Анна Иванова,+77771234567,Python Start"></textarea></details>
     <div id="imp_preview" style="margin-top:10px"></div><div id="modalErr" class="form-error"></div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn btn-secondary" onclick="runClientImport(true)">Проверить</button><button class="btn" onclick="runClientImport(false)">Создать аккаунты</button></div>`;
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn btn-secondary" onclick="runClientImport(true)">Проверить файл</button><button class="btn" id="imp_create" onclick="runClientImport(false)" disabled>Создать аккаунты</button></div>`;
   document.getElementById('modal').classList.add('active');
 }
 async function runClientImport(dryRun) {
   const err=document.getElementById('modalErr'); err.textContent='';
   try {
-    const r=await API.importData('clients',parseImportInput(),dryRun);
-    if(dryRun){document.getElementById('imp_preview').innerHTML=`<div class="card" style="padding:12px">Строк: <b>${r.total}</b> · Готово к созданию: <b>${r.items.length}</b>${r.errors.length?`<div class="form-error">${r.errors.map(e=>`Строка ${e.line}: ${escapeHtml(e.error)}`).join('<br>')}</div>`:''}</div>`;return;}
+    const file=document.getElementById('imp_file')?.files?.[0];
+    const raw=document.getElementById('imp_data')?.value?.trim();
+    if(!file&&!raw) throw new Error('Выберите файл или вставьте данные');
+    const r=file?await API.importClientFile(file,dryRun):await API.importData('clients',parseImportInput(),dryRun);
+    if(dryRun){
+      document.getElementById('imp_preview').innerHTML=`<div class="card" style="padding:12px"><b>${r.errors.length?'Найдены ошибки':'Файл готов к импорту'}</b><div style="margin-top:5px">Строк: ${r.total} · Будет создано: <b>${r.items.length}</b> · Ошибок: <b>${r.errors.length}</b></div>${r.errors.length?`<div class="form-error" style="margin-top:8px;max-height:150px;overflow:auto">${r.errors.map(e=>`Строка ${e.line}: ${escapeHtml(e.error)}`).join('<br>')}</div>`:''}</div>`;
+      const create=document.getElementById('imp_create'); create.disabled=!!r.errors.length; return;
+    }
     _baseLoaded=false;
     document.getElementById('modalContent').innerHTML=`<h2>Создано клиентов: ${r.created}</h2><p>Скопируйте доступы или отправьте их через Green API. Они также доступны в карточке клиента до первой смены пароля.</p>
       <div class="credentials-list">${r.credentials.map(credentialsCardHtml).join('')}</div><div class="modal-actions"><button class="btn" onclick="closeModal();render()">Готово</button></div>`;
@@ -1345,10 +1367,36 @@ async function sendCredentials(studentId,button){button.disabled=true;try{await 
 async function copyText(text){try{await navigator.clipboard.writeText(text);showToast('Скопировано','success');}catch{prompt('Скопируйте данные',text);}}
 function filterClients() {
   const q = document.getElementById('clSearch').value.toLowerCase();
+  const status = document.getElementById('clStatusFilter')?.value || '';
+  const branch = document.getElementById('clBranchFilter')?.value || '';
+  let visible = 0;
   document.querySelectorAll('#clTable tbody tr').forEach(tr => {
     if (!tr.dataset.search) return;
-    tr.style.display = tr.dataset.search.includes(q) ? '' : 'none';
+    const show = tr.dataset.search.includes(q) && (!status || tr.dataset.status===status) && (!branch || tr.dataset.branch===branch);
+    tr.style.display = show ? '' : 'none'; if (show) visible++;
   });
+  const count=document.getElementById('clVisibleCount'); if(count) count.textContent=visible;
+}
+async function openClientOverview(id) {
+  const modal=document.getElementById('modalContent'); modal.classList.add('student-overview-modal');
+  modal.innerHTML='<div style="padding:30px;text-align:center">Загружаем карточку…</div>'; document.getElementById('modal').classList.add('active');
+  try {
+    const o=await API.getCrmStudentOverview(id), c=o.student, initials=(c.fullName||'?').split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
+    const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const statusLabel={present:'Был',late:'Опоздал',excused:'Уваж.',absent:'Пропуск'};
+    const schedules=o.schedules.map(s=>`${days[s.weekday]} ${s.start_time} · ${s.duration_min} мин`).join('<br>')||'Расписание не назначено';
+    modal.innerHTML=`<div class="student-overview-grid"><section>
+      <div class="student-profile-head"><div class="student-avatar-lg">${escapeHtml(initials)}</div><div style="flex:1"><h2 style="margin:0">${escapeHtml(c.fullName)}</h2><div style="color:#64748b">${c.age?c.age+' лет · ':''}${c.gender==='m'?'Мужской':c.gender==='f'?'Женский':'Пол не указан'} · ${escapeHtml(c.branchName||'Филиал не указан')}</div><div style="font-size:12px;color:#94a3b8">Логин: ${escapeHtml(c.login||'—')}</div></div><span class="badge badge-${c.status==='active'?'success':c.status==='frozen'?'warning':'danger'}">${I18N.t('crm.status_'+c.status)}</span></div>
+      <div class="student-stat-grid"><div class="student-stat"><b>${c.visitsLeft}</b><span>уроков осталось</span></div><div class="student-stat"><b>${o.attendanceCounts.present}</b><span>посещено</span></div><div class="student-stat"><b>${o.attendanceCounts.excused}</b><span>уважительных</span></div><div class="student-stat"><b>${o.attendanceCounts.absent}</b><span>пропусков</span></div></div>
+      <div class="card" style="padding:15px"><b>Посещения</b><div class="visit-strip">${o.attendance.length?o.attendance.slice(0,35).map(a=>`<span class="visit-dot ${a.status}" title="${escapeHtml(a.group_name+(a.reason?' · '+a.reason:''))}">${statusLabel[a.status]}<br>${new Date(a.date).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})}</span>`).join(''):'<span style="color:#94a3b8">Посещений пока нет</span>'}</div></div>
+      <div class="card" style="padding:15px;margin-top:12px"><b>Комментарии преподавателей</b>${o.feedback.length?o.feedback.map(f=>`<div style="padding:10px 0;border-bottom:1px solid #e2e8f0"><div>${escapeHtml(f.text)}</div><small style="color:#94a3b8">${escapeHtml(f.teacher_name||'Сотрудник')} · ${new Date(f.created_at).toLocaleDateString('ru-RU')}</small></div>`).join(''):'<p style="color:#94a3b8">Комментариев пока нет</p>'}</div>
+    </section><aside><div class="card" style="padding:16px"><b>Абонемент</b><div style="margin-top:10px">${escapeHtml(c.tariffName||'Тариф не назначен')}</div><div style="font-size:28px;font-weight:800;color:${c.visitsLeft<=2?'#ef4444':'#10b981'}">${c.visitsLeft} уроков</div></div>
+      <div class="card" style="padding:16px;margin-top:12px"><b>Группы</b>${o.groups.length?o.groups.map(g=>`<div style="padding:9px 0;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(g.name)}</strong><br><small>${g.lesson_kind==='extra'?'Дополнительный':'Основной'} · ${escapeHtml(g.teacher_name||'Учитель не назначен')}</small></div>`).join(''):'<p style="color:#94a3b8">Не состоит в группе</p>'}</div>
+      <div class="card" style="padding:16px;margin-top:12px"><b>Регулярные уроки</b><div style="margin-top:8px;color:#475569">${schedules}</div></div>
+      <div class="card" style="padding:16px;margin-top:12px"><b>Родитель</b><div>${escapeHtml(c.parentName||'Не указан')}</div><a href="tel:${escapeHtml(c.parentPhone||'')}">${escapeHtml(c.parentPhone||'Телефон не указан')}</a></div>
+      <div style="display:grid;gap:8px;margin-top:12px"><button class="btn" onclick="closeModal();openClientForm('${id}')">Редактировать карточку</button><button class="btn btn-outline" onclick="showClientCredentials('${id}')">Показать доступы</button><button class="btn btn-outline" onclick="closeModal()">Закрыть</button></div>
+    </aside></div>`;
+  } catch(e){modal.innerHTML=`<div class="form-error">${escapeHtml(e.message)}</div><button class="btn" onclick="closeModal()">Закрыть</button>`;}
 }
 function openClientForm(id) {
   const c = id ? _byId(window._clients||[], id, 'userId') : null;
@@ -1377,6 +1425,8 @@ function openClientForm(id) {
       <input class="form-input" id="cl_parent_phone" value="${escapeHtml(c?.parentPhone||'')}" placeholder="+7 777 123 45 67" oninput="previewNormPhone(this)">
       <small id="cl_phone_preview" style="color:#64748b;font-size:12px"></small>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="form-group"><label>Телефон студента</label><input class="form-input" id="cl_student_phone" value="${escapeHtml(c?.studentPhone||'')}" placeholder="+7 777 000 00 00"></div><div class="form-group"><label>Email студента</label><input class="form-input" id="cl_student_email" type="email" value="${escapeHtml(c?.studentEmail||'')}"></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="form-group"><label>Дата следующей оплаты</label><input class="form-input" id="cl_next_payment" type="date" value="${c?.nextPaymentAt?new Date(c.nextPaymentAt).toISOString().slice(0,10):''}"></div><div class="form-group"><label>Сумма следующей оплаты, ₸</label><input class="form-input" id="cl_next_amount" type="number" min="0" value="${c?.nextPaymentAmount??''}"></div></div>
     <div class="form-group"><label data-i18n="crm.birth_date">Дата рождения</label><input class="form-input" id="cl_birth" type="date" value="${escapeHtml(c?.birthDate||'')}"></div>
     <div class="form-group"><label data-i18n="crm.document">Документ</label><input class="form-input" id="cl_doc" value="${escapeHtml(c?.documentId||'')}"></div>
     <label class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="cl_video" ${c&&c.videoConsent?'checked':''}> <span data-i18n="crm.video_consent">Согласие на видеосъёмку</span></label>
@@ -1399,6 +1449,10 @@ async function saveClient(id) {
     responsibleManagerId: document.getElementById('cl_manager').value || null,
     parentName: document.getElementById('cl_parent_name').value.trim(),
     parentPhone: document.getElementById('cl_parent_phone').value.trim(),
+    studentPhone: document.getElementById('cl_student_phone').value.trim(),
+    studentEmail: document.getElementById('cl_student_email').value.trim() || null,
+    nextPaymentAt: document.getElementById('cl_next_payment').value ? new Date(document.getElementById('cl_next_payment').value+'T12:00:00').getTime() : null,
+    nextPaymentAmount: document.getElementById('cl_next_amount').value ? Number(document.getElementById('cl_next_amount').value) : null,
     birthDate: document.getElementById('cl_birth').value || null,
     documentId: document.getElementById('cl_doc').value.trim(),
     videoConsent: document.getElementById('cl_video').checked,
@@ -1744,6 +1798,17 @@ function lessonRowHtml(r, attendance) {
     </div>
     ${attendance.parentNotice ? `<div style="margin-top:6px;padding:7px 10px;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;font-weight:700">👨‍👩‍👧 Родитель предупредил заранее</div>` : ''}
     <input class="form-input att_reason" data-student="${r.studentId}" value="${escapeHtml(attendance.reason||'')}" placeholder="Причина / примечание к посещению" style="margin-top:6px;font-size:13px">
+    <div style="display:grid;grid-template-columns:120px 120px 1fr;gap:6px;margin-top:6px">
+      <select class="form-input assess_class" data-student="${r.studentId}" title="Оценка за работу на уроке"><option value="">Классная —</option>${[1,2,3,4,5].map(x=>`<option value="${x}" ${attendance.classScore==x?'selected':''}>Классная ${x}</option>`).join('')}</select>
+      <select class="form-input assess_hw" data-student="${r.studentId}" title="Оценка за домашнюю работу"><option value="">ДЗ —</option>${[1,2,3,4,5].map(x=>`<option value="${x}" ${attendance.homeworkScore==x?'selected':''}>ДЗ ${x}</option>`).join('')}</select>
+      <select class="form-input assess_hw_status" data-student="${r.studentId}"><option value="none">ДЗ не задано</option><option value="assigned" ${attendance.homeworkStatus==='assigned'?'selected':''}>ДЗ задано</option><option value="submitted" ${attendance.homeworkStatus==='submitted'?'selected':''}>ДЗ сдано</option><option value="checking" ${attendance.homeworkStatus==='checking'?'selected':''}>На проверке</option><option value="checked" ${attendance.homeworkStatus==='checked'?'selected':''}>Проверено</option><option value="missing" ${attendance.homeworkStatus==='missing'?'selected':''}>Не выполнено</option></select>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px">
+      <select class="form-input assess_engagement" data-student="${r.studentId}"><option value="">Вовлечённость —</option><option value="engaged" ${attendance.engagement==='engaged'?'selected':''}>Вовлечён</option><option value="passive" ${attendance.engagement==='passive'?'selected':''}>Пассивен</option></select>
+      <select class="form-input assess_difficulty" data-student="${r.studentId}"><option value="">Сложность —</option><option value="easy" ${attendance.difficulty==='easy'?'selected':''}>Легко</option><option value="hard" ${attendance.difficulty==='hard'?'selected':''}>Сложно</option></select>
+      <select class="form-input assess_interest" data-student="${r.studentId}"><option value="">Интерес —</option><option value="interested" ${attendance.interest==='interested'?'selected':''}>Интересно</option><option value="not_interested" ${attendance.interest==='not_interested'?'selected':''}>Неинтересно</option></select>
+    </div>
+    <input class="form-input assess_private" data-student="${r.studentId}" value="${escapeHtml(attendance.privateComment||'')}" placeholder="Внутренний комментарий — видит только куратор" style="margin-top:6px;font-size:13px">
     <div class="art_list" data-student="${r.studentId}" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
       ${arts.map(artChipHtml).join('')}
     </div>
@@ -1817,6 +1882,8 @@ async function saveAttendance(sessionId) {
   const records = Array.from(document.querySelectorAll('.att_sel')).map(s => ({ studentId: s.dataset.student, status: s.value, reason: document.querySelector(`.att_reason[data-student="${s.dataset.student}"]`)?.value.trim() || '' }));
   try {
     const resp = await API.saveAttendance({ lessonSessionId: sessionId, records });
+    const assessments=records.map(r=>({studentId:r.studentId,classScore:document.querySelector(`.assess_class[data-student="${r.studentId}"]`)?.value||null,homeworkScore:document.querySelector(`.assess_hw[data-student="${r.studentId}"]`)?.value||null,homeworkStatus:document.querySelector(`.assess_hw_status[data-student="${r.studentId}"]`)?.value||'none',engagement:document.querySelector(`.assess_engagement[data-student="${r.studentId}"]`)?.value||null,difficulty:document.querySelector(`.assess_difficulty[data-student="${r.studentId}"]`)?.value||null,interest:document.querySelector(`.assess_interest[data-student="${r.studentId}"]`)?.value||null,privateComment:document.querySelector(`.assess_private[data-student="${r.studentId}"]`)?.value.trim()||''}));
+    await API._request('POST','/api/student-assessments',{lessonSessionId:sessionId,records:assessments});
     const missing = resp && resp.missingReports || [];
     renderMissingReportWarning(missing);
     if (missing.length === 0) { closeModal(); }
@@ -2320,7 +2387,7 @@ async function renderNotificationsTab() {
   I18N.applyI18n(tabEl());
 }
 
-function closeModal() { document.getElementById('modal').classList.remove('active'); }
+function closeModal() { document.getElementById('modal').classList.remove('active'); document.getElementById('modalContent').classList.remove('student-overview-modal'); }
 document.getElementById('modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 </script>
 </body>

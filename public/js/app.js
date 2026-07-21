@@ -22,6 +22,8 @@ function renderNavbar(activePage) {
     { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Чаты', key:'chats' },
     { href:'/pages/catalog.html', icon:'https://cdn-icons-png.flaticon.com/512/2232/2232688.png', label:T('nav.tasks'), key:'catalog' },
     { href:'/admin/index.html', icon:'https://cdn-icons-png.flaticon.com/512/3524/3524388.png', label:T('nav.manage'), key:'admin' },
+  ] : user.role === 'curator' ? [
+    { href:'/curator/index.html', icon:'https://cdn-icons-png.flaticon.com/512/1828/1828765.png', label:'Кабинет куратора', key:'curator' },
   ] : user.role === 'parent' ? [
     { href:'/pages/parent.html', icon:'https://cdn-icons-png.flaticon.com/512/1946/1946436.png', label:T('nav.parent'), key:'parent' },
     { href:'/pages/chats.html', icon:'https://cdn-icons-png.flaticon.com/512/134/134914.png', label:'Написать преподавателю', key:'chats' },

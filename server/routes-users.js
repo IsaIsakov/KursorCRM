@@ -14,7 +14,7 @@ const router = express.Router();
 router.use(authRequired);
 
 // Допустимые роли (CHECK на уровне БД снят — валидируем здесь)
-const ROLES = ['admin', 'teacher', 'assistant', 'student', 'parent'];
+const ROLES = ['admin', 'teacher', 'assistant', 'curator', 'student', 'parent'];
 const roleSchema = z.enum(ROLES);
 const languagesSchema = z.array(z.string().trim().min(1).max(50)).max(30);
 const createUserSchema = z.strictObject({

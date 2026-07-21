@@ -278,6 +278,92 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 10,
+    name: 'curator_workspace_and_student_success',
+    up(db) {
+      const crmCols = db.prepare('PRAGMA table_info(students_crm)').all().map(c => c.name);
+      if (!crmCols.includes('student_phone')) db.exec('ALTER TABLE students_crm ADD COLUMN student_phone TEXT');
+      if (!crmCols.includes('student_email')) db.exec('ALTER TABLE students_crm ADD COLUMN student_email TEXT');
+      if (!crmCols.includes('next_payment_at')) db.exec('ALTER TABLE students_crm ADD COLUMN next_payment_at INTEGER');
+      if (!crmCols.includes('next_payment_amount')) db.exec('ALTER TABLE students_crm ADD COLUMN next_payment_amount INTEGER');
+      const homeworkCols = db.prepare('PRAGMA table_info(homework)').all().map(c => c.name);
+      if (!homeworkCols.includes('kind')) db.exec("ALTER TABLE homework ADD COLUMN kind TEXT NOT NULL DEFAULT 'homework'");
+      if (!homeworkCols.includes('assignment_text')) db.exec('ALTER TABLE homework ADD COLUMN assignment_text TEXT');
+      if (!homeworkCols.includes('attachment_url')) db.exec('ALTER TABLE homework ADD COLUMN attachment_url TEXT');
+      const assignmentCols = db.prepare('PRAGMA table_info(homework_assignments)').all().map(c => c.name);
+      if (!assignmentCols.includes('status')) db.exec("ALTER TABLE homework_assignments ADD COLUMN status TEXT NOT NULL DEFAULT 'assigned'");
+      if (!assignmentCols.includes('submitted_at')) db.exec('ALTER TABLE homework_assignments ADD COLUMN submitted_at INTEGER');
+      if (!assignmentCols.includes('checked_at')) db.exec('ALTER TABLE homework_assignments ADD COLUMN checked_at INTEGER');
+      if (!assignmentCols.includes('score')) db.exec('ALTER TABLE homework_assignments ADD COLUMN score INTEGER');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS curator_branches (
+          curator_id TEXT NOT NULL,
+          branch_id TEXT NOT NULL,
+          assigned_at INTEGER NOT NULL,
+          PRIMARY KEY(curator_id,branch_id),
+          FOREIGN KEY(curator_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(branch_id) REFERENCES branches(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_curator_branches_branch ON curator_branches(branch_id,curator_id);
+
+        CREATE TABLE IF NOT EXISTS curator_cases (
+          id TEXT PRIMARY KEY,
+          student_id TEXT NOT NULL,
+          branch_id TEXT NOT NULL,
+          category TEXT NOT NULL CHECK(category IN ('debtor','at_risk','absence')),
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','in_progress','follow_up','resolved')),
+          source TEXT NOT NULL DEFAULT 'system',
+          description TEXT,
+          created_at INTEGER NOT NULL,
+          taken_by TEXT,
+          taken_at INTEGER,
+          next_contact_at INTEGER,
+          resolved_at INTEGER,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+          FOREIGN KEY(taken_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_curator_case_open_unique ON curator_cases(student_id,category) WHERE status<>'resolved';
+        CREATE INDEX IF NOT EXISTS idx_curator_case_queue ON curator_cases(branch_id,status,created_at);
+        CREATE INDEX IF NOT EXISTS idx_curator_case_owner ON curator_cases(taken_by,status,next_contact_at);
+
+        CREATE TABLE IF NOT EXISTS curator_case_events (
+          id TEXT PRIMARY KEY,
+          case_id TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          comment TEXT,
+          next_contact_at INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY(case_id) REFERENCES curator_cases(id) ON DELETE CASCADE,
+          FOREIGN KEY(actor_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_curator_case_events ON curator_case_events(case_id,created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS student_assessments (
+          lesson_session_id TEXT NOT NULL,
+          student_id TEXT NOT NULL,
+          class_score INTEGER CHECK(class_score BETWEEN 1 AND 5),
+          homework_score INTEGER CHECK(homework_score BETWEEN 1 AND 5),
+          homework_status TEXT NOT NULL DEFAULT 'none' CHECK(homework_status IN ('none','assigned','submitted','checking','checked','missing')),
+          engagement TEXT CHECK(engagement IN ('engaged','passive')),
+          difficulty TEXT CHECK(difficulty IN ('easy','hard')),
+          interest TEXT CHECK(interest IN ('interested','not_interested')),
+          private_comment TEXT,
+          updated_by TEXT,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(lesson_session_id,student_id),
+          FOREIGN KEY(lesson_session_id) REFERENCES lesson_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(updated_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_student_assessments_student ON student_assessments(student_id,updated_at DESC);
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

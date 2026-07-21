@@ -214,6 +214,7 @@
 
   const getCrmStudents     = (q) => API_.get('/api/students-crm' + (q ? ('?' + q) : ''));
   const getCrmStudent      = (id) => API_.get('/api/students-crm/' + encodeURIComponent(id));
+  const getCrmStudentOverview = (id) => API_.get('/api/students-crm/' + encodeURIComponent(id) + '/overview');
   const getMyGroupStudents = () => API_.get('/api/students-crm/me-as-teacher');
   const createCrmStudent   = (data) => API_.post('/api/students-crm', data);
   const updateCrmStudent   = (id, data) => API_.put('/api/students-crm/' + encodeURIComponent(id), data);
@@ -303,6 +304,8 @@
   }
   const importData = (dataset, payload, dryRun) =>
     API_.post('/api/import/' + dataset + (dryRun ? '?dryRun=true' : ''), payload);
+  const importClientFile = (file, dryRun) => { const form = new FormData(); form.append('file', file);
+    return request('POST', '/api/import/clients' + (dryRun ? '?dryRun=true' : ''), form); };
 
 
   // Привязка родитель ↔ дети
@@ -332,7 +335,7 @@
     getGroups, getGroup, createGroup, updateGroup, deleteGroup,
     getSchedule, addSchedule, deleteSchedule,
     getMembers, addMember, removeMember,
-    getCrmStudents, getCrmStudent, getMyGroupStudents,
+    getCrmStudents, getCrmStudent, getCrmStudentOverview, getMyGroupStudents,
     createCrmStudent, updateCrmStudent, deleteCrmStudent,
     getCrmOverview, getCrmLeads, createCrmLead, updateCrmLead, deleteCrmLead,
     getCrmTasks, createCrmTask, updateCrmTask, deleteCrmTask, getClientCredentials, sendClientCredentials,
@@ -363,6 +366,6 @@
     waSendNow:       (data)   => request('POST', '/api/whatsapp/send-now', data),
     getWaLog:        ()       => request('GET',  '/api/whatsapp/log'),
     // импорт/экспорт
-    exportUrl, exportDownload, importData,
+    exportUrl, exportDownload, importData, importClientFile,
   };
 })();

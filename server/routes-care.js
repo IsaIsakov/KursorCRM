@@ -5,7 +5,7 @@ const { genId } = require('./util');
 
 const router = express.Router();
 router.use(authRequired);
-function curator(req,res,next){ if(!['admin','assistant'].includes(req.user.role)) return res.status(403).json({error:'Доступно куратору или администратору'}); next(); }
+function curator(req,res,next){ if(!['admin','curator'].includes(req.user.role)) return res.status(403).json({error:'Доступно куратору или администратору'}); next(); }
 function canReview(user,row){
   if(user.role==='admin') return true;
   return !!db.prepare(`SELECT 1 FROM students_crm sc LEFT JOIN group_members gm ON gm.student_id=sc.user_id

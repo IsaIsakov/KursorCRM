@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 10);
+  assert.equal((await ready.json()).schemaVersion, 11);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -103,6 +103,26 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.equal(clientOverview.student.fullName, 'Тестовый Ребёнок');
 
   await api('POST', `/api/groups/${group.id}/members`, { studentId: student.id, since: Date.now() - 1000 }, 201);
+  async function sessionApi(cookieValue, csrfValue, method, url, body, expected=200) {
+    const headers={Cookie:cookieValue};
+    if(!['GET','HEAD'].includes(method))headers['X-CSRF-Token']=csrfValue;
+    if(body!==undefined)headers['Content-Type']='application/json';
+    const response=await fetch(base+url,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+    const text=await response.text();
+    assert.equal(response.status,expected,`${method} ${url}: ${text}`);
+    return text?JSON.parse(text):null;
+  }
+  const privateThread=await sessionApi(studentCookie,studentLoginBody.csrfToken,'POST','/api/chats/student-threads',{teacherId:teacher.id,subject:'Вопрос по проекту'},201);
+  await sessionApi(studentCookie,studentLoginBody.csrfToken,'POST',`/api/chats/student-threads/${privateThread.id}/messages`,{body:'Помогите проверить проект'},201);
+  const teacherLogin=await fetch(`${base}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:`teacher_${port}`,password:'Teacher-2026!'})});
+  const teacherLoginBody=await teacherLogin.json();
+  const teacherCookie=(teacherLogin.headers.getSetCookie?teacherLogin.headers.getSetCookie():[teacherLogin.headers.get('set-cookie')]).filter(Boolean).map(line=>line.split(';')[0]).join('; ');
+  await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'POST','/api/auth/change-password',{oldPassword:'Teacher-2026!',newPassword:'Teacher-final-2026!'});
+  const teacherChats=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET','/api/chats');
+  assert.equal(teacherChats.studentThreads[0].unread,1);
+  const privateMessages=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET',`/api/chats/student-threads/${privateThread.id}/messages`);
+  assert.equal(privateMessages.messages[0].body,'Помогите проверить проект');
+  await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'POST',`/api/chats/student-threads/${privateThread.id}/messages`,{body:'Да, посмотрю сегодня'},201);
   const lesson = (await api('POST', '/api/lesson-sessions', { groupId: group.id, date: Date.now(), topic: 'Integration' }, 201)).body;
   await api('POST', '/api/attendance', { lessonSessionId: lesson.id, records: [{ studentId: student.id, status: 'present' }] });
   const subscriptions = (await api('GET', `/api/subscriptions?student_id=${encodeURIComponent(student.id)}`)).body;

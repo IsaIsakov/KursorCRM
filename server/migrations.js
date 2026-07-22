@@ -364,6 +364,39 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 11,
+    name: 'student_teacher_private_dialogs',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS student_teacher_threads (
+          id TEXT PRIMARY KEY,
+          student_id TEXT NOT NULL,
+          teacher_id TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          closed_at INTEGER,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(teacher_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_student_threads_student ON student_teacher_threads(student_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_student_threads_teacher ON student_teacher_threads(teacher_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS student_teacher_messages (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          sender_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          read_at INTEGER,
+          FOREIGN KEY(thread_id) REFERENCES student_teacher_threads(id) ON DELETE CASCADE,
+          FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_student_messages_thread ON student_teacher_messages(thread_id, created_at);
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

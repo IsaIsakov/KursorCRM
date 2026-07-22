@@ -67,7 +67,17 @@ router.get('/chats', requireRole('teacher','student','parent'), (req,res) => {
       FROM groups g LEFT JOIN users t ON t.id=g.teacher_id LEFT JOIN group_members gm ON gm.group_id=g.id
       WHERE g.status='active' AND ((gm.student_id=? AND gm.since<=? AND (gm.until IS NULL OR gm.until>=?)) OR g.id=?) ORDER BY g.name`)
       .all(req.user.id,req.user.id,req.user.id,now,now,req.user.group || '');
-    return res.json({groups,threads:[]});
+    const threads=db.prepare(`SELECT t.*,u.name teacher_name,
+      (SELECT body FROM student_teacher_messages WHERE thread_id=t.id ORDER BY created_at DESC LIMIT 1) last_message,
+      (SELECT created_at FROM student_teacher_messages WHERE thread_id=t.id ORDER BY created_at DESC LIMIT 1) last_at,
+      (SELECT COUNT(*) FROM student_teacher_messages WHERE thread_id=t.id AND sender_id<>? AND read_at IS NULL) unread
+      FROM student_teacher_threads t JOIN users u ON u.id=t.teacher_id
+      WHERE t.student_id=? ORDER BY t.updated_at DESC`).all(req.user.id,req.user.id);
+    const contacts=db.prepare(`SELECT DISTINCT t.id teacher_id,t.name teacher_name,g.id group_id,g.name group_name
+      FROM groups g JOIN users t ON t.id=g.teacher_id LEFT JOIN group_members gm ON gm.group_id=g.id
+      WHERE g.status='active' AND ((gm.student_id=? AND gm.since<=? AND (gm.until IS NULL OR gm.until>=?)) OR g.id=?)
+      ORDER BY t.name,g.name`).all(req.user.id,now,now,req.user.group||'');
+    return res.json({groups,threads:[],studentThreads:threads.map(studentThreadRow),contacts:contacts.map(r=>({teacherId:r.teacher_id,teacherName:r.teacher_name,groupId:r.group_id,groupName:r.group_name}))});
   }
   const groups=db.prepare(`SELECT g.id,g.name,u.name teacher_name,
     (SELECT body FROM group_chat_messages WHERE group_id=g.id AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1) last_message,
@@ -82,10 +92,17 @@ router.get('/chats', requireRole('teacher','student','parent'), (req,res) => {
      WHERE m.thread_id=t.id AND m.sender_id<>? AND m.created_at>COALESCE(rs.read_at,0)) unread
     FROM parent_teacher_threads t JOIN users s ON s.id=t.student_id JOIN users u ON u.id=t.teacher_id JOIN users p ON p.id=t.parent_id
     WHERE t.teacher_id=? ORDER BY t.updated_at DESC`).all(req.user.id,req.user.id,req.user.id);
-  res.json({groups,threads:threads.map(threadRow)});
+  const studentThreads=db.prepare(`SELECT t.*,s.name student_name,u.name teacher_name,
+    (SELECT body FROM student_teacher_messages WHERE thread_id=t.id ORDER BY created_at DESC LIMIT 1) last_message,
+    (SELECT created_at FROM student_teacher_messages WHERE thread_id=t.id ORDER BY created_at DESC LIMIT 1) last_at,
+    (SELECT COUNT(*) FROM student_teacher_messages WHERE thread_id=t.id AND sender_id<>? AND read_at IS NULL) unread
+    FROM student_teacher_threads t JOIN users s ON s.id=t.student_id JOIN users u ON u.id=t.teacher_id
+    WHERE t.teacher_id=? ORDER BY t.updated_at DESC`).all(req.user.id,req.user.id);
+  res.json({groups,threads:threads.map(threadRow),studentThreads:studentThreads.map(studentThreadRow)});
 });
 
 function threadRow(r){ return {id:r.id,subject:r.subject,studentId:r.student_id,studentName:r.student_name,teacherId:r.teacher_id,teacherName:r.teacher_name,parentName:r.parent_name||null,lastMessage:r.last_message||null,lastAt:r.last_at||null,unread:Number(r.unread)||0,closedAt:r.closed_at||null}; }
+function studentThreadRow(r){return {id:r.id,subject:r.subject,studentId:r.student_id,studentName:r.student_name||null,teacherId:r.teacher_id,teacherName:r.teacher_name,lastMessage:r.last_message||null,lastAt:r.last_at||null,unread:Number(r.unread)||0,closedAt:r.closed_at||null}}
 
 router.get('/chats/groups/:groupId/messages', requireRole('teacher','student'), (req,res) => {
   const g=groupAccess(req.user,req.params.groupId); if(!g) return res.status(403).json({error:'Нет доступа к чату группы'});
@@ -118,5 +135,21 @@ router.post('/chats/parent-threads', requireRole('parent'), (req,res) => {
 function getThread(user,id){const t=db.prepare('SELECT * FROM parent_teacher_threads WHERE id=?').get(id);if(!t)return null;if(user.role==='parent'&&t.parent_id===user.id)return t;if(user.role==='teacher'&&t.teacher_id===user.id)return t;return null;}
 router.get('/chats/parent-threads/:id/messages', requireRole('teacher','parent'), (req,res)=>{const t=getThread(req.user,req.params.id);if(!t)return res.status(403).json({error:'Нет доступа к диалогу'});const rows=db.prepare(`SELECT m.*,u.name sender_name,u.role sender_role,u.avatar_url FROM parent_teacher_messages m JOIN users u ON u.id=m.sender_id WHERE m.thread_id=? ORDER BY m.created_at LIMIT 200`).all(t.id);markRead(req.user.id,'parent_thread',t.id);db.prepare('UPDATE parent_teacher_messages SET read_at=? WHERE thread_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),t.id,req.user.id);res.json({messages:rows.map(publicMessage)});});
 router.post('/chats/parent-threads/:id/messages', requireRole('teacher','parent'), (req,res)=>{const t=getThread(req.user,req.params.id);if(!t)return res.status(403).json({error:'Нет доступа к диалогу'});if(t.closed_at)return res.status(409).json({error:'Диалог закрыт'});const body=bodyText(req,res);if(body===null)return;const id=genId('pmsg'),now=Date.now();db.prepare('INSERT INTO parent_teacher_messages(id,thread_id,sender_id,body,created_at) VALUES (?,?,?,?,?)').run(id,t.id,req.user.id,body,now);db.prepare('UPDATE parent_teacher_threads SET updated_at=? WHERE id=?').run(now,t.id);const row=db.prepare(`SELECT m.*,u.name sender_name,u.role sender_role,u.avatar_url FROM parent_teacher_messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?`).get(id);const message=publicMessage(row);markRead(req.user.id,'parent_thread',t.id);ws.broadcastToUsers([t.parent_id,t.teacher_id],{type:'chat_message',channelType:'parent_thread',channelId:t.id,message});res.status(201).json(message);});
+
+router.post('/chats/student-threads', requireRole('student'), (req,res)=>{
+  const teacherId=String(req.body?.teacherId||''),subject=String(req.body?.subject||'Вопрос преподавателю').trim(),now=Date.now();
+  if(!subject||subject.length>160)return res.status(400).json({error:'Тема должна содержать от 1 до 160 символов'});
+  const teacher=db.prepare(`SELECT g.teacher_id id FROM groups g LEFT JOIN group_members gm ON gm.group_id=g.id
+    WHERE g.teacher_id=? AND g.status='active' AND ((gm.student_id=? AND gm.since<=? AND (gm.until IS NULL OR gm.until>=?)) OR g.id=?) LIMIT 1`)
+    .get(teacherId,req.user.id,now,now,req.user.group||'');
+  if(!teacher)return res.status(403).json({error:'Можно написать только своему преподавателю'});
+  const existing=db.prepare('SELECT id FROM student_teacher_threads WHERE student_id=? AND teacher_id=? AND closed_at IS NULL ORDER BY updated_at DESC LIMIT 1').get(req.user.id,teacherId);
+  if(existing)return res.json({id:existing.id,reused:true});
+  const id=genId('sth');db.prepare('INSERT INTO student_teacher_threads(id,student_id,teacher_id,subject,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(id,req.user.id,teacherId,subject,now,now);
+  res.status(201).json({id,teacherId,studentId:req.user.id,subject});
+});
+function getStudentThread(user,id){const t=db.prepare('SELECT * FROM student_teacher_threads WHERE id=?').get(id);if(!t)return null;if(user.role==='student'&&t.student_id===user.id)return t;if(user.role==='teacher'&&t.teacher_id===user.id)return t;return null}
+router.get('/chats/student-threads/:id/messages',requireRole('teacher','student'),(req,res)=>{const t=getStudentThread(req.user,req.params.id);if(!t)return res.status(403).json({error:'Нет доступа к диалогу'});const rows=db.prepare(`SELECT m.*,u.name sender_name,u.role sender_role,u.avatar_url FROM student_teacher_messages m JOIN users u ON u.id=m.sender_id WHERE m.thread_id=? ORDER BY m.created_at LIMIT 200`).all(t.id);db.prepare('UPDATE student_teacher_messages SET read_at=? WHERE thread_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),t.id,req.user.id);res.json({messages:rows.map(publicMessage)});});
+router.post('/chats/student-threads/:id/messages',requireRole('teacher','student'),(req,res)=>{const t=getStudentThread(req.user,req.params.id);if(!t)return res.status(403).json({error:'Нет доступа к диалогу'});if(t.closed_at)return res.status(409).json({error:'Диалог закрыт'});const body=bodyText(req,res);if(body===null)return;const id=genId('smsg'),now=Date.now();db.prepare('INSERT INTO student_teacher_messages(id,thread_id,sender_id,body,created_at) VALUES (?,?,?,?,?)').run(id,t.id,req.user.id,body,now);db.prepare('UPDATE student_teacher_threads SET updated_at=? WHERE id=?').run(now,t.id);const row=db.prepare(`SELECT m.*,u.name sender_name,u.role sender_role,u.avatar_url FROM student_teacher_messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?`).get(id);const message=publicMessage(row);ws.broadcastToUsers([t.student_id,t.teacher_id],{type:'chat_message',channelType:'student_thread',channelId:t.id,message});res.status(201).json(message);});
 
 module.exports=router;

@@ -397,6 +397,28 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 12,
+    name: 'sipuni_curator_call_tracking',
+    up(db) {
+      const userCols=db.prepare('PRAGMA table_info(users)').all().map(c=>c.name);
+      if(!userCols.includes('sipuni_extension'))db.exec('ALTER TABLE users ADD COLUMN sipuni_extension TEXT');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sipuni_calls (
+          id TEXT PRIMARY KEY, call_id TEXT UNIQUE, case_id TEXT, student_id TEXT, curator_id TEXT,
+          phone TEXT NOT NULL, extension TEXT, direction TEXT NOT NULL DEFAULT 'outgoing',
+          status TEXT NOT NULL DEFAULT 'requested', started_at INTEGER, answered_at INTEGER,
+          ended_at INTEGER, duration_sec INTEGER, recording_url TEXT, raw_status TEXT,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          FOREIGN KEY(case_id) REFERENCES curator_cases(id) ON DELETE SET NULL,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE SET NULL,
+          FOREIGN KEY(curator_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sipuni_calls_case ON sipuni_calls(case_id,created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sipuni_calls_phone ON sipuni_calls(phone,created_at DESC);
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

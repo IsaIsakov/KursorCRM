@@ -20,12 +20,12 @@ const languagesSchema = z.array(z.string().trim().min(1).max(50)).max(30);
 const createUserSchema = z.strictObject({
   name: text(200), login: text(100), password: z.string().min(10).max(1024), role: roleSchema,
   age: z.coerce.number().int().min(0).max(130).optional(), group: z.coerce.number().int().min(0).max(1000000).optional(),
-  languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(),
+  languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(), sipuni_extension: z.string().trim().max(30).nullable().optional(),
 });
 const updateUserSchema = z.strictObject({
   name: text(200).optional(), login: text(100).optional(), password: z.string().min(10).max(1024).optional(), role: roleSchema.optional(),
   age: z.coerce.number().int().min(0).max(130).optional(), group: z.coerce.number().int().min(0).max(1000000).optional(),
-  languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(),
+  languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(), sipuni_extension: z.string().trim().max(30).nullable().optional(),
 }).refine(v => Object.keys(v).length > 0, 'Нужно передать хотя бы одно поле');
 const avatarSchema = z.strictObject({ dataUrl: z.string().min(32).max(3_000_000) });
 const childrenSchema = z.strictObject({ children: z.array(idSchema).max(500) });
@@ -49,7 +49,7 @@ function rowToUser(row) {
     age: row.age, group: row.group_id,
     languages: JSON.parse(row.languages || '[]'),
     teacher_id: row.teacher_id,
-    avatar_url: row.avatar_url || null,
+    avatar_url: row.avatar_url || null, sipuni_extension: row.sipuni_extension || null,
     createdAt: row.created_at,
   };
 }
@@ -92,7 +92,7 @@ router.get('/staff', requireRole('assistant','admin'), (_req,res)=>{
 });
 
 router.post('/', requireRole('admin'), validateBody(createUserSchema), (req, res) => {
-  const { name, login, password, role, age, group, languages, teacher_id } = req.body || {};
+  const { name, login, password, role, age, group, languages, teacher_id, sipuni_extension } = req.body || {};
   if (!name || !login || !password) return res.status(400).json({ error: 'Имя, логин, пароль обязательны' });
   if (!isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 10 символов' });
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'Некорректная роль' });
@@ -102,13 +102,13 @@ router.post('/', requireRole('admin'), validateBody(createUserSchema), (req, res
 
   const id = randomId();
   db.prepare(`
-    INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, teacher_id, must_change_password, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, teacher_id, must_change_password, created_at, sipuni_extension)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
   `).run(
     id, String(login).trim(), hashPassword(password), String(name).trim(), role,
     parseInt(age) || 0, parseInt(group) || 0,
     JSON.stringify(Array.isArray(languages) ? languages : []),
-    teacher_id || null, Date.now()
+    teacher_id || null, Date.now(), sipuni_extension || null
   );
   if (role === 'student') {
     db.prepare('INSERT OR IGNORE INTO progress (user_id, points, streak, badges) VALUES (?, 0, 0, \'["beginner"]\')').run(id);
@@ -125,7 +125,7 @@ router.put('/:id', validateBody(updateUserSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!cur) return res.status(404).json({ error: 'Пользователь не найден' });
 
-  const { name, password, age, group, languages, role, teacher_id, login } = req.body || {};
+  const { name, password, age, group, languages, role, teacher_id, login, sipuni_extension } = req.body || {};
   if (!isAdmin && password) return res.status(400).json({ error: 'Используйте защищённую форму смены пароля' });
   const patch = {
     name: name !== undefined ? String(name).trim() : cur.name,
@@ -144,10 +144,12 @@ router.put('/:id', validateBody(updateUserSchema), (req, res) => {
       } else patch.login = cur.login;
     } else patch.login = cur.login;
     patch.teacher_id = teacher_id !== undefined ? (teacher_id || null) : cur.teacher_id;
+    patch.sipuni_extension = sipuni_extension !== undefined ? (sipuni_extension || null) : cur.sipuni_extension;
   } else {
     patch.role = cur.role;
     patch.login = cur.login;
     patch.teacher_id = cur.teacher_id;
+    patch.sipuni_extension = cur.sipuni_extension;
   }
 
   if (password && !isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 10 символов' });
@@ -155,9 +157,9 @@ router.put('/:id', validateBody(updateUserSchema), (req, res) => {
   const mustChangePassword = password ? 1 : (cur.must_change_password || 0);
 
   db.prepare(`
-    UPDATE users SET login=?, password_hash=?, name=?, role=?, age=?, group_id=?, languages=?, teacher_id=?, must_change_password=?
+    UPDATE users SET login=?, password_hash=?, name=?, role=?, age=?, group_id=?, languages=?, teacher_id=?, must_change_password=?, sipuni_extension=?
     WHERE id=?
-  `).run(patch.login, passwordHash, patch.name, patch.role, patch.age, patch.group_id, patch.languages, patch.teacher_id, mustChangePassword, targetId);
+  `).run(patch.login, passwordHash, patch.name, patch.role, patch.age, patch.group_id, patch.languages, patch.teacher_id, mustChangePassword, patch.sipuni_extension, targetId);
 
   res.json(rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(targetId)));
 });

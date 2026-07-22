@@ -23,6 +23,8 @@ function inspectSecurityConfig(env = process.env) {
   const jwt = String(env.JWT_SECRET || '');
   const artifact = String(env.ARTIFACT_URL_SECRET || '');
   const settings = String(env.SETTINGS_ENCRYPTION_KEY || '');
+  const sipuniToken = String(env.SIPUNI_WEBHOOK_TOKEN || '');
+  const sipuniTemplate = String(env.SIPUNI_CALL_URL_TEMPLATE || '');
   const origins = String(env.APP_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
 
   if (!isStrongSecret(jwt)) (production ? errors : warnings).push(
@@ -42,6 +44,12 @@ function inspectSecurityConfig(env = process.env) {
   );
   if (production && (!origins.length || origins.some(origin => origin === '*' || !/^https:\/\//i.test(origin)))) {
     errors.push('APP_ORIGIN должен содержать один или несколько production HTTPS origin через запятую');
+  }
+  if (sipuniToken || sipuniTemplate) {
+    if (!isStrongSecret(sipuniToken)) (production ? errors : warnings).push('SIPUNI_WEBHOOK_TOKEN должен содержать не менее 32 символов и не быть шаблонным');
+    if (!/^https:\/\/([^/]+\.)?sipuni\.com\//i.test(sipuniTemplate) || !sipuniTemplate.includes('{phone}') || !sipuniTemplate.includes('{extension}')) {
+      (production ? errors : warnings).push('SIPUNI_CALL_URL_TEMPLATE должен быть HTTPS URL Sipuni с {phone} и {extension}');
+    }
   }
   return { production, errors, warnings };
 }

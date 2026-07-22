@@ -84,6 +84,7 @@ app.use('/api/feedback',          require('./routes-feedback'));
 app.use('/api/session-artifacts', require('./routes-artifacts'));
 app.use('/api/parent',            require('./routes-parent'));
 app.use('/api/notifications',     require('./routes-notifications'));
+app.use('/api/sipuni',            require('./routes-sipuni'));
 app.use('/api',                   require('./routes-chats'));
 app.use('/api',                   require('./routes-care'));
 app.use('/api',                   require('./routes-curator'));

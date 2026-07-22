@@ -101,9 +101,9 @@ async function toggleNotifPanel() {
     const head = `<div class="notif-head"><b>${I18N.t('nav.notifications')}</b>
       <button class="btn btn-sm btn-ghost" onclick="markAllNotif()">${I18N.t('notif.mark_all')}</button></div>`;
     const list = items.map(n => `
-      <a class="notif-item ${n.read ? '' : 'unread'} ${n.type === 'missing_report' ? 'urgent' : ''}" href="${n.link || '#'}" onclick="markNotif('${n.id}')">
+      <a class="notif-item ${n.read ? '' : 'unread'} ${n.type === 'missing_report' ? 'urgent' : ''}" href="${n.link || '#'}" onclick="return openNotif(event,'${n.id}',this.href)">
         <div class="notif-text">${n.type === 'missing_report' ? uiIcon('warning') : ''}${escapeHtml(n.text)}</div>
-        <div class="notif-time">${fmtDateTime(n.createdAt)}</div>
+        <div class="notif-time">${fmtDateTime(n.createdAt)}${n.read ? ' · Прочитано' : ' · Новое'}</div>
       </a>`).join('');
     panel.innerHTML = head + `<div class="notif-list">${list}</div>`;
   } catch (e) {
@@ -111,7 +111,20 @@ async function toggleNotifPanel() {
   }
 }
 async function markNotif(id) { try { await API.markNotifRead(id); loadNotifBadge(); } catch {} }
-async function markAllNotif() { try { await API.markAllNotifRead(); loadNotifBadge(); toggleNotifPanel(); toggleNotifPanel(); } catch {} }
+async function openNotif(event,id,href) {
+  event?.preventDefault();
+  try { await API.markNotifRead(id); await loadNotifBadge(); }
+  finally { if (href && href !== location.href + '#') location.href = href; }
+  return false;
+}
+async function markAllNotif() {
+  try {
+    await API.markAllNotifRead();
+    await loadNotifBadge();
+    const panel=document.getElementById('notifPanel');
+    if(panel){panel.style.display='none';await toggleNotifPanel();}
+  } catch {}
+}
 
 document.addEventListener('click', (e) => {
   const panel = document.getElementById('notifPanel');
@@ -205,6 +218,7 @@ window.getQueryParam = getQueryParam;
 window.toggleNotifPanel = toggleNotifPanel;
 window.loadNotifBadge = loadNotifBadge;
 window.markNotif = markNotif;
+window.openNotif = openNotif;
 window.markAllNotif = markAllNotif;
 
 // Подгружаем счётчик уведомлений после отрисовки навбара

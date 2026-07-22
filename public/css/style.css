@@ -781,6 +781,8 @@ h1 { font-weight:800; } h2 { font-weight:700; }
 .notif-item { display:block; padding:12px 16px; border-bottom:1px solid #f1f5f9; color:var(--text); text-decoration:none; }
 .notif-item:hover { background:#f8fafc; text-decoration:none; }
 .notif-item.unread { background:#eef2ff; }
+.notif-item.unread .notif-text::before { content:''; display:inline-block; width:7px; height:7px; margin-right:7px; border-radius:50%; background:#ef4444; vertical-align:1px; }
+.notif-item:not(.unread) { opacity:.78; }
 .notif-item .notif-text { font-size:14px; font-weight:600; }
 .notif-item .notif-time { font-size:11px; color:var(--text-muted); margin-top:4px; }
 .notif-item.urgent .notif-text { color:#dc2626; }

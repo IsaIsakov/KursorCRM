@@ -285,6 +285,9 @@
   const createParentThread = data => API_.post('/api/chats/parent-threads', data);
   const getParentThreadMessages = id => API_.get('/api/chats/parent-threads/' + encodeURIComponent(id) + '/messages');
   const sendParentThreadMessage = (id, body) => API_.post('/api/chats/parent-threads/' + encodeURIComponent(id) + '/messages', { body });
+  const createStudentThread = data => API_.post('/api/chats/student-threads', data);
+  const getStudentThreadMessages = id => API_.get('/api/chats/student-threads/' + encodeURIComponent(id) + '/messages');
+  const sendStudentThreadMessage = (id, body) => API_.post('/api/chats/student-threads/' + encodeURIComponent(id) + '/messages', { body });
 
   /* ---------- Импорт / экспорт ---------- */
   function exportUrl(dataset, format) {
@@ -353,6 +356,7 @@
     // фаза 6
     getNotifications, markNotifRead, markAllNotifRead, deleteNotif,
     getChats, getGroupMessages, sendGroupMessage, createParentThread, getParentThreadMessages, sendParentThreadMessage,
+    createStudentThread, getStudentThreadMessages, sendStudentThreadMessage,
     // WhatsApp
     getWaMeta:       ()       => request('GET',  '/api/whatsapp/meta'),
     getWaState:      ()       => request('GET',  '/api/whatsapp/state'),

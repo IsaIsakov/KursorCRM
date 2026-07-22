@@ -17,4 +17,7 @@
   <symbol id="edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L20 8l-4-4L4 16ZM14 6l4 4"/></symbol>
   <symbol id="video" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/></symbol>
   <symbol id="snowflake" viewBox="0 0 24 24"><path d="M12 2v20M4 7l16 10M20 7 4 17M9 4l3 3 3-3M9 20l3-3 3 3"/></symbol>
+  <symbol id="back" viewBox="0 0 24 24"><path d="m10 6-6 6 6 6M4 12h16"/></symbol>
+  <symbol id="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="file" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6V2Z M14 2v5h5 M9 12h6M9 16h6"/></symbol>
 </svg>

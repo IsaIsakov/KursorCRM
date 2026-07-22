@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8"><title>Админ — КУРСОР</title>
+<meta charset="UTF-8"><title>Рабочий кабинет — КУРСОР</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=13">
+<link rel="stylesheet" href="/css/style.css?v=14">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -20,6 +20,9 @@
       <img src="/img/kursor-logo.webp" alt="KURSOR">
     </div>
     <div id="navLangSlot" style="padding:0 16px 12px"></div>
+    <a id="teacherBackLink" href="/pages/teacher.html" class="teacher-back-link" style="display:none">
+      <svg class="ui-icon"><use href="/img/ui-icons.svg#back"></use></svg><span>Мой кабинет</span>
+    </a>
     <div class="nav-search">
       <input id="navSearch" placeholder="Поиск раздела…" data-i18n-ph="admin.search_nav" oninput="filterNav(this.value)">
     </div>
@@ -35,15 +38,17 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=13"></script>
-<script src="/js/i18n.js?v=13"></script>
-<script src="/js/api.js?v=13"></script>
-<script src="/js/app.js?v=13"></script>
+<script src="/data/database.js?v=14"></script>
+<script src="/js/i18n.js?v=14"></script>
+<script src="/js/api.js?v=14"></script>
+<script src="/js/app.js?v=14"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
 const isAdmin = user && user.role === 'admin';
-let currentTab = location.hash === '#requests' ? 'requests' : 'dashboard';
+const ADMIN_TABS = new Set(['dashboard','notifications','modules','tasks','materials','access','branches','tariffs','sales','clients','whatsapp','calendar','requests','groups','sessions','homework','users','permissions']);
+const defaultTab = user && user.role !== 'admin' ? 'calendar' : 'dashboard';
+let currentTab = ADMIN_TABS.has(location.hash.slice(1)) ? location.hash.slice(1) : defaultTab;
 let cache = { users: [], modules: [], tasks: [], progressById: {} };
 let _renderToken = 0;
 
@@ -223,6 +228,7 @@ async function render() {
 
 function switchTab(t) {
   currentTab = t;
+  history.replaceState(null, '', '#' + t);
   window.scrollTo({ top: 0, behavior: 'smooth' });
   document.querySelector('.admin-main')?.scrollTo?.({ top: 0, behavior: 'smooth' });
   highlightActiveNav();
@@ -233,6 +239,9 @@ function switchTab(t) {
 
 // Инициализация после загрузки
 window.addEventListener('DOMContentLoaded', async () => {
+  const back = document.getElementById('teacherBackLink');
+  if (back && ['teacher','assistant'].includes(user?.role)) back.style.display = 'flex';
+  if (user && user.role !== 'admin') document.title = 'Кабинет преподавателя — КУРСОР';
   document.getElementById('navLangSlot').innerHTML = I18N.switcherHtml();
   try { const fresh = await API.refreshCurrentUser(); userPerms = fresh.permissions || {}; } catch {}
   buildNav();
@@ -1754,10 +1763,11 @@ async function removeSession(id) {
 let _lesson = { sessionId: null, groupId: null, artifacts: [], missing: [] };
 
 async function openAttendance(sessionId, groupId) {
-  const [existing, members, artifacts] = await Promise.all([
+  const [existing, members, artifacts, homework] = await Promise.all([
     API.getSessionAttendance(sessionId),
     groupId ? API.getMembers(groupId) : Promise.resolve([]),
     API.getArtifacts('lesson_session_id=' + encodeURIComponent(sessionId)).catch(() => []),
+    groupId ? API.getHomework('group_id=' + encodeURIComponent(groupId)).catch(() => []) : Promise.resolve([]),
   ]);
   const existMap = {};
   (existing || []).forEach(r => { existMap[r.studentId] = r; });
@@ -1767,65 +1777,107 @@ async function openAttendance(sessionId, groupId) {
   (members || []).forEach(m => { roster.push({ studentId: m.studentId, name: m.name || userName(m.studentId) }); seen.add(m.studentId); });
   (existing || []).forEach(r => { if (!seen.has(r.studentId)) { roster.push({ studentId: r.studentId, name: r.name || userName(r.studentId) }); seen.add(r.studentId); } });
 
-  _lesson = { sessionId, groupId, artifacts: artifacts || [], missing: [] };
+  const group = (window._groups || []).find(g => g.id === groupId);
+  _lesson = { sessionId, groupId, artifacts: artifacts || [], missing: [], homework:(homework||[]).filter(h=>h.lessonSessionId===sessionId) };
 
-  document.getElementById('modalContent').innerHTML = `
-    <h2 data-i18n="session.conduct">Проведение занятия</h2>
-    <div class="lesson-help"><b>Как закрыть занятие</b><span>1. Отметьте посещаемость</span><span>2. Добавьте работу или отчёт каждому присутствующему</span><span>3. Сохраните занятие</span></div>
-    <p style="color:#64748b;font-size:13px;margin:10px 0">Видео и файлы — до 150 МБ. Материалы сразу появляются в защищённой ленте родителя.</p>
-    <div id="att_list">${roster.length ? roster.map(r=>lessonRowHtml(r, existMap[r.studentId] || {status:'present',reason:''})).join('')
-      : `<div style="color:#64748b">${I18N.t('common.none')} — в группе нет учеников</div>`}</div>
-    <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+  const modalContent=document.getElementById('modalContent');
+  modalContent.classList.add('lesson-modal');
+  modalContent.innerHTML = `
+    <div class="lesson-modal-head">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+        <div><h2 data-i18n="session.conduct">Проведение занятия</h2><p style="color:#64748b;font-size:13px;margin:3px 0 0">${escapeHtml(group?.name||'Группа')} · ${roster.length} учеников</p></div>
+        <button class="lesson-expand" aria-label="Закрыть" onclick="closeModal()">${uiIcon('close')}</button>
+      </div>
+      <div class="lesson-help"><b>Сначала главное:</b><span>1. Присутствие</span><span>2. Две оценки</span><span>3. Отчёт присутствующим</span><span>4. ДЗ группе</span></div>
+    </div>
+    <div class="lesson-modal-body">
+      <div class="lesson-toolbar"><b>Ученики</b><div class="lesson-toolbar-actions">
+        <button class="btn btn-ghost btn-sm" onclick="setAllAttendance('present')">Все присутствуют</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleAllLessonRows(true)">Раскрыть всех</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleAllLessonRows(false)">Свернуть</button>
+      </div></div>
+      <div id="att_list">${roster.length ? roster.map(r=>lessonRowHtml(r, existMap[r.studentId] || {status:'present',reason:''})).join('')
+        : `<div class="empty-state">${I18N.t('common.none')} — в группе нет учеников</div>`}</div>
+      ${lessonHomeworkHtml(sessionId)}
+    </div>
+    <div class="lesson-modal-footer"><div id="modalErr" class="lesson-save-status"></div><div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.close">Закрыть</button>
-      <button class="btn btn-success" onclick="saveAttendance('${sessionId}')" data-i18n="session.save_attendance">Сохранить посещаемость</button>
-    </div>`;
+      <button class="btn btn-success" onclick="saveAttendance('${sessionId}')">Сохранить занятие</button>
+    </div></div>`;
   document.getElementById('modal').classList.add('active');
   I18N.applyI18n(document.getElementById('modalContent'));
+  document.querySelectorAll('.att_sel').forEach(updateAttendanceReason);
 }
 
 // Разметка строки одного ученика в окне проведения занятия
 function lessonRowHtml(r, attendance) {
   const st = attendance.status || 'present';
   const arts = _lesson.artifacts.filter(a => a.studentId === r.studentId);
-  return `<div class="lesson-row" data-row="${r.studentId}">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <span style="font-weight:600">${escapeHtml(r.name)}</span>
-      <select class="form-input att_sel" data-student="${r.studentId}" style="width:170px">
+  return `<div class="lesson-row lesson-student-card" data-row="${r.studentId}">
+    <div class="lesson-student-main">
+      <span class="lesson-student-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+      <select class="form-input att_sel" aria-label="Посещаемость ${escapeHtml(r.name)}" data-student="${r.studentId}" onchange="updateAttendanceReason(this)">
         <option value="present" ${st==='present'?'selected':''}>${I18N.t('session.present')}</option>
         <option value="absent" ${st==='absent'?'selected':''}>${I18N.t('session.absent')}</option>
         <option value="late" ${st==='late'?'selected':''}>${I18N.t('session.late')}</option>
         <option value="excused" ${st==='excused'?'selected':''}>${I18N.t('session.excused')}</option>
       </select>
+      <select class="form-input assess_class" data-student="${r.studentId}" aria-label="Оценка за урок"><option value="">Урок —</option>${[1,2,3,4,5].map(x=>`<option value="${x}" ${attendance.classScore==x?'selected':''}>Урок ${x}</option>`).join('')}</select>
+      <select class="form-input assess_hw" data-student="${r.studentId}" aria-label="Оценка за ДЗ"><option value="">ДЗ —</option>${[1,2,3,4,5].map(x=>`<option value="${x}" ${attendance.homeworkScore==x?'selected':''}>ДЗ ${x}</option>`).join('')}</select>
+      <button class="lesson-expand" aria-label="Дополнительные отметки" title="Комментарий, теги и отчёты" onclick="toggleLessonRow(this)">${uiIcon('chevron')}</button>
     </div>
-    ${attendance.parentNotice ? `<div style="margin-top:6px;padding:7px 10px;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;font-weight:700;display:flex;gap:7px;align-items:center">${uiIcon('calendar')} Родитель предупредил заранее</div>` : ''}
-    <input class="form-input att_reason" data-student="${r.studentId}" value="${escapeHtml(attendance.reason||'')}" placeholder="Причина / примечание к посещению" style="margin-top:6px;font-size:13px">
-    <div style="display:grid;grid-template-columns:120px 120px 1fr;gap:6px;margin-top:6px">
-      <select class="form-input assess_class" data-student="${r.studentId}" title="Оценка за работу на уроке"><option value="">Классная —</option>${[1,2,3,4,5].map(x=>`<option value="${x}" ${attendance.classScore==x?'selected':''}>Классная ${x}</option>`).join('')}</select>
-      <select class="form-input assess_hw" data-student="${r.studentId}" title="Оценка за домашнюю работу"><option value="">ДЗ —</option>${[1,2,3,4,5].map(x=>`<option value="${x}" ${attendance.homeworkScore==x?'selected':''}>ДЗ ${x}</option>`).join('')}</select>
+    <div class="lesson-student-details">
+      ${attendance.parentNotice ? `<div style="margin-top:10px;padding:7px 10px;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-size:12px;font-weight:700;display:flex;gap:7px;align-items:center">${uiIcon('calendar')} Родитель предупредил заранее</div>` : ''}
+      <div class="lesson-att-reason"><label class="lesson-field-label">Причина отсутствия или примечание</label><input class="form-input att_reason" data-student="${r.studentId}" value="${escapeHtml(attendance.reason||'')}" placeholder="Например: заболел, опоздал на 15 минут"></div>
+      <label class="lesson-field-label">Статус домашней работы</label>
       <select class="form-input assess_hw_status" data-student="${r.studentId}"><option value="none">ДЗ не задано</option><option value="assigned" ${attendance.homeworkStatus==='assigned'?'selected':''}>ДЗ задано</option><option value="submitted" ${attendance.homeworkStatus==='submitted'?'selected':''}>ДЗ сдано</option><option value="checking" ${attendance.homeworkStatus==='checking'?'selected':''}>На проверке</option><option value="checked" ${attendance.homeworkStatus==='checked'?'selected':''}>Проверено</option><option value="missing" ${attendance.homeworkStatus==='missing'?'selected':''}>Не выполнено</option></select>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px">
+      <label class="lesson-field-label">Наблюдения преподавателя — видит куратор</label>
+      <div class="lesson-detail-grid">
       <select class="form-input assess_engagement" data-student="${r.studentId}"><option value="">Вовлечённость —</option><option value="engaged" ${attendance.engagement==='engaged'?'selected':''}>Вовлечён</option><option value="passive" ${attendance.engagement==='passive'?'selected':''}>Пассивен</option></select>
       <select class="form-input assess_difficulty" data-student="${r.studentId}"><option value="">Сложность —</option><option value="easy" ${attendance.difficulty==='easy'?'selected':''}>Легко</option><option value="hard" ${attendance.difficulty==='hard'?'selected':''}>Сложно</option></select>
       <select class="form-input assess_interest" data-student="${r.studentId}"><option value="">Интерес —</option><option value="interested" ${attendance.interest==='interested'?'selected':''}>Интересно</option><option value="not_interested" ${attendance.interest==='not_interested'?'selected':''}>Неинтересно</option></select>
-    </div>
-    <input class="form-input assess_private" data-student="${r.studentId}" value="${escapeHtml(attendance.privateComment||'')}" placeholder="Внутренний комментарий — видит только куратор" style="margin-top:6px;font-size:13px">
-    <div class="art_list" data-student="${r.studentId}" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
+      </div>
+      <input class="form-input assess_private" data-student="${r.studentId}" value="${escapeHtml(attendance.privateComment||'')}" placeholder="Краткий внутренний комментарий" style="margin-top:8px">
+      <label class="lesson-field-label">Работа ученика и видеоотчёт для родителя</label>
+      <div class="art_list" data-student="${r.studentId}" style="display:flex;flex-wrap:wrap;gap:6px">
       ${arts.map(artChipHtml).join('')}
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
       <input class="form-input art_desc" data-student="${r.studentId}" placeholder="${I18N.t('session.work_desc')}" style="flex:1;min-width:160px;font-size:13px">
-      <button class="btn btn-outline btn-sm lesson-upload" type="button" onclick="document.getElementById('wf_${r.studentId}').click()">📎 ${I18N.t('session.add_work')}</button>
-      <button class="btn btn-outline btn-sm lesson-upload" type="button" onclick="document.getElementById('vf_${r.studentId}').click()">🎬 ${I18N.t('session.add_video')}</button>
+      <button class="btn btn-outline btn-sm lesson-upload" type="button" onclick="document.getElementById('wf_${r.studentId}').click()">${uiIcon('file')} ${I18N.t('session.add_work')}</button>
+      <button class="btn btn-outline btn-sm lesson-upload" type="button" onclick="document.getElementById('vf_${r.studentId}').click()">${uiIcon('video')} ${I18N.t('session.add_video')}</button>
       <input id="wf_${r.studentId}" type="file" style="display:none" accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip" onchange="uploadArtifact('${r.studentId}','work',this)">
       <input id="vf_${r.studentId}" type="file" style="display:none" accept="video/*" onchange="uploadArtifact('${r.studentId}','video',this)">
+      </div>
     </div>
   </div>`;
 }
 
+function toggleLessonRow(button){button.closest('.lesson-student-card')?.classList.toggle('expanded')}
+function toggleAllLessonRows(expanded){document.querySelectorAll('.lesson-student-card').forEach(x=>x.classList.toggle('expanded',expanded))}
+function setAllAttendance(value){document.querySelectorAll('.att_sel').forEach(x=>{x.value=value;updateAttendanceReason(x)})}
+function updateAttendanceReason(select){const box=select.closest('.lesson-student-card')?.querySelector('.lesson-att-reason');if(!box)return;box.hidden=['present'].includes(select.value)}
+
+function lessonHomeworkHtml(sessionId){
+  const assigned=_lesson.homework||[];
+  return `<section class="lesson-homework-box ${assigned.length?'expanded':''}" id="lessonHomeworkBox">
+    <div class="lesson-homework-head" onclick="this.parentElement.classList.toggle('expanded')"><div style="display:flex;gap:10px;align-items:center">${uiIcon('book')}<span><b>Домашнее задание группе</b><small style="display:block;color:#64748b">${assigned.length?`Уже назначено: ${assigned.length}`:'Можно назначить прямо из этого урока'}</small></span></div>${uiIcon('chevron')}</div>
+    <div class="lesson-homework-content" onclick="event.stopPropagation()">
+      ${assigned.length?`<div style="display:grid;gap:6px;margin-bottom:12px">${assigned.map(h=>`<div class="notice-box" style="margin:0"><b>${escapeHtml(h.moduleTitle||'Задание')}</b><span>${(h.taskIds||[]).length} задач · срок ${fmtDate(h.dueDate)}</span></div>`).join('')}</div>`:''}
+      <div class="lesson-homework-grid"><div class="form-group"><label>Тема или модуль</label><select class="form-input" id="lessonHwModule" onchange="renderLessonTaskPicker(this.value)"><option value="">Выберите модуль</option>${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml(m.title)}</option>`).join('')}</select></div><div class="form-group"><label>Сдать до</label><input class="form-input" id="lessonHwDue" type="date" value="${new Date(Date.now()+7*86400000).toISOString().slice(0,10)}"></div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="font-weight:800">Задачи из модуля</label><button class="btn btn-ghost btn-sm" type="button" onclick="selectAllLessonTasks()">Выбрать все</button></div>
+      <div id="lessonTaskPicker" class="lesson-task-picker"><span style="color:#64748b">Сначала выберите модуль — появится понятный список задач.</span></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn" type="button" onclick="saveLessonHomework('${sessionId}')">Назначить всей группе</button></div>
+    </div></section>`;
+}
+function tasksForModule(moduleId){return cache.tasks.filter(t=>String(t.module)===String(moduleId))}
+function taskPickerHtml(tasks,inputClass){return tasks.length?tasks.map(t=>`<label class="lesson-task-option"><input type="checkbox" class="${inputClass}" value="${t.id}"><span><b>${escapeHtml(t.title)}</b><br><small style="color:#64748b">${escapeHtml(t.description||'')}</small></span></label>`).join(''):'<span style="color:#64748b">В этом модуле задач нет.</span>'}
+function renderLessonTaskPicker(moduleId){const box=document.getElementById('lessonTaskPicker');box.innerHTML=taskPickerHtml(tasksForModule(moduleId),'lesson-hw-task')}
+function selectAllLessonTasks(){document.querySelectorAll('.lesson-hw-task').forEach(x=>x.checked=true)}
+async function saveLessonHomework(sessionId){const moduleId=document.getElementById('lessonHwModule')?.value||null;const taskIds=[...document.querySelectorAll('.lesson-hw-task:checked')].map(x=>Number(x.value));const dueRaw=document.getElementById('lessonHwDue')?.value;const err=document.getElementById('modalErr');if(!moduleId&&!taskIds.length){err.textContent='Выберите модуль или хотя бы одну задачу';return}try{const hw=await API.createHomework({lessonSessionId:sessionId,moduleId,taskIds,dueDate:dueRaw?new Date(dueRaw+'T12:00:00').getTime():null});_lesson.homework.push(hw);err.textContent='Домашнее задание назначено всей группе';err.style.color='#059669';showToast('Домашнее задание назначено','success')}catch(e){err.style.color='#ef4444';err.textContent=e.message}}
+
 function artChipHtml(a) {
-  const icon = a.type === 'video' ? '🎬' : a.type === 'screenshot' ? '🖼' : a.type === 'link' ? '🔗' : '📄';
+  const icon = a.type === 'video' ? uiIcon('video') : uiIcon('file');
   const label = escapeHtml(a.title || ({video:'Видеоотчёт',screenshot:'Скрин работы',file:'Файл',link:'Ссылка'}[a.type] || a.type));
   const inner = a.url
     ? `<a href="${escapeHtml(a.url)}" target="_blank" style="text-decoration:none">${icon} ${label}</a>`
@@ -1989,10 +2041,12 @@ async function loadHw() {
 function openHwForm(sessionId) {
   document.getElementById('modalContent').innerHTML = `
     <h2>${I18N.t('admin.homework')}</h2>
-    <div class="form-group"><label>${I18N.t('hw.module_opt')}</label><select class="form-input" id="hwf_module">
+    <p style="color:#64748b;margin:-4px 0 16px">Выберите тему, отметьте задания и срок. ДЗ получат все ученики группы.</p>
+    <div class="form-group"><label>${I18N.t('hw.module_opt')}</label><select class="form-input" id="hwf_module" onchange="renderHwFormTasks(this.value)">
       <option value="">${I18N.t('hw.not_set')}</option>
       ${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml(m.title)}</option>`).join('')}</select></div>
-    <div class="form-group"><label>${I18N.t('hw.task_ids')}</label><input class="form-input" id="hwf_tasks" placeholder="${I18N.t('hw.task_ids_ph')}"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="font-weight:800">Задачи</label><button class="btn btn-ghost btn-sm" type="button" onclick="document.querySelectorAll('.hwf-task').forEach(x=>x.checked=true)">Выбрать все</button></div>
+    <div id="hwf_task_picker" class="lesson-task-picker" style="margin-bottom:14px"><span style="color:#64748b">Выберите модуль — здесь появятся его задачи.</span></div>
     <div class="form-group"><label>${I18N.t('hw.due_opt')}</label><input class="form-input" id="hwf_due" type="date"></div>
     <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -2002,8 +2056,9 @@ function openHwForm(sessionId) {
   document.getElementById('modal').classList.add('active');
   I18N.applyI18n(document.getElementById('modalContent'));
 }
+function renderHwFormTasks(moduleId){document.getElementById('hwf_task_picker').innerHTML=taskPickerHtml(tasksForModule(moduleId),'hwf-task')}
 async function saveHw(sessionId) {
-  const taskIds = document.getElementById('hwf_tasks').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const taskIds = [...document.querySelectorAll('.hwf-task:checked')].map(x=>Number(x.value));
   const moduleId = document.getElementById('hwf_module').value || null;
   const dueRaw = document.getElementById('hwf_due').value;
   const data = { lessonSessionId: sessionId, moduleId, taskIds, dueDate: dueRaw ? new Date(dueRaw).getTime() : null };
@@ -2389,7 +2444,10 @@ async function renderNotificationsTab() {
   I18N.applyI18n(tabEl());
 }
 
-function closeModal() { document.getElementById('modal').classList.remove('active'); document.getElementById('modalContent').classList.remove('student-overview-modal'); }
+function closeModal() {
+  document.getElementById('modal').classList.remove('active');
+  document.getElementById('modalContent').classList.remove('student-overview-modal','lesson-modal');
+}
 document.getElementById('modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 </script>
 </body>

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=16">
+<link rel="stylesheet" href="/css/style.css?v=17">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,15 +38,15 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=16"></script>
-<script src="/js/i18n.js?v=16"></script>
-<script src="/js/api.js?v=16"></script>
-<script src="/js/app.js?v=16"></script>
+<script src="/data/database.js?v=17"></script>
+<script src="/js/i18n.js?v=17"></script>
+<script src="/js/api.js?v=17"></script>
+<script src="/js/app.js?v=17"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
 const isAdmin = user && user.role === 'admin';
-const ADMIN_TABS = new Set(['dashboard','notifications','modules','tasks','materials','access','branches','tariffs','sales','clients','whatsapp','calendar','requests','groups','sessions','homework','users','permissions']);
+const ADMIN_TABS = new Set(['dashboard','notifications','modules','tasks','materials','access','branches','tariffs','sales','clients','whatsapp','sipuni','calendar','requests','groups','sessions','homework','users','permissions']);
 const defaultTab = user && user.role !== 'admin' ? 'calendar' : 'dashboard';
 let currentTab = ADMIN_TABS.has(location.hash.slice(1)) ? location.hash.slice(1) : defaultTab;
 let cache = { users: [], modules: [], tasks: [], progressById: {} };
@@ -71,6 +71,7 @@ const NAV_ICONS = {
   users:         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="6" r="3"/><path d="M3 18c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>`,
   permissions:   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2l7 3v5c0 4-3 7-7 8C3 17 0 14 0 10V5l7-3z" transform="translate(1,1) scale(0.9)"/><path d="M7 10l2 2 4-4"/></svg>`,
   whatsapp:      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2a8 8 0 0 1 6.93 12L18 18l-4.14-1.07A8 8 0 1 1 10 2z"/><path d="M7.5 8.5c.3.6.8 1.3 1.4 1.9s1.3 1.1 1.9 1.4l.7-.7c.2-.2.5-.3.8-.2.5.2 1 .3 1.5.4.3.1.5.3.5.6v1.5c0 .3-.2.6-.6.6A8.5 8.5 0 0 1 6 6.6c0-.3.2-.6.6-.6H8c.3 0 .6.2.6.5.1.5.2 1 .4 1.5.1.3 0 .6-.2.8l-.9.7z"/></svg>`,
+  sipuni:        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3h3l1.5 4-2 1.5a12 12 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2C8 17.5 2.5 12 2 5a2 2 0 0 1 2-2z"/><path d="M12 3a5 5 0 0 1 5 5M12 6a2 2 0 0 1 2 2"/></svg>`,
 };
 function navIcon(key) {
   const svg = NAV_ICONS[key] || NAV_ICONS.tasks;
@@ -96,6 +97,9 @@ const NAV_GROUPS = [
   ]},
   { id:'whatsapp_grp', titleKey:'admin.grp_whatsapp', show:() => isAdmin || (userPerms && userPerms.manage_whatsapp), items:[
     { tab:'whatsapp', i18n:'admin.whatsapp', iconKey:'whatsapp' },
+  ]},
+  { id:'telephony', titleKey:'admin.grp_telephony', adminOnly:true, items:[
+    { tab:'sipuni', i18n:'admin.sipuni', iconKey:'sipuni', adminOnly:true },
   ]},
   { id:'journal', titleKey:'admin.grp_journal', items:[
     { tab:'calendar', i18n:'admin.calendar', iconKey:'calendar' },
@@ -204,6 +208,7 @@ const TAB_RENDERERS = {
   notifications: () => renderNotificationsTab(),
   requests: () => renderCareRequests(),
   whatsapp: () => renderWhatsapp(),
+  sipuni: () => renderSipuni(),
 };
 
 async function render() {
@@ -2072,6 +2077,71 @@ async function saveHw(sessionId) {
 async function removeHw(id) {
   if (!confirm(I18N.t('common.confirm_delete'))) return;
   try { await API.deleteHomework(id); await loadHw(); } catch (e) { alert(e.message); }
+}
+
+// ---------- Телефония Sipuni ----------
+async function renderSipuni() {
+  if (!isAdmin) return;
+  const cfg = await API._request('GET', '/api/sipuni/settings');
+  const statusColor = cfg.configured ? '#16a34a' : '#f59e0b';
+  tabEl().innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div><h1 style="margin:0">Телефония Sipuni</h1><p style="color:#64748b;margin:5px 0 0">Звонки родителям прямо из задачника куратора, история и записи разговоров.</p></div>
+      <span class="badge" style="background:${cfg.configured?'#dcfce7':'#fef3c7'};color:${statusColor};font-size:13px">${cfg.configured?'Подключено':'Нужно настроить'}</span>
+    </div>
+    <div class="card" style="padding:22px;margin-top:18px;max-width:880px">
+      <div style="display:grid;gap:22px">
+        <section style="display:grid;grid-template-columns:36px 1fr;gap:12px">
+          <div class="stat-icon blue" style="width:36px;height:36px">1</div>
+          <div><h2 style="font-size:17px;margin:2px 0 6px">Создайте адрес для событий</h2>
+            <p style="color:#64748b;font-size:13px;margin:0 0 10px">Секрет создаётся автоматически и хранится зашифрованным.</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input class="form-input" id="sip_webhook" value="${escapeHtml(cfg.webhookUrl||'')}" readonly placeholder="Нажмите «Создать адрес»" style="flex:1;min-width:260px">
+              <button class="btn btn-outline" onclick="sipPrepare()">${cfg.webhookUrl?'Обновить':'Создать адрес'}</button>
+              <button class="btn btn-ghost" onclick="sipCopyWebhook()" ${cfg.webhookUrl?'':'disabled'}>Копировать</button>
+            </div>
+          </div>
+        </section>
+        <section style="display:grid;grid-template-columns:36px 1fr;gap:12px">
+          <div class="stat-icon purple" style="width:36px;height:36px">2</div>
+          <div><h2 style="font-size:17px;margin:2px 0 6px">Вставьте адрес в Sipuni</h2>
+            <p style="color:#64748b;font-size:13px;margin:0">В кабинете Sipuni откройте <b>Интеграции → API → События на АТС</b>, подключите услугу и вставьте скопированный адрес.</p>
+            <a class="btn btn-ghost btn-sm" style="margin-top:8px" href="https://sipuni.com/cabinet" target="_blank" rel="noopener">Открыть кабинет Sipuni ↗</a>
+          </div>
+        </section>
+        <section style="display:grid;grid-template-columns:36px 1fr;gap:12px">
+          <div class="stat-icon green" style="width:36px;height:36px">3</div>
+          <div><h2 style="font-size:17px;margin:2px 0 6px">Подключите звонок из CRM</h2>
+            <p style="color:#64748b;font-size:13px;margin:0 0 12px">В Sipuni откройте <b>API → Звонок на номер</b>, подключите услугу и скопируйте созданную ссылку целиком.</p>
+            <div class="form-group"><label>Ссылка заказа звонка из Sipuni</label><textarea class="form-input" id="sip_call_url" rows="3" placeholder="https://sipuni.com/...">${cfg.callUrlConfigured?'':' '}</textarea><small style="color:#64748b">${cfg.callUrlConfigured?'Ссылка уже сохранена. Оставьте поле пустым, чтобы не менять её.':'Вставьте ссылку без изменений.'}</small></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div class="form-group"><label>Телефон из скопированной ссылки</label><input class="form-input" id="sip_sample_phone" placeholder="Например, 77051234567" inputmode="tel"></div>
+              <div class="form-group"><label>Внутренний номер из ссылки</label><input class="form-input" id="sip_sample_ext" placeholder="Например, 101" inputmode="numeric"></div>
+            </div>
+            <label style="display:flex;align-items:center;gap:9px;margin:2px 0 14px"><input type="checkbox" id="sip_enabled" ${cfg.enabled?'checked':''}> Включить звонки после сохранения</label>
+            <button class="btn btn-success" onclick="sipSave()">Проверить и подключить</button>
+            <div id="sip_msg" style="font-size:13px;margin-top:10px;min-height:20px"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="notice-box" style="max-width:880px;margin-top:14px"><b>Последний шаг для сотрудников</b><span>В разделе «Пользователи» откройте каждого куратора и укажите его короткий внутренний номер Sipuni. После этого кнопка звонка появится в задаче клиента.</span></div>`;
+}
+
+async function sipPrepare(){
+  try { const r=await API._request('POST','/api/sipuni/settings/prepare',{}); document.getElementById('sip_webhook').value=r.webhookUrl; showToast('Безопасный адрес создан','success'); await navigator.clipboard?.writeText(r.webhookUrl); }
+  catch(e){ showToast(e.message,'error'); }
+}
+async function sipCopyWebhook(){
+  const value=document.getElementById('sip_webhook').value;
+  try{await navigator.clipboard.writeText(value);showToast('Адрес скопирован','success')}catch{document.getElementById('sip_webhook').select();document.execCommand('copy')}
+}
+async function sipSave(){
+  const msg=document.getElementById('sip_msg'); msg.style.color='#64748b'; msg.textContent='Проверяем настройки…';
+  try{
+    const r=await API._request('PUT','/api/sipuni/settings',{callUrl:document.getElementById('sip_call_url').value.trim(),samplePhone:document.getElementById('sip_sample_phone').value.trim(),sampleExtension:document.getElementById('sip_sample_ext').value.trim(),enabled:document.getElementById('sip_enabled').checked});
+    msg.style.color='#16a34a';msg.textContent='Sipuni подключён. Кураторы могут звонить из задачника.';showToast('Телефония подключена','success');setTimeout(renderSipuni,900);
+  }catch(e){msg.style.color='#dc2626';msg.textContent=e.message}
 }
 
 // ---------- WhatsApp рассылка ----------

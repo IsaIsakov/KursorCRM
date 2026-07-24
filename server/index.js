@@ -113,7 +113,8 @@ app.use(express.static(publicDir, {
   setHeaders(res, file) {
     // HTML and executable frontend assets must always revalidate. Otherwise a
     // deploy can combine a new page with an hour-old API client in the browser.
-    if (/\.(html|js|css)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
+    if (/\.html$/i.test(file)) res.setHeader('Cache-Control', 'no-store, max-age=0');
+    else if (/\.(js|css)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
   },
 }));
 

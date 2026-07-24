@@ -128,7 +128,7 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
       const studentId = genId('u');
       const studentPassword = temporaryPassword();
       db.prepare(`INSERT INTO users (id,login,password_hash,name,role,age,group_id,languages,teacher_id,must_change_password,created_at)
-        VALUES (?,?,?,?, 'student', ?,?,?,NULL,1,?)`)
+        VALUES (?,?,?,?, 'student', ?,?,?,NULL,0,?)`)
         .run(studentId, studentLogin, hashPassword(studentPassword), item.studentName, item.age, 0,
           JSON.stringify(parseLanguages(item.source.languages)), now);
       db.prepare("INSERT INTO progress (user_id,points,streak,badges) VALUES (?,0,0,'[\"beginner\"]')").run(studentId);
@@ -138,7 +138,7 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
       if (!parentId) {
         parentId = genId('u'); parentPassword = temporaryPassword();
         db.prepare(`INSERT INTO users (id,login,password_hash,name,role,age,group_id,languages,teacher_id,must_change_password,created_at)
-          VALUES (?,?,?,?,'parent',0,0,'[]',NULL,1,?)`)
+          VALUES (?,?,?,?,'parent',0,0,'[]',NULL,0,?)`)
           .run(parentId, parentLogin, hashPassword(parentPassword), item.parentName || `Родитель ${item.studentName}`, now);
         storeCredential({ userId: parentId, login: parentLogin, password: parentPassword, kind: 'parent', actorId });
       }

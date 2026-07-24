@@ -132,7 +132,7 @@ router.post('/import/users', requireRole('admin'), (req, res) => {
         const id = genId('u');
         const pwd = createPassword;
         db.prepare(`INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, teacher_id, must_change_password, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,1,?)`)
+                    VALUES (?,?,?,?,?,?,?,?,?,0,?)`)
           .run(id, login, hashPassword(pwd), name, role, parseInt(r.age) || 0, parseInt(r.group) || 0, langs, r.teacher_id || null, Date.now());
         if (role === 'student') db.prepare("INSERT OR IGNORE INTO progress (user_id, points, streak, badges) VALUES (?,0,0,'[\"beginner\"]')").run(id);
         existingLogins.set(login, id);

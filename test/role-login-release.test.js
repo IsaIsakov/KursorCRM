@@ -17,7 +17,7 @@ const rolePages = [
 test('all role panels load the same current auth client release', () => {
   for (const file of rolePages) {
     const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
-    assert.match(source, /\/js\/api\.js\?v=18/, `${file} must use current auth client`);
+    assert.match(source, /\/js\/api\.js\?v=19/, `${file} must use current auth client`);
     assert.doesNotMatch(source, /\?v=(16|17)/, `${file} contains a stale release asset`);
   }
 });

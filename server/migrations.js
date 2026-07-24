@@ -419,6 +419,16 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 13,
+    name: 'optional_first_login_password_change',
+    up(db) {
+      // Student/parent credentials are issued by the school and often used by
+      // children on shared devices. Existing accounts must not be trapped on
+      // the password-change screen after this release.
+      db.prepare("UPDATE users SET must_change_password=0 WHERE role<>'admin'").run();
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

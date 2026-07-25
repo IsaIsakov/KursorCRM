@@ -166,4 +166,4 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
   return { dryRun, ...result };
 }
 
-module.exports = { slugName, uniqueLogin, temporaryPassword, onboardClients, revealCredential };
+module.exports = { slugName, uniqueLogin, temporaryPassword, storeCredential, onboardClients, revealCredential };

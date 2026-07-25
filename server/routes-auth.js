@@ -2,6 +2,7 @@
    KURSOR — Auth маршруты: /api/auth/*
    ============================================================ */
 const express = require('express');
+const crypto = require('crypto');
 const db = require('./db');
 const { signToken, checkPassword, authRequired, hashPassword, issueSession, clearSession, parseCookies, CSRF_COOKIE } = require('./auth');
 const { getPermissions } = require('./permissions');
@@ -13,6 +14,44 @@ const router = express.Router();
 
 const loginSchema = z.strictObject({ login: text(100), password: z.string().min(1).max(1024) });
 const changePasswordSchema = z.strictObject({ oldPassword: z.string().min(1).max(1024), newPassword: z.string().min(10).max(1024) });
+const recoverySchema = z.strictObject({
+  login: text(100),
+  recoveryCode: z.string().min(1).max(1024),
+  newPassword: z.string().min(10).max(1024),
+});
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+router.post('/recover-admin', validateBody(recoverySchema), (req, res) => {
+  const configured = String(process.env.ADMIN_RECOVERY_CODE || '');
+  if (!configured) return res.status(503).json({ error: 'Восстановление не настроено администратором' });
+  const { login, recoveryCode, newPassword } = req.body;
+  const source = req.ip || req.socket.remoteAddress || 'unknown';
+  const limiterLogin = `admin-recovery:${login}`;
+  const gate = loginGuard.consume(source, limiterLogin);
+  if (!gate.allowed) {
+    res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(429).json({ error: 'Слишком много попыток. Попробуйте позже', retryAfter: gate.retryAfter });
+  }
+  const row = db.prepare("SELECT id FROM users WHERE login=? AND role='admin'").get(String(login).trim());
+  if (!row || !safeEqual(recoveryCode, configured)) {
+    const failure = loginGuard.recordFailure(source, limiterLogin);
+    if (failure.locked) res.setHeader('Retry-After', String(failure.retryAfter));
+    return res.status(401).json({ error: 'Неверный логин администратора или код восстановления' });
+  }
+  if (!isAcceptablePassword(newPassword)) return res.status(400).json({ error: 'Пароль должен содержать не менее 10 символов' });
+  db.transaction(() => {
+    db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(hashPassword(newPassword), row.id);
+    db.prepare('UPDATE account_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(Date.now(), row.id);
+  })();
+  loginGuard.recordSuccess(source, limiterLogin);
+  clearSession(res);
+  res.json({ ok: true });
+});
 
 router.post('/login', validateBody(loginSchema), (req, res) => {
   const { login, password } = req.body || {};

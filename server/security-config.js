@@ -23,6 +23,7 @@ function inspectSecurityConfig(env = process.env) {
   const jwt = String(env.JWT_SECRET || '');
   const artifact = String(env.ARTIFACT_URL_SECRET || '');
   const settings = String(env.SETTINGS_ENCRYPTION_KEY || '');
+  const recovery = String(env.ADMIN_RECOVERY_CODE || '');
   const origins = String(env.APP_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
 
   if (!isStrongSecret(jwt)) (production ? errors : warnings).push(
@@ -39,6 +40,12 @@ function inspectSecurityConfig(env = process.env) {
   );
   if (settings && (settings === jwt || settings === artifact)) (production ? errors : warnings).push(
     'SETTINGS_ENCRYPTION_KEY должен отличаться от остальных секретов',
+  );
+  if (recovery && !isStrongSecret(recovery)) (production ? errors : warnings).push(
+    `ADMIN_RECOVERY_CODE должен содержать не менее ${MIN_SECRET_LENGTH} символов и не быть шаблонным`,
+  );
+  if (recovery && [jwt, artifact, settings].includes(recovery)) (production ? errors : warnings).push(
+    'ADMIN_RECOVERY_CODE должен отличаться от остальных секретов',
   );
   if (production && (!origins.length || origins.some(origin => origin === '*' || !/^https:\/\//i.test(origin)))) {
     errors.push('APP_ORIGIN должен содержать один или несколько production HTTPS origin через запятую');

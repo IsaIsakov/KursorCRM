@@ -1,8 +1,8 @@
 const express = require('express');
 const db = require('./db');
-const { authRequired, requireRole } = require('./auth');
+const { authRequired, requireRole, hashPassword } = require('./auth');
 const { parseCsv } = require('./util');
-const { onboardClients, revealCredential } = require('./onboarding');
+const { onboardClients, revealCredential, temporaryPassword, storeCredential } = require('./onboarding');
 const { sendAccessMessage, normalizePhone } = require('./whatsapp');
 const { parseMultipart } = require('./multipart');
 const { readClientFile, makeTemplate } = require('./client-import');
@@ -40,15 +40,45 @@ router.get('/import/clients/template', adminOnly, async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.get('/client-credentials', adminOnly, (req, res) => {
+function canManageStudent(req, studentId) {
+  if (req.user.role === 'admin') return true;
+  if (req.user.role !== 'curator') return false;
+  return !!db.prepare(`SELECT 1 FROM students_crm sc
+    JOIN curator_branches cb ON cb.branch_id=sc.branch_id
+    WHERE sc.user_id=? AND cb.curator_id=?`).get(studentId, req.user.id);
+}
+
+function credentialsAllowed(req, res, next) {
+  if (!['admin', 'curator'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
+  next();
+}
+
+router.get('/client-credentials', credentialsAllowed, (req, res) => {
   const studentId = String(req.query.student_id || '');
   if (!studentId) return res.status(400).json({ error: 'student_id обязателен' });
-  const rows = db.prepare(`SELECT ac.* FROM account_credentials ac WHERE ac.user_id=? OR ac.user_id IN
-    (SELECT parent_id FROM parent_children WHERE student_id=?) ORDER BY ac.account_kind`).all(studentId, studentId);
+  if (!canManageStudent(req, studentId)) return res.status(403).json({ error: 'Ученик не относится к вашим филиалам' });
+  const rows = req.user.role === 'admin'
+    ? db.prepare(`SELECT ac.* FROM account_credentials ac WHERE ac.user_id=? OR ac.user_id IN
+      (SELECT parent_id FROM parent_children WHERE student_id=?) ORDER BY ac.account_kind`).all(studentId, studentId)
+    : db.prepare(`SELECT ac.* FROM account_credentials ac WHERE ac.user_id=? AND ac.account_kind='student'`).all(studentId);
   const credentials = rows.map(revealCredential).filter(Boolean);
   if (credentials.length) db.prepare(`UPDATE account_credentials SET revealed_at=? WHERE id IN (${credentials.map(() => '?').join(',')})`)
     .run(Date.now(), ...credentials.map(c => c.id));
   res.json(credentials);
+});
+
+router.post('/client-credentials/reset-student', credentialsAllowed, (req, res) => {
+  const studentId = String(req.body?.studentId || '');
+  if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
+  if (!canManageStudent(req, studentId)) return res.status(403).json({ error: 'Ученик не относится к вашим филиалам' });
+  const student = db.prepare("SELECT id,login FROM users WHERE id=? AND role='student'").get(studentId);
+  if (!student) return res.status(404).json({ error: 'Ученик не найден' });
+  const password = temporaryPassword();
+  db.transaction(() => {
+    db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(hashPassword(password), student.id);
+    storeCredential({ userId: student.id, login: student.login, password, kind: 'student', actorId: req.user.id });
+  })();
+  res.json({ userId: student.id, login: student.login, password, kind: 'student' });
 });
 
 router.post('/client-credentials/send', adminOnly, async (req, res, next) => {

@@ -11,13 +11,23 @@ const { canAccessStudent } = require('./access-scope');
 const { activeMemberIds, validateGroupStudents, sessionTimestamp } = require('./group-scope');
 const subscriptions = require('./subscriptions').createSubscriptionService(db);
 const { z, id: idSchema, optionalText, timestamp, validateBody } = require('./validation');
+const { parseMultipart } = require('./multipart');
+const storage = require('./storage');
 
 const router = express.Router();
 router.use(authRequired);
 
 const lessonSchema = z.strictObject({ groupId: idSchema, date: timestamp, topic: optionalText(500) });
 const attendanceSchema = z.strictObject({ lessonSessionId: idSchema, records: z.array(z.strictObject({ studentId: idSchema, status: z.enum(['present','absent','excused','late']), reason: optionalText(1000) })).max(500) });
-const homeworkSchema = z.strictObject({ lessonSessionId: idSchema, moduleId: idSchema.nullable().optional(), taskIds: z.array(z.coerce.number().int().positive()).max(500).optional(), dueDate: timestamp.nullable().optional(), studentIds: z.array(idSchema).max(500).optional() });
+const homeworkSchema = z.strictObject({
+  lessonSessionId: idSchema,
+  moduleId: idSchema.nullable().optional(),
+  taskIds: z.array(z.coerce.number().int().positive()).max(500).optional(),
+  dueDate: timestamp.nullable().optional(),
+  studentIds: z.array(idSchema).max(500).optional(),
+  description: optionalText(5000),
+  linkUrl: z.string().url().max(2048).refine(v => /^https?:\/\//i.test(v), 'Разрешены только http/https ссылки').nullable().optional(),
+});
 
 function canManageGroup(user, groupId) {
   if (user.role === 'admin') return true;
@@ -273,11 +283,14 @@ function rowToHw(r) {
     taskIds, dueDate: r.due_date || null, createdAt: r.created_at,
     groupId: r.group_id || null, sessionDate: r.session_date || null,
     moduleTitle: r.module_title || null,
+    description: r.description || '', linkUrl: r.link_url || null,
+    fileName: r.file_name || null, fileMime: r.file_mime || null, fileSize: r.file_size || null,
+    fileUrl: r.file_path ? `/api/homework/${encodeURIComponent(r.id)}/file` : null,
   };
 }
 
 router.post('/homework', validateBody(homeworkSchema), (req, res) => {
-  const { lessonSessionId, moduleId, taskIds, dueDate, studentIds } = req.body || {};
+  const { lessonSessionId, moduleId, taskIds, dueDate, studentIds, description, linkUrl } = req.body || {};
   if (!lessonSessionId) return res.status(400).json({ error: 'lessonSessionId обязателен' });
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
   if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
@@ -291,9 +304,13 @@ router.post('/homework', validateBody(homeworkSchema), (req, res) => {
   const targetCheck = validateGroupStudents(db, ls.group_id, targets, sessionTimestamp(ls.date));
   if (!targetCheck.valid) return res.status(400).json({ error: 'Домашнее задание содержит ученика не из этой группы', invalidStudentIds: targetCheck.outsiders });
   const insA = db.prepare('INSERT INTO homework_assignments (id, homework_id, student_id) VALUES (?,?,?)');
-  const insertHomework = db.prepare('INSERT INTO homework (id, lesson_session_id, module_id, task_ids, due_date, created_at) VALUES (?,?,?,?,?,?)');
+  if (!moduleId && !(taskIds && taskIds.length) && !String(description || '').trim() && !linkUrl) {
+    return res.status(400).json({ error: 'Добавьте задачи платформы, текст, ссылку или файл' });
+  }
+  const insertHomework = db.prepare('INSERT INTO homework (id, lesson_session_id, module_id, task_ids, due_date, description, link_url, created_at) VALUES (?,?,?,?,?,?,?,?)');
   const txn = db.transaction(() => {
-    insertHomework.run(id, lessonSessionId, moduleId || null, taskIds && taskIds.length ? JSON.stringify(taskIds) : null, dueDate || null, Date.now());
+    insertHomework.run(id, lessonSessionId, moduleId || null, taskIds && taskIds.length ? JSON.stringify(taskIds) : null,
+      dueDate || null, String(description || '').trim() || null, linkUrl || null, Date.now());
     for (const sid of targets) insA.run(genId('ha'), id, sid);
   });
   txn();
@@ -307,7 +324,44 @@ router.post('/homework', validateBody(homeworkSchema), (req, res) => {
     txnN();
   } catch {}
 
-  res.status(201).json({ id, lessonSessionId, moduleId: moduleId || null, taskIds: taskIds || [], dueDate: dueDate || null, assigned: targets.length });
+  const created = db.prepare(`SELECT h.*, ls.group_id, ls.date session_date, m.title module_title
+    FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id LEFT JOIN modules m ON m.id=h.module_id WHERE h.id=?`).get(id);
+  res.status(201).json({ ...rowToHw(created), assigned: targets.length });
+});
+
+const homeworkUpload = parseMultipart({ maxFileBytes: 30 * 1024 * 1024, maxFields: 2 });
+router.post('/homework/:id/file', homeworkUpload, (req, res) => {
+  if (!req.upload?.size) return res.status(400).json({ error: 'Выберите файл' });
+  const hw = db.prepare(`SELECT h.*,ls.group_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
+  if (!hw) return res.status(404).json({ error: 'Домашнее задание не найдено' });
+  if (!canManageGroup(req.user, hw.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  if (hw.file_path) storage.deleteFile(hw.file_path);
+  const safeId = String(hw.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const original = String(req.upload.filename || 'homework-file').slice(0, 180);
+  const ext = original.includes('.') ? original.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) : 'bin';
+  const rel = `homework/${safeId}/${genId('file')}.${ext || 'bin'}`;
+  storage.importFile(req.upload.tempPath, rel);
+  db.prepare('UPDATE homework SET file_path=?,file_name=?,file_mime=?,file_size=? WHERE id=?')
+    .run(rel, original, req.upload.mime, req.upload.size, hw.id);
+  const updated = db.prepare(`SELECT h.*,ls.group_id,ls.date session_date,m.title module_title
+    FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id LEFT JOIN modules m ON m.id=h.module_id WHERE h.id=?`).get(hw.id);
+  res.json(rowToHw(updated));
+});
+
+router.get('/homework/:id/file', (req, res) => {
+  const hw = db.prepare(`SELECT h.*,ls.group_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
+  if (!hw?.file_path) return res.status(404).json({ error: 'Файл не найден' });
+  const assigned = req.user.role === 'student' && db.prepare('SELECT 1 FROM homework_assignments WHERE homework_id=? AND student_id=?').get(hw.id, req.user.id);
+  const allowed = assigned || canManageGroup(req.user, hw.group_id) ||
+    (req.user.role === 'parent' && !!db.prepare(`SELECT 1 FROM homework_assignments ha JOIN parent_children pc ON pc.student_id=ha.student_id
+      WHERE ha.homework_id=? AND pc.parent_id=?`).get(hw.id, req.user.id));
+  if (!allowed) return res.status(403).json({ error: 'Недостаточно прав' });
+  const full = storage.resolveFile(hw.file_path);
+  if (!full) return res.status(404).json({ error: 'Файл не найден' });
+  res.setHeader('Content-Type', hw.file_mime || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(hw.file_name || 'homework-file')}`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.sendFile(full);
 });
 
 router.get('/homework', (req, res) => {
@@ -372,6 +426,7 @@ router.delete('/homework/:id', (req, res) => {
   const hw = db.prepare('SELECT h.*, ls.group_id FROM homework h JOIN lesson_sessions ls ON ls.id = h.lesson_session_id WHERE h.id = ?').get(req.params.id);
   if (!hw) return res.status(404).json({ error: 'Не найдено' });
   if (!canManageGroup(req.user, hw.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  if (hw.file_path) storage.deleteFile(hw.file_path);
   db.prepare('DELETE FROM homework WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

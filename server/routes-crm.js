@@ -286,13 +286,14 @@ router.get('/groups/:id/members', (req, res) => {
     }
   }
   const rows = db.prepare(`
-    SELECT gm.*, u.name, u.login, u.avatar_url FROM group_members gm
+    SELECT gm.*, u.name, u.login, u.avatar_url, COALESCE(sc.video_consent,0) video_consent FROM group_members gm
     JOIN users u ON u.id = gm.student_id
+    LEFT JOIN students_crm sc ON sc.user_id=gm.student_id
     WHERE gm.group_id = ? ORDER BY u.name
   `).all(req.params.id);
   res.json(rows.map(r => ({
     id: r.id, studentId: r.student_id, groupId: r.group_id, since: r.since, until: r.until || null,
-    name: r.name, login: r.login, avatarUrl: r.avatar_url || null,
+    name: r.name, login: r.login, avatarUrl: r.avatar_url || null, videoConsent: !!r.video_consent,
   })));
 });
 router.post('/groups/:id/members', requireRole('admin','assistant'), validateBody(memberSchema), (req, res) => {

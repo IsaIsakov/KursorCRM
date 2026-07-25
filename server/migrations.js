@@ -429,6 +429,22 @@ const MIGRATIONS = [
       db.prepare("UPDATE users SET must_change_password=0 WHERE role<>'admin'").run();
     },
   },
+  {
+    version: 14,
+    name: 'homework_text_links_and_files',
+    up(db) {
+      const columns = new Set(db.prepare('PRAGMA table_info(homework)').all().map(c => c.name));
+      const additions = [
+        ['description', 'TEXT'],
+        ['link_url', 'TEXT'],
+        ['file_path', 'TEXT'],
+        ['file_name', 'TEXT'],
+        ['file_mime', 'TEXT'],
+        ['file_size', 'INTEGER'],
+      ];
+      for (const [name, type] of additions) if (!columns.has(name)) db.exec(`ALTER TABLE homework ADD COLUMN ${name} ${type}`);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

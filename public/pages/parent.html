@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=20">
+<link rel="stylesheet" href="/css/style.css?v=21">
 <style>
 /* ======= PARENT PANEL STYLES ======= */
 .parent-layout {
@@ -310,10 +310,10 @@
   <div class="p-loader">Загружаем кабинет…</div>
 </div>
 
-<script src="/data/database.js?v=20"></script>
-<script src="/js/i18n.js?v=20"></script>
-<script src="/js/api.js?v=20"></script>
-<script src="/js/app.js?v=20"></script>
+<script src="/data/database.js?v=21"></script>
+<script src="/js/i18n.js?v=21"></script>
+<script src="/js/api.js?v=21"></script>
+<script src="/js/app.js?v=21"></script>
 <script>
 const user = requireAuth(['parent']);
 let child = null;     // единственный ребёнок
@@ -364,6 +364,7 @@ function renderLayout() {
   const navItems = [
     { key: 'feed',       icon: 'feed', label: 'Лента' },
     { key: 'lessons',    icon: 'calendar', label: 'Уроки' },
+    { key: 'homework',   icon: 'book', label: 'Домашнее задание' },
     { key: 'works',      icon: 'edit', label: 'Работы' },
     { key: 'videos',     icon: 'video', label: 'Видеоотчёты' },
     { key: 'care',       icon: 'snowflake', label: 'Пропуски и заморозка' },
@@ -397,7 +398,7 @@ async function switchChild(id){child=parentChildrenList.find(c=>c.id===id)||chil
 async function loadAllData() {
   const sid = child.id;
   try {
-    const [feed, attendance, feedback, artifacts, progress, calendar, requests] = await Promise.all([
+    const [feed, attendance, feedback, artifacts, progress, calendar, requests, homework] = await Promise.all([
       API.parentFeed(sid),
       API.parentAttendance(sid),
       API.parentFeedback(sid),
@@ -405,8 +406,9 @@ async function loadAllData() {
       API.parentProgress(sid),
       API.parentCalendar(sid, Date.now(), Date.now() + 90 * 86400000),
       API.parentRequests(sid),
+      API.getHomework('student_id=' + encodeURIComponent(sid)),
     ]);
-    cachedData = { feed, attendance, feedback, artifacts, progress, calendar, requests };
+    cachedData = { feed, attendance, feedback, artifacts, progress, calendar, requests, homework };
   } catch (e) {
     cachedData = { feed: [], attendance: { records: [], visitsLeft: null }, feedback: [], artifacts: [], progress: { points: 0, streak: 0, tasks: {} } };
     console.error('loadAllData error', e);
@@ -427,11 +429,18 @@ function renderSection(key) {
   switch(key) {
     case 'feed':    main.innerHTML = buildFeed(); break;
     case 'lessons': main.innerHTML = buildLessons(); break;
+    case 'homework': main.innerHTML = buildParentHomework(); break;
     case 'works':   main.innerHTML = buildWorks(); break;
     case 'videos':  main.innerHTML = buildVideos(); break;
     case 'care':    main.innerHTML = buildCare(); break;
     case 'account': main.innerHTML = buildAccount(); break;
   }
+}
+
+function buildParentHomework(){
+  const rows=cachedData.homework||[];
+  if(!rows.length)return `<h1 class="section-heading"><span class="sh-icon">${uiIcon('book')}</span> Домашнее задание</h1>`+emptyState('thinking','Домашних заданий пока нет','Здесь родитель увидит задания, сроки и приложенные файлы');
+  return `<h1 class="section-heading"><span class="sh-icon">${uiIcon('book')}</span> Домашнее задание</h1><div class="feed-list">${rows.map(hw=>`<div class="ig-post"><div class="ig-post-header"><div class="ig-post-avatar">${uiIcon('book')}</div><div style="flex:1;min-width:0"><div class="ig-post-title">${escapeHtml(hw.moduleTitle||hw.fileName||'Домашнее задание')}</div><div class="ig-post-sub">${hw.dueDate?'Сдать до '+fmtDate(hw.dueDate):'Без срока'}</div></div></div><div class="ig-post-body" style="padding:16px">${hw.description?`<p style="white-space:pre-wrap;margin:0 0 12px">${escapeHtml(hw.description)}</p>`:''}<div style="display:flex;gap:8px;flex-wrap:wrap">${hw.fileUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(hw.fileUrl)}" target="_blank" rel="noopener">${escapeHtml(hw.fileName||'Открыть файл')}</a>`:''}${hw.linkUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(hw.linkUrl)}" target="_blank" rel="noopener">Открыть ссылку</a>`:''}${(hw.taskIds||[]).length?`<span class="badge badge-info">Задач на платформе: ${hw.taskIds.length}</span>`:''}</div></div></div>`).join('')}</div>`;
 }
 
 function requestStatus(status) {

@@ -34,6 +34,11 @@
 
       'auth.title': 'Вход в КУРСОР', 'auth.login_ph': 'Логин', 'auth.password_ph': 'Пароль',
       'auth.signin': 'Войти', 'auth.error': 'Неверный логин или пароль',
+      'auth.show_password': 'Показать пароль', 'auth.hide_password': 'Скрыть пароль',
+      'auth.forgot': 'Забыли пароль администратора?', 'auth.admin_login': 'Логин администратора',
+      'auth.recovery_code': 'Код восстановления', 'auth.new_password': 'Новый пароль (минимум 10 символов)',
+      'auth.recovery_hint': 'Введите логин администратора, код восстановления из Railway и новый пароль.',
+      'auth.restore': 'Восстановить доступ', 'auth.restored': 'Пароль изменён. Теперь войдите с новым паролем.',
 
       'dash.greeting': 'Привет', 'dash.points': 'Баллов', 'dash.solved': 'Задач решено',
       'dash.streak': 'Дней подряд', 'dash.continue': 'Продолжить обучение',
@@ -170,6 +175,11 @@
 
       'auth.title': 'КУРСОР-ға кіру', 'auth.login_ph': 'Логин', 'auth.password_ph': 'Құпиясөз',
       'auth.signin': 'Кіру', 'auth.error': 'Логин не құпиясөз қате',
+      'auth.show_password': 'Құпиясөзді көрсету', 'auth.hide_password': 'Құпиясөзді жасыру',
+      'auth.forgot': 'Әкімші құпиясөзін ұмыттыңыз ба?', 'auth.admin_login': 'Әкімші логині',
+      'auth.recovery_code': 'Қалпына келтіру коды', 'auth.new_password': 'Жаңа құпиясөз (кемінде 10 таңба)',
+      'auth.recovery_hint': 'Әкімші логинін, Railway қалпына келтіру кодын және жаңа құпиясөзді енгізіңіз.',
+      'auth.restore': 'Қолжетімділікті қалпына келтіру', 'auth.restored': 'Құпиясөз өзгертілді. Енді жаңа құпиясөзбен кіріңіз.',
 
       'dash.greeting': 'Сәлем', 'dash.points': 'Ұпай', 'dash.solved': 'Шешілген тапсырма',
       'dash.streak': 'Күндер қатарынан', 'dash.continue': 'Оқуды жалғастыру',
@@ -288,6 +298,39 @@
 
   let lang = localStorage.getItem(LANG_KEY) || 'ru';
   if (!DICT[lang]) lang = 'ru';
+  const KK_STATIC = {
+    'Уроки':'Сабақтар','Студенты':'Оқушылар','Группы':'Топтар','Задачник куратора':'Куратор міндеттері',
+    'ДЗ и проекты':'Үй жұмысы және жобалар','Отчёты':'Есептер','Кабинет куратора':'Куратор кабинеті',
+    'Филиал':'Филиал','Уведомления':'Хабарламалар','Выйти':'Шығу','Обновить':'Жаңарту',
+    'Уроки филиала':'Филиал сабақтары','Актуальное расписание. Неотмеченные пары выделены красным.':'Өзекті кесте. Белгіленбеген сабақтар қызыл түспен көрсетіледі.',
+    'Преподаватель не назначен':'Мұғалім тағайындалмаған','Основной':'Негізгі','Дополнительный':'Қосымша',
+    'Не отмечен':'Белгіленбеген','Проведён':'Өткізілді','Запланирован':'Жоспарланған',
+    'На этой неделе занятий нет':'Осы аптада сабақ жоқ','Контакты, оплаты, расписание и успеваемость.':'Байланыс, төлем, кесте және үлгерім.',
+    'Поиск студента':'Оқушыны іздеу','Студент':'Оқушы','Группа':'Топ','Родитель':'Ата-ана',
+    'Телефон':'Телефон','Остаток':'Қалдық','Открыть':'Ашу','Контакты':'Байланыстар',
+    'Группы и расписание':'Топтар мен кесте','Оплаты':'Төлемдер','Закрыть':'Жабу',
+    'Доступ ученика':'Оқушының кіру деректері','Создать новый пароль':'Жаңа құпиясөз жасау',
+    'Копировать':'Көшіру','Готово':'Дайын','Новый пароль ученика':'Оқушының жаңа құпиясөзі',
+    'График посещений и оценки':'Қатысу кестесі және бағалар','Отзывы преподавателей':'Мұғалім пікірлері',
+    'Посещаемость':'Қатысу','Успеваемость':'Үлгерім','Скачать CSV':'CSV жүктеу',
+    'Домашние задания и проектные работы':'Үй тапсырмалары және жобалық жұмыстар',
+    'Все группы':'Барлық топтар','На проверке':'Тексерілуде','Комментарий':'Түсініктеме',
+    'Забыли пароль администратора?':'Әкімші құпиясөзін ұмыттыңыз ба?','Показать пароль':'Құпиясөзді көрсету',
+  };
+
+  function translateStatic(root) {
+    if (lang !== 'kk' || !root) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (['SCRIPT','STYLE','TEXTAREA'].includes(node.parentElement?.tagName)) return;
+      const raw=node.nodeValue, trimmed=raw.trim(), translated=KK_STATIC[trimmed];
+      if (translated) node.nodeValue=raw.replace(trimmed,translated);
+    });
+    (root.querySelectorAll ? root.querySelectorAll('[placeholder]') : []).forEach(el => {
+      const translated=KK_STATIC[el.getAttribute('placeholder')]; if(translated) el.setAttribute('placeholder',translated);
+    });
+  }
 
   function t(key, fallback) {
     const d = DICT[lang] || DICT.ru;
@@ -310,6 +353,7 @@
     scope.querySelectorAll('[data-i18n-html]').forEach(el => {
       el.innerHTML = t(el.getAttribute('data-i18n-html'));
     });
+    translateStatic(scope);
     if (document.documentElement) document.documentElement.setAttribute('lang', lang);
   }
 
@@ -342,8 +386,16 @@
 
   // Автоприменение после загрузки DOM
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => applyI18n());
+    document.addEventListener('DOMContentLoaded', () => {
+      applyI18n();
+      if (lang === 'kk') new MutationObserver(changes => changes.forEach(c => c.addedNodes.forEach(n => {
+        if (n.nodeType === 1) translateStatic(n);
+      }))).observe(document.body,{childList:true,subtree:true});
+    });
   } else {
     applyI18n();
+    if (lang === 'kk') new MutationObserver(changes => changes.forEach(c => c.addedNodes.forEach(n => {
+      if (n.nodeType === 1) translateStatic(n);
+    }))).observe(document.body,{childList:true,subtree:true});
   }
 })();

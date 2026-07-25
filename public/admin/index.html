@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=19">
+<link rel="stylesheet" href="/css/style.css?v=20">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,10 +38,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=19"></script>
-<script src="/js/i18n.js?v=19"></script>
-<script src="/js/api.js?v=19"></script>
-<script src="/js/app.js?v=19"></script>
+<script src="/data/database.js?v=20"></script>
+<script src="/js/i18n.js?v=20"></script>
+<script src="/js/api.js?v=20"></script>
+<script src="/js/app.js?v=20"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -1385,7 +1385,8 @@ async function runClientImport(dryRun) {
   } catch(e){err.textContent=e.message;}
 }
 function credentialsCardHtml(c){const parts=[`Ученик: ${c.student.login} / ${c.student.password}`];if(c.parent&&!c.parent.reused)parts.push(`Родитель: ${c.parent.login} / ${c.parent.password}`);else if(c.parent)parts.push(`Родитель: ${c.parent.login} (существующий аккаунт)`);const text=parts.join('\n');return `<div class="credential-card"><b>${escapeHtml(c.studentName)}</b><pre>${escapeHtml(text)}</pre><div><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(text)})'>Копировать</button>${c.phone?`<button class="btn btn-success btn-sm" onclick="sendCredentials('${c.studentId}',this)">WhatsApp</button>`:''}</div></div>`;}
-async function showClientCredentials(studentId){try{const rows=await API.getClientCredentials(studentId);document.getElementById('modalContent').innerHTML=`<h2>Временные доступы</h2>${rows.length?`<div class="credentials-list">${rows.map(r=>`<div class="credential-card"><b>${r.kind==='parent'?'Родитель':'Ученик'}</b><pre>${escapeHtml(r.login+'\n'+r.password)}</pre><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(r.login+'\n'+r.password)})'>Копировать</button></div>`).join('')}</div><div class="modal-actions"><button class="btn btn-success" onclick="sendCredentials('${studentId}',this)">Отправить в WhatsApp</button><button class="btn" onclick="closeModal()">Закрыть</button></div>`:'<div class="notice-box">Временный пароль уже изменён или доступы создавались вручную. Из соображений безопасности действующий пароль показать нельзя.</div><div class="modal-actions"><button class="btn" onclick="closeModal()">Закрыть</button></div>'}`;document.getElementById('modal').classList.add('active');}catch(e){alert(e.message);}}
+async function showClientCredentials(studentId){try{const rows=await API.getClientCredentials(studentId);document.getElementById('modalContent').innerHTML=`<h2>Доступы клиента</h2>${rows.length?`<div class="credentials-list">${rows.map(r=>`<div class="credential-card"><b>${r.kind==='parent'?'Родитель':'Ученик'}</b><pre>${escapeHtml(r.login+'\n'+r.password)}</pre><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(r.login+'\n'+r.password)})'>Копировать</button></div>`).join('')}</div>`:'<div class="notice-box">Пароль уже изменён или аккаунт создан вручную. Действующий пароль восстановить из защищённого хеша нельзя.</div>'}<div class="modal-actions"><button class="btn btn-outline" onclick="resetStudentAccess('${studentId}')">Создать новый пароль ученика</button>${rows.length?`<button class="btn btn-success" onclick="sendCredentials('${studentId}',this)">Отправить в WhatsApp</button>`:''}<button class="btn" onclick="closeModal()">Закрыть</button></div>`;document.getElementById('modal').classList.add('active');}catch(e){alert(e.message);}}
+async function resetStudentAccess(studentId){if(!confirm('Старый пароль ученика перестанет работать. Создать новый?'))return;try{const r=await API.resetStudentPassword(studentId);const text=r.login+'\n'+r.password;document.getElementById('modalContent').innerHTML=`<h2>Новый пароль создан</h2><div class="notice-box">Предыдущий пароль ученика больше не действует.</div><div class="credential-card"><b>Ученик</b><pre>${escapeHtml(text)}</pre><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(text)})'>Копировать</button></div><div class="modal-actions"><button class="btn" onclick="closeModal()">Готово</button></div>`;}catch(e){alert(e.message);}}
 async function sendCredentials(studentId,button){button.disabled=true;try{await API.sendClientCredentials({studentId});showToast('Доступы отправлены в WhatsApp','success');}catch(e){alert(e.message);}finally{button.disabled=false;}}
 async function copyText(text){try{await navigator.clipboard.writeText(text);showToast('Скопировано','success');}catch{prompt('Скопируйте данные',text);}}
 function filterClients() {

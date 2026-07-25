@@ -230,6 +230,7 @@
   const deleteCrmTask      = id => API_.del('/api/crm/tasks/' + encodeURIComponent(id));
   const getClientCredentials = sid => API_.get('/api/client-credentials?student_id=' + encodeURIComponent(sid));
   const sendClientCredentials = data => API_.post('/api/client-credentials/send', data);
+  const resetStudentPassword = studentId => API_.post('/api/client-credentials/reset-student', { studentId });
 
   /* ---------- Права преподавателей ---------- */
   const getPermissionKeys = () => API_.get('/api/teacher-permissions/keys');
@@ -341,7 +342,7 @@
     getCrmStudents, getCrmStudent, getCrmStudentOverview, getMyGroupStudents,
     createCrmStudent, updateCrmStudent, deleteCrmStudent,
     getCrmOverview, getCrmLeads, createCrmLead, updateCrmLead, deleteCrmLead,
-    getCrmTasks, createCrmTask, updateCrmTask, deleteCrmTask, getClientCredentials, sendClientCredentials,
+    getCrmTasks, createCrmTask, updateCrmTask, deleteCrmTask, getClientCredentials, sendClientCredentials, resetStudentPassword,
     getPermissionKeys, getPermissions, setPermissions,
     // фаза 3
     getSessions, getCalendar, createSession, deleteSession, getSessionAttendance, saveAttendance,

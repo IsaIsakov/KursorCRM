@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=19">
+<link rel="stylesheet" href="/css/style.css?v=20">
 </head>
 <body>
 <div class="login-page">
@@ -24,9 +24,22 @@
       </div>
       <div class="form-group">
         <label for="password" data-i18n="auth.password_ph">Пароль</label>
-        <input class="form-input" type="password" id="password" placeholder="пароль" data-i18n-ph="auth.password_ph" required autocomplete="current-password">
+        <div style="position:relative">
+          <input class="form-input" style="padding-right:54px" type="password" id="password" placeholder="пароль" data-i18n-ph="auth.password_ph" required autocomplete="current-password">
+          <button type="button" class="btn btn-ghost btn-sm" style="position:absolute;right:7px;top:50%;transform:translateY(-50%);padding:8px" onclick="togglePassword('password',this)" data-i18n-title="auth.show_password" aria-label="Показать пароль"><svg style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9"><use href="/img/ui-icons.svg#eye"></use></svg></button>
+        </div>
       </div>
       <button type="submit" class="btn btn-lg" id="submitBtn" style="width:100%" data-i18n="auth.signin">Войти</button>
+    </form>
+    <button type="button" class="btn btn-ghost btn-sm" style="display:block;margin:10px auto 0" onclick="toggleRecovery()" data-i18n="auth.forgot">Забыли пароль администратора?</button>
+    <form id="recoveryForm" hidden style="margin-top:12px;padding:14px;border:1px solid #e2e8f0;border-radius:14px;text-align:left">
+      <p style="font-size:13px;color:#64748b;margin:0 0 10px" data-i18n="auth.recovery_hint">Введите логин администратора, код восстановления из Railway и новый пароль.</p>
+      <input class="form-input" id="recoveryLogin" autocomplete="username" placeholder="Логин администратора" data-i18n-ph="auth.admin_login" required>
+      <input class="form-input" style="margin-top:8px" type="password" id="recoveryCode" autocomplete="one-time-code" placeholder="Код восстановления" data-i18n-ph="auth.recovery_code" required>
+      <input class="form-input" style="margin-top:8px" type="password" id="recoveryPassword" autocomplete="new-password" minlength="10" placeholder="Новый пароль (минимум 10 символов)" data-i18n-ph="auth.new_password" required>
+      <label style="display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px"><input type="checkbox" onchange="toggleRecoveryPasswords(this.checked)"> <span data-i18n="auth.show_password">Показать пароль</span></label>
+      <button class="btn" type="submit" style="width:100%" data-i18n="auth.restore">Восстановить доступ</button>
+      <div id="recoveryMsg" role="alert" aria-live="polite" style="margin-top:8px;font-size:13px;font-weight:700"></div>
     </form>
 
     <p style="margin-top:18px;font-size:13px;color:#64748b;text-align:center">
@@ -37,11 +50,14 @@
   </div>
 </div>
 
-<script src="/data/database.js?v=19"></script>
-<script src="/js/i18n.js?v=19"></script>
-<script src="/js/api.js?v=19"></script>
+<script src="/data/database.js?v=20"></script>
+<script src="/js/i18n.js?v=20"></script>
+<script src="/js/api.js?v=20"></script>
 <script>
 document.getElementById('langSlot').innerHTML = I18N.switcherHtml();
+function togglePassword(id,button){const input=document.getElementById(id),show=input.type==='password';input.type=show?'text':'password';button.innerHTML=`<svg style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9"><use href="/img/ui-icons.svg#${show?'eye-off':'eye'}"></use></svg>`;button.setAttribute('aria-label',I18N.t(show?'auth.hide_password':'auth.show_password'));}
+function toggleRecovery(){const form=document.getElementById('recoveryForm');form.hidden=!form.hidden;if(!form.hidden)document.getElementById('recoveryLogin').focus();}
+function toggleRecoveryPasswords(show){document.getElementById('recoveryCode').type=show?'text':'password';document.getElementById('recoveryPassword').type=show?'text':'password';}
 
 (function () {
   const u = API.getCurrentUser();
@@ -76,6 +92,11 @@ document.getElementById('loginForm').addEventListener('submit', async function (
     msg.textContent = err.message || I18N.t('auth.error');
     btn.disabled = false; btn.textContent = I18N.t('auth.signin');
   }
+});
+document.getElementById('recoveryForm').addEventListener('submit',async function(e){
+  e.preventDefault();const box=document.getElementById('recoveryMsg');box.style.color='#64748b';box.textContent=I18N.t('common.loading');
+  try{await API._request('POST','/api/auth/recover-admin',{login:recoveryLogin.value.trim(),recoveryCode:recoveryCode.value,newPassword:recoveryPassword.value});box.style.color='#16a34a';box.textContent=I18N.t('auth.restored');document.getElementById('login').value=recoveryLogin.value.trim();document.getElementById('password').value=recoveryPassword.value;this.reset();}
+  catch(err){box.style.color='#ef4444';box.textContent=err.message||I18N.t('common.error');}
 });
 </script>
 </body>

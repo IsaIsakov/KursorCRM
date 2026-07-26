@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 15);
+  assert.equal((await ready.json()).schemaVersion, 16);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -84,13 +84,13 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
 
   await api('POST', '/api/students-crm', { userId: student.id, fullName: student.name, branchId: branch.id,
-    tariffId: tariff.id, subscriptionIssuedAt: Date.now(), videoConsent: true }, 201);
+    tariffId: tariff.id, subscriptionIssuedAt: Date.now() }, 201);
   const modules = (await api('GET', '/api/modules')).body;
   const group = (await api('POST', '/api/groups', { name: 'E2E group', branchId: branch.id, courseId: modules[0].id,
     teacherId: teacher.id, assistantId: null, lessonKind: 'main' }, 201)).body;
   const onboarded = (await api('POST', '/api/import/clients', { format: 'json', data: [{
     student_name: 'Тестовый Ребёнок', parent_name: 'Тестовый Родитель', parent_phone: '+7 777 123 45 67',
-    branch_id: branch.id, tariff_id: tariff.id, group_id: group.id, languages: 'python', video_consent: 'да',
+    branch_id: branch.id, tariff_id: tariff.id, group_id: group.id, languages: 'python',
   }] })).body;
   assert.equal(onboarded.created, 1);
   assert.equal(onboarded.credentials.length, 1);

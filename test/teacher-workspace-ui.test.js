@@ -23,7 +23,10 @@ test('lesson modal keeps attendance, assessments, reports and guided homework', 
   assert.match(admin, /lessonHomeworkHtml/);
   assert.match(admin, /renderLessonTaskPicker/);
   assert.match(admin, /tasksForModule/);
-  assert.match(css, /\.lesson-student-card\.expanded/);
+  assert.match(css, /\.lesson-student-details\s*\{\s*display:block/);
+  assert.doesNotMatch(admin, /toggleAllLessonRows|toggleLessonRow/);
+  assert.doesNotMatch(admin, /videoConsent|Согласие на видеосъёмку|Видео: нет согласия/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'server/routes-artifacts.js'), 'utf8'), /video_consent|Нет согласия на видеосъёмку/);
   assert.doesNotMatch(css, /\.lesson-student-main \.assess_class,[^\n]+display:none/);
 });
 

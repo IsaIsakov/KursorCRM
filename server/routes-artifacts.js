@@ -140,14 +140,6 @@ router.post('/', multipartArtifact, validateArtifact, (req, res) => {
     return res.status(403).json({ error: 'Нет права загружать материалы' });
   }
 
-  // Согласие на видео
-  if (type === 'video') {
-    const crm = db.prepare('SELECT video_consent FROM students_crm WHERE user_id = ?').get(studentId);
-    if (!crm || !crm.video_consent) {
-      return res.status(403).json({ error: 'Нет согласия на видеосъёмку у этого ученика. Видео загрузить нельзя (но скрины и файлы — можно).' });
-    }
-  }
-
   const now = Date.now();
   const id = genId('sa');
   const expiresAt = type === 'video' ? now + VIDEO_TTL_MS : null;

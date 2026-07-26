@@ -145,13 +145,12 @@ function onboardClients(rows, { dryRun = false, actorId = null } = {}) {
       db.prepare('INSERT INTO parent_children (id,parent_id,student_id,since) VALUES (?,?,?,?)').run(genId('pc'), parentId, studentId, now);
 
       const tariff = item.tariffId ? db.prepare('SELECT visits_count FROM tariffs WHERE id=?').get(item.tariffId) : null;
-      const consent = ['1','true','yes','да'].includes(String(item.source.video_consent ?? item.source.videoConsent ?? '').toLowerCase());
       db.prepare(`INSERT INTO students_crm (user_id,full_name,birth_date,branch_id,tariff_id,subscription_issued_at,visits_left,status,
-        responsible_manager_id,parent_name,parent_phone,comment,video_consent,video_consent_date)
-        VALUES (?,?,?,?,?,?,?,'active',?,?,?,?,?,?)`)
+        responsible_manager_id,parent_name,parent_phone,comment)
+        VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)`)
         .run(studentId, item.studentName, item.source.birth_date || item.source.birthDate || null, item.branchId, item.tariffId,
           item.tariffId ? now : null, item.source.visits_left !== undefined ? item.visitsLeft : (tariff ? tariff.visits_count : 0), item.source.responsible_manager_id || actorId || null,
-          item.parentName || null, item.phone || item.phoneRaw || null, item.source.comment || null, consent ? 1 : 0, consent ? now : null);
+          item.parentName || null, item.phone || item.phoneRaw || null, item.source.comment || null);
       db.prepare('UPDATE students_crm SET gender=? WHERE user_id=?').run(item.gender, studentId);
       if (item.groupId) db.prepare('INSERT INTO group_members (id,student_id,group_id,since,until) VALUES (?,?,?,?,NULL)')
         .run(genId('gm'), studentId, item.groupId, now);

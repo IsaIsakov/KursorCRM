@@ -39,7 +39,7 @@ const crmFields = {
   responsibleManagerId: idSchema.nullable().optional(), parentName: optionalText(200), parentPhone: optionalText(50),
   studentPhone: optionalText(50), studentEmail: z.string().trim().email().max(200).nullable().optional(),
   nextPaymentAt: timestamp.nullable().optional(), nextPaymentAmount: z.coerce.number().int().min(0).max(1000000000).nullable().optional(),
-  documentId: optionalText(100), comment: optionalText(5000), videoConsent: z.boolean().optional(), videoConsentDate: timestamp.nullable().optional(),
+  documentId: optionalText(100), comment: optionalText(5000),
 };
 const crmCreateSchema = z.strictObject({ userId: idSchema, ...crmFields });
 // The current admin form also sends userId while editing. It is accepted for
@@ -89,7 +89,6 @@ function rowToCrm(r) {
     studentPhone: r.student_phone || null, studentEmail: r.student_email || null,
     nextPaymentAt: r.next_payment_at || null, nextPaymentAmount: r.next_payment_amount || null,
     documentId: r.document_id || null, comment: r.comment || null,
-    videoConsent: !!r.video_consent, videoConsentDate: r.video_consent_date || null,
     branchName: r.branch_name || null, tariffName: r.tariff_name || null,
     login: r.login || null, name: r.name || null, age: r.age || 0,
   };
@@ -297,14 +296,13 @@ router.get('/groups/:id/members', (req, res) => {
     }
   }
   const rows = db.prepare(`
-    SELECT gm.*, u.name, u.login, u.avatar_url, COALESCE(sc.video_consent,0) video_consent FROM group_members gm
+    SELECT gm.*, u.name, u.login, u.avatar_url FROM group_members gm
     JOIN users u ON u.id = gm.student_id
-    LEFT JOIN students_crm sc ON sc.user_id=gm.student_id
     WHERE gm.group_id = ? ORDER BY u.name
   `).all(req.params.id);
   res.json(rows.map(r => ({
     id: r.id, studentId: r.student_id, groupId: r.group_id, since: r.since, until: r.until || null,
-    name: r.name, login: r.login, avatarUrl: r.avatar_url || null, videoConsent: !!r.video_consent,
+    name: r.name, login: r.login, avatarUrl: r.avatar_url || null,
   })));
 });
 router.post('/groups/:id/members', requireRole('admin','curator'), validateBody(memberSchema), (req, res) => {
@@ -419,15 +417,14 @@ router.post('/students-crm', requireRole('admin'), validateBody(crmCreateSchema)
   db.prepare(`INSERT INTO students_crm
     (user_id, full_name, birth_date, gender, branch_id, tariff_id, subscription_issued_at,
      visits_left, status, responsible_manager_id, parent_name, parent_phone, document_id,
-     comment, video_consent, video_consent_date,student_phone,student_email,next_payment_at,next_payment_amount)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+     comment,student_phone,student_email,next_payment_at,next_payment_amount)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(b.userId, String(b.fullName).trim(), b.birthDate || null,
          ['m', 'f'].includes(b.gender) ? b.gender : null, b.branchId || null, b.tariffId || null,
          b.subscriptionIssuedAt || null, 0,
          ['active', 'frozen', 'inactive'].includes(b.status) ? b.status : 'active',
          b.responsibleManagerId || null, b.parentName || null, b.parentPhone || null,
          b.documentId || null, b.comment || null,
-         b.videoConsent ? 1 : 0, b.videoConsent ? (b.videoConsentDate || Date.now()) : null,
          b.studentPhone||null,b.studentEmail||null,b.nextPaymentAt||null,b.nextPaymentAmount||null);
     if (b.tariffId || visitsLeft > 0) subscriptions.issue({
       studentId: b.userId, tariffId: b.tariffId || null,
@@ -456,7 +453,7 @@ router.put('/students-crm/:id', requireRole('admin'), validateBody(crmUpdateSche
   db.prepare(`UPDATE students_crm SET
     full_name=?, birth_date=?, gender=?, branch_id=?, tariff_id=?, subscription_issued_at=?,
     visits_left=?, status=?, responsible_manager_id=?, parent_name=?, parent_phone=?,
-    document_id=?, comment=?, video_consent=?, video_consent_date=?,student_phone=?,student_email=?,next_payment_at=?,next_payment_amount=? WHERE user_id=?`)
+    document_id=?, comment=?,student_phone=?,student_email=?,next_payment_at=?,next_payment_amount=? WHERE user_id=?`)
     .run(
       b.fullName !== undefined ? String(b.fullName).trim() : cur.full_name,
       pick('birthDate', 'birth_date'),
@@ -471,8 +468,6 @@ router.put('/students-crm/:id', requireRole('admin'), validateBody(crmUpdateSche
       pick('parentPhone', 'parent_phone'),
       pick('documentId', 'document_id'),
       pick('comment', 'comment'),
-      b.videoConsent !== undefined ? (b.videoConsent ? 1 : 0) : cur.video_consent,
-      b.videoConsent !== undefined ? (b.videoConsent ? (b.videoConsentDate || Date.now()) : null) : cur.video_consent_date,
       pick('studentPhone','student_phone'),pick('studentEmail','student_email'),pick('nextPaymentAt','next_payment_at'),pick('nextPaymentAmount','next_payment_amount'),
       req.params.id
     );

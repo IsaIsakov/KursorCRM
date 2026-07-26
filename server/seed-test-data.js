@@ -230,8 +230,8 @@ function seedStudents(branches, tariffs, groups, teachers) {
   console.log('[seed-test] Создаём CRM-карточки...');
   const insCrm = db.prepare(`INSERT INTO students_crm
     (user_id, full_name, birth_date, gender, branch_id, tariff_id, subscription_issued_at, visits_left,
-     status, responsible_manager_id, parent_name, parent_phone, document_id, comment, video_consent, video_consent_date)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+     status, responsible_manager_id, parent_name, parent_phone, document_id, comment)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const today = new Date();
   const managerId = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY created_at LIMIT 1").get()?.id || teachers[0]?.id || null;
   for (const s of students) {
@@ -248,9 +248,7 @@ function seedStudents(branches, tariffs, groups, teachers) {
       'Родитель ' + s.name.split(' ')[0], // временное имя (потом заполним из родителя)
       `+7 700 ${rnd(100,999)} ${rnd(10,99)}-${rnd(10,99)}`,
       `IIN${rnd(100000000000, 999999999999)}`,
-      Math.random() < 0.3 ? 'Очень активный ученик, любит вызовы' : (Math.random() < 0.5 ? 'Стеснительный, требует поддержки' : ''),
-      Math.random() < 0.85 ? 1 : 0,
-      Math.random() < 0.85 ? issued : null
+      Math.random() < 0.3 ? 'Очень активный ученик, любит вызовы' : (Math.random() < 0.5 ? 'Стеснительный, требует поддержки' : '')
     );
   }
 

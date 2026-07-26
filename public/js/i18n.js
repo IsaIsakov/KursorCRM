@@ -73,7 +73,7 @@
       'crm.fullname': 'ФИО', 'crm.branch': 'Филиал', 'crm.tariff': 'Тариф',
       'crm.visits_left': 'Осталось занятий', 'crm.manager': 'Ответственный',
       'crm.parent_name': 'Имя родителя', 'crm.parent_phone': 'Телефон родителя',
-      'crm.video_consent': 'Согласие на видеосъёмку', 'crm.status_active': 'Активен',
+      'crm.status_active': 'Активен',
       'crm.status_frozen': 'Заморожен', 'crm.status_inactive': 'Неактивен',
       'crm.birth_date': 'Дата рождения', 'crm.document': 'Документ',
 
@@ -214,7 +214,7 @@
       'crm.fullname': 'Аты-жөні', 'crm.branch': 'Филиал', 'crm.tariff': 'Тариф',
       'crm.visits_left': 'Қалған сабақ', 'crm.manager': 'Жауапты',
       'crm.parent_name': 'Ата-ананың аты', 'crm.parent_phone': 'Ата-ана телефоны',
-      'crm.video_consent': 'Бейнетүсірілімге келісім', 'crm.status_active': 'Белсенді',
+      'crm.status_active': 'Белсенді',
       'crm.status_frozen': 'Тоқтатылған', 'crm.status_inactive': 'Белсенді емес',
       'crm.birth_date': 'Туған күні', 'crm.document': 'Құжат',
 

@@ -59,21 +59,17 @@ function canManageSession(user, session) {
 
 function effectiveLessonMembers(session) {
   const overrides = db.prepare(`
-    SELECT lsm.student_id, lsm.active, u.name, u.login, u.avatar_url,
-           COALESCE(sc.video_consent,0) video_consent
+    SELECT lsm.student_id, lsm.active, u.name, u.login, u.avatar_url
     FROM lesson_session_members lsm
     JOIN users u ON u.id=lsm.student_id AND u.role='student'
-    LEFT JOIN students_crm sc ON sc.user_id=u.id
     WHERE lsm.lesson_session_id=? ORDER BY u.name
   `).all(session.id);
   if (overrides.length) return overrides.filter(r => r.active);
   const at = sessionTimestamp(session.date);
   return db.prepare(`
-    SELECT gm.student_id,1 active,u.name,u.login,u.avatar_url,
-           COALESCE(sc.video_consent,0) video_consent
+    SELECT gm.student_id,1 active,u.name,u.login,u.avatar_url
     FROM group_members gm
     JOIN users u ON u.id=gm.student_id AND u.role='student'
-    LEFT JOIN students_crm sc ON sc.user_id=u.id
     WHERE gm.group_id=? AND gm.since<=? AND (gm.until IS NULL OR gm.until>=?)
     ORDER BY u.name
   `).all(session.group_id,at,at);
@@ -227,7 +223,6 @@ router.get('/lesson-sessions/:id/members', (req, res) => {
   if(!canManageSession(req.user,ls))return res.status(403).json({error:'Нет доступа'});
   res.json(effectiveLessonMembers(ls).map(r=>({
     studentId:r.student_id,name:r.name,login:r.login,avatarUrl:r.avatar_url||null,
-    videoConsent:!!r.video_consent,
   })));
 });
 

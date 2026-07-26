@@ -502,6 +502,15 @@ const MIGRATIONS = [
       db.prepare("UPDATE users SET role='teacher' WHERE role='assistant'").run();
     },
   },
+  {
+    version: 16,
+    name: 'remove_video_consent',
+    up(db) {
+      const columns = new Set(db.prepare('PRAGMA table_info(students_crm)').all().map(c => c.name));
+      if (columns.has('video_consent')) db.exec('ALTER TABLE students_crm DROP COLUMN video_consent');
+      if (columns.has('video_consent_date')) db.exec('ALTER TABLE students_crm DROP COLUMN video_consent_date');
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

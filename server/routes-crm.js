@@ -47,21 +47,20 @@ const crmCreateSchema = z.strictObject({ userId: idSchema, ...crmFields });
 const crmUpdateSchema = z.strictObject({ userId: idSchema.optional(), ...Object.fromEntries(Object.entries(crmFields).map(([k, v]) => [k, v.optional()])) });
 
 /* ============== ХЕЛПЕРЫ ============== */
-function isStaff(u) { return ['admin', 'teacher', 'assistant'].includes(u.role); }
+function isStaff(u) { return ['admin', 'teacher', 'curator'].includes(u.role); }
 
 // группы, где пользователь — учитель или ассистент
 function teacherGroupIds(userId) {
   return db.prepare('SELECT id FROM groups WHERE teacher_id = ? OR assistant_id = ?')
     .all(userId, userId).map(r => r.id);
 }
-function curatorBranchIds(userId) {
-  return db.prepare('SELECT DISTINCT branch_id FROM groups WHERE assistant_id=?').all(userId).map(r=>r.branch_id);
-}
 function canCurateGroup(user, groupId) {
   if (user.role === 'admin') return true;
-  if (user.role !== 'assistant') return false;
-  const group = db.prepare('SELECT branch_id FROM groups WHERE id=?').get(groupId);
-  return !!group && curatorBranchIds(user.id).includes(group.branch_id);
+  if (user.role === 'curator') {
+    return !!db.prepare(`SELECT 1 FROM groups g JOIN curator_branches cb ON cb.branch_id=g.branch_id
+      WHERE g.id=? AND cb.curator_id=?`).get(groupId,user.id);
+  }
+  return false;
 }
 
 function rowToTariff(r) {
@@ -182,8 +181,9 @@ router.get('/groups', (req, res) => {
   let rows;
   if (req.user.role === 'admin') {
     rows = db.prepare(`${GROUP_SELECT} ORDER BY g.status, g.name`).all();
-  } else if (req.user.role === 'assistant') {
-    const ids=curatorBranchIds(req.user.id); if(!ids.length) rows=[];
+  } else if (req.user.role === 'curator') {
+    const ids=db.prepare('SELECT branch_id FROM curator_branches WHERE curator_id=?').all(req.user.id).map(r=>r.branch_id);
+    if(!ids.length) rows=[];
     else rows=db.prepare(`${GROUP_SELECT} WHERE g.branch_id IN (${ids.map(()=>'?').join(',')}) ORDER BY g.name`).all(...ids);
   } else {
     rows = db.prepare(`${GROUP_SELECT} WHERE g.teacher_id = ? OR g.assistant_id = ? ORDER BY g.name`)
@@ -202,13 +202,17 @@ router.get('/groups/:id', (req, res) => {
   res.json(rowToGroup(g));
 });
 
-router.post('/groups', requireRole('admin'), validateBody(groupCreateSchema), (req, res, next) => {
+router.post('/groups', requireRole('admin','curator'), validateBody(groupCreateSchema), (req, res, next) => {
   const { name, courseId, branchId, teacherId, assistantId, lessonKind, status } = req.body || {};
   if (!name || !branchId) return res.status(400).json({ error: 'name, branchId обязательны' });
+  if (req.user.role==='curator' && !db.prepare('SELECT 1 FROM curator_branches WHERE curator_id=? AND branch_id=?').get(req.user.id,branchId)) {
+    return res.status(403).json({ error:'Нет доступа к выбранному филиалу' });
+  }
   if (!db.prepare('SELECT 1 FROM branches WHERE id=?').get(branchId)) return res.status(400).json({ error: 'Выбранный филиал больше не существует. Обновите страницу.' });
   if (courseId && !db.prepare('SELECT 1 FROM modules WHERE id=?').get(courseId)) return res.status(400).json({ error: 'Выбранный курс больше не существует. Обновите страницу.' });
   if (teacherId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(teacherId)) return res.status(400).json({ error: 'Выбранный преподаватель не найден или имеет другую роль.' });
-  if (assistantId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='assistant'").get(assistantId)) return res.status(400).json({ error: 'Выбранный ассистент не найден или имеет другую роль.' });
+  if (assistantId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(assistantId)) return res.status(400).json({ error: 'Вторым преподавателем можно назначить только преподавателя.' });
+  if (teacherId && assistantId && teacherId===assistantId) return res.status(400).json({error:'Основной и второй преподаватель должны быть разными'});
   try {
     const id = genId('grp');
     db.prepare(`INSERT INTO groups (id, name, course_id, branch_id, teacher_id, assistant_id, lesson_kind, status)
@@ -227,17 +231,24 @@ router.post('/groups', requireRole('admin'), validateBody(groupCreateSchema), (r
   }
 });
 
-router.put('/groups/:id', requireRole('admin','assistant'), validateBody(groupUpdateSchema), (req, res) => {
+router.put('/groups/:id', requireRole('admin','curator'), validateBody(groupUpdateSchema), (req, res) => {
   const cur = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найдена' });
   if (!canCurateGroup(req.user,req.params.id)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const { name, courseId, branchId, teacherId, assistantId, lessonKind, status } = req.body || {};
+  const nextBranch=branchId||cur.branch_id;
+  if (req.user.role==='curator' && !db.prepare('SELECT 1 FROM curator_branches WHERE curator_id=? AND branch_id=?').get(req.user.id,nextBranch)) {
+    return res.status(403).json({error:'Нет доступа к выбранному филиалу'});
+  }
+  if (teacherId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(teacherId)) return res.status(400).json({error:'Основной преподаватель не найден'});
+  if (assistantId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(assistantId)) return res.status(400).json({error:'Второй преподаватель не найден'});
+  if (teacherId && assistantId && teacherId===assistantId) return res.status(400).json({error:'Основной и второй преподаватель должны быть разными'});
   db.prepare(`UPDATE groups SET name=?, course_id=?, branch_id=?, teacher_id=?, assistant_id=?, lesson_kind=?, status=? WHERE id=?`)
     .run(
       name !== undefined ? String(name).trim() : cur.name,
       courseId !== undefined ? (courseId || null) : cur.course_id,
-      branchId || cur.branch_id,
-      teacherId || cur.teacher_id,
+      nextBranch,
+      teacherId !== undefined ? (teacherId || null) : cur.teacher_id,
       assistantId !== undefined ? (assistantId || null) : cur.assistant_id,
       lessonKind && ['main', 'extra'].includes(lessonKind) ? lessonKind : cur.lesson_kind,
       status && ['active', 'archived'].includes(status) ? status : cur.status,
@@ -258,7 +269,7 @@ router.get('/groups/:id/schedule', (req, res) => {
   const rows = db.prepare('SELECT * FROM group_schedule WHERE group_id = ? ORDER BY weekday, start_time').all(req.params.id);
   res.json(rows.map(r => ({ id: r.id, groupId: r.group_id, weekday: r.weekday, startTime: r.start_time, durationMin: r.duration_min })));
 });
-router.post('/groups/:id/schedule', requireRole('admin','assistant'), validateBody(scheduleSchema), (req, res) => {
+router.post('/groups/:id/schedule', requireRole('admin','curator'), validateBody(scheduleSchema), (req, res) => {
   if (!canCurateGroup(req.user,req.params.id)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const { weekday, startTime, durationMin } = req.body || {};
   if (weekday == null || !startTime || !durationMin) return res.status(400).json({ error: 'weekday, startTime, durationMin обязательны' });
@@ -269,7 +280,7 @@ router.post('/groups/:id/schedule', requireRole('admin','assistant'), validateBo
     .run(id, req.params.id, wd, String(startTime), parseInt(durationMin) || 60);
   res.status(201).json({ id, groupId: req.params.id, weekday: wd, startTime, durationMin: parseInt(durationMin) || 60 });
 });
-router.delete('/groups/:gid/schedule/:sid', requireRole('admin','assistant'), (req, res) => {
+router.delete('/groups/:gid/schedule/:sid', requireRole('admin','curator'), (req, res) => {
   if (!canCurateGroup(req.user,req.params.gid)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const info = db.prepare('DELETE FROM group_schedule WHERE id = ? AND group_id = ?').run(req.params.sid, req.params.gid);
   if (!info.changes) return res.status(404).json({ error: 'Не найдено' });
@@ -296,7 +307,7 @@ router.get('/groups/:id/members', (req, res) => {
     name: r.name, login: r.login, avatarUrl: r.avatar_url || null, videoConsent: !!r.video_consent,
   })));
 });
-router.post('/groups/:id/members', requireRole('admin','assistant'), validateBody(memberSchema), (req, res) => {
+router.post('/groups/:id/members', requireRole('admin','curator'), validateBody(memberSchema), (req, res) => {
   if (!canCurateGroup(req.user,req.params.id)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const { studentId, since, until } = req.body || {};
   if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
@@ -311,7 +322,7 @@ router.post('/groups/:id/members', requireRole('admin','assistant'), validateBod
     .run(id, studentId, req.params.id, since || Date.now(), until || null);
   res.status(201).json({ id, studentId, groupId: req.params.id });
 });
-router.delete('/groups/:gid/members/:mid', requireRole('admin','assistant'), (req, res) => {
+router.delete('/groups/:gid/members/:mid', requireRole('admin','curator'), (req, res) => {
   if (!canCurateGroup(req.user,req.params.gid)) return res.status(403).json({error:'Группа не относится к вашему филиалу'});
   const info = db.prepare('DELETE FROM group_members WHERE id = ? AND group_id = ?').run(req.params.mid, req.params.gid);
   if (!info.changes) return res.status(404).json({ error: 'Не найдено' });

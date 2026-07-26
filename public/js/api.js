@@ -243,6 +243,9 @@
   const createSession    = (data) => API_.post('/api/lesson-sessions', data);
   const deleteSession    = (id) => API_.del('/api/lesson-sessions/' + encodeURIComponent(id));
   const getSessionAttendance = (id) => API_.get('/api/lesson-sessions/' + encodeURIComponent(id) + '/attendance');
+  const getSessionMembers = (id) => API_.get('/api/lesson-sessions/' + encodeURIComponent(id) + '/members');
+  const getSessionManage = (id) => API_.get('/api/lesson-sessions/' + encodeURIComponent(id) + '/manage');
+  const updateSessionManage = (id, data) => API_.put('/api/lesson-sessions/' + encodeURIComponent(id) + '/manage', data);
   const saveAttendance   = (data) => API_.post('/api/attendance', data);
 
   const getHomework      = (q) => API_.get('/api/homework' + (q ? ('?' + q) : ''));
@@ -346,7 +349,8 @@
     getCrmTasks, createCrmTask, updateCrmTask, deleteCrmTask, getClientCredentials, sendClientCredentials, resetStudentPassword,
     getPermissionKeys, getPermissions, setPermissions,
     // фаза 3
-    getSessions, getCalendar, createSession, deleteSession, getSessionAttendance, saveAttendance,
+    getSessions, getCalendar, createSession, deleteSession, getSessionAttendance,
+    getSessionMembers, getSessionManage, updateSessionManage, saveAttendance,
     getHomework, getMyHomework, createHomework, uploadHomeworkFile, deleteHomework,
     // фаза 4
     getArtifacts, createArtifact, deleteArtifact,

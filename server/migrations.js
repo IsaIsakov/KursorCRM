@@ -445,6 +445,63 @@ const MIGRATIONS = [
       for (const [name, type] of additions) if (!columns.has(name)) db.exec(`ALTER TABLE homework ADD COLUMN ${name} ${type}`);
     },
   },
+  {
+    version: 15,
+    name: 'production_lesson_lifecycle_and_password_requests',
+    up(db) {
+      const lessonCols = new Set(db.prepare('PRAGMA table_info(lesson_sessions)').all().map(c => c.name));
+      const lessonAdditions = [
+        ['lesson_day', 'TEXT'], ['status', "TEXT NOT NULL DEFAULT 'conducted'"],
+        ['start_time', 'TEXT'], ['duration_min', 'INTEGER'],
+        ['scheduled_teacher_id', 'TEXT'], ['scheduled_assistant_id', 'TEXT'],
+        ['updated_at', 'INTEGER'],
+      ];
+      for (const [name, type] of lessonAdditions) if (!lessonCols.has(name)) db.exec(`ALTER TABLE lesson_sessions ADD COLUMN ${name} ${type}`);
+      db.exec(`
+        UPDATE lesson_sessions SET
+          lesson_day=COALESCE(lesson_day,date(CAST(date AS INTEGER)/1000,'unixepoch')),
+          status=COALESCE(status,'conducted'),
+          updated_at=COALESCE(updated_at,created_at);
+        DELETE FROM lesson_sessions WHERE id IN (
+          SELECT newer.id FROM lesson_sessions newer JOIN lesson_sessions older
+          ON newer.group_id=older.group_id AND newer.lesson_day=older.lesson_day
+          AND (newer.created_at<older.created_at OR (newer.created_at=older.created_at AND newer.id<older.id))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_lesson_unique_day ON lesson_sessions(group_id,lesson_day);
+        CREATE INDEX IF NOT EXISTS idx_lesson_status_day ON lesson_sessions(status,lesson_day);
+
+        CREATE TABLE IF NOT EXISTS lesson_session_members (
+          lesson_session_id TEXT NOT NULL,
+          student_id TEXT NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          updated_by TEXT,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(lesson_session_id,student_id),
+          FOREIGN KEY(lesson_session_id) REFERENCES lesson_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS password_reset_requests (
+          id TEXT PRIMARY KEY,
+          user_id TEXT,
+          login_snapshot TEXT NOT NULL,
+          branch_id TEXT,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved','rejected')),
+          requested_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          resolved_by TEXT,
+          delivery_channel TEXT,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+          FOREIGN KEY(branch_id) REFERENCES branches(id) ON DELETE SET NULL,
+          FOREIGN KEY(resolved_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_password_reset_pending ON password_reset_requests(status,requested_at DESC);
+      `);
+      // «Ассистент» теперь является назначением преподавателя внутри группы,
+      // а не отдельной глобальной ролью аккаунта.
+      db.prepare("UPDATE users SET role='teacher' WHERE role='assistant'").run();
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

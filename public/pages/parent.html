@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=21">
+<link rel="stylesheet" href="/css/style.css?v=23">
 <style>
 /* ======= PARENT PANEL STYLES ======= */
 .parent-layout {
@@ -310,10 +310,10 @@
   <div class="p-loader">Загружаем кабинет…</div>
 </div>
 
-<script src="/data/database.js?v=21"></script>
-<script src="/js/i18n.js?v=21"></script>
-<script src="/js/api.js?v=21"></script>
-<script src="/js/app.js?v=21"></script>
+<script src="/data/database.js?v=23"></script>
+<script src="/js/i18n.js?v=23"></script>
+<script src="/js/api.js?v=23"></script>
+<script src="/js/app.js?v=23"></script>
 <script>
 const user = requireAuth(['parent']);
 let child = null;     // единственный ребёнок
@@ -486,11 +486,14 @@ function captionHtml(title) {
     ? `<div class="ig-caption">📝 ${escapeHtml(title)}</div>`
     : `<div class="ig-caption muted">Описание не добавлено</div>`;
 }
+function mediaPublishedHtml(a) {
+  return a.createdAt ? `<div class="ig-caption muted">Опубликовано: ${fmtDateTime(a.createdAt, I18N.lang==='kk'?'kk-KZ':'ru-RU')}</div>` : '';
+}
 function imageBlockHtml(a) {
   return `<div class="ig-block ig-image-wrap">
     <img class="ig-image" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.title || 'Работа ученика')}" loading="lazy" onclick='openLightbox(${JSON.stringify(a.url)})'>
     <div class="ig-media-actions"><a class="ig-download-btn" href="${escapeHtml(a.url)}" download>⬇ Скачать</a></div>
-    ${captionHtml(a.title)}
+    ${captionHtml(a.title)}${mediaPublishedHtml(a)}
   </div>`;
 }
 function fileBlockHtml(a) {
@@ -499,20 +502,20 @@ function fileBlockHtml(a) {
       <div class="ig-file-icon">${fileIconFor(a.url)}</div>
       <div style="flex:1;min-width:0"><div class="ig-file-name">${escapeHtml(a.title || 'Файл работы')}</div></div>
       <a class="ig-download-btn" href="${escapeHtml(a.url)}" download>⬇ Скачать</a>
-    </div>
+    </div>${mediaPublishedHtml(a)}
   </div>`;
 }
 function videoBlockHtml(a) {
   return `<div class="ig-block" style="padding:0">
     <video class="ig-video" controls preload="metadata" src="${escapeHtml(a.url)}"></video>
     <div class="ig-media-actions"><a class="ig-download-btn" href="${escapeHtml(a.url)}" download>⬇ Скачать видео</a></div>
-    ${captionHtml(a.title)}
+    ${captionHtml(a.title)}${mediaPublishedHtml(a)}
   </div>`;
 }
 function linkBlockHtml(a) {
   return `<div class="ig-block">
     ${a.title ? `<div class="ig-caption" style="padding:0 0 8px">🔗 ${escapeHtml(a.title)}</div>` : ''}
-    <a class="ig-download-btn" href="${escapeHtml(a.url)}" target="_blank">🔗 Открыть ссылку</a>
+    <a class="ig-download-btn" href="${escapeHtml(a.url)}" target="_blank">🔗 Открыть ссылку</a>${mediaPublishedHtml(a)}
   </div>`;
 }
 function unavailableBlockHtml(text) {
@@ -582,7 +585,7 @@ function lessonPostHtml(item) {
         <div class="ig-post-title">${escapeHtml(item.topic || 'Занятие')}</div>
         <div class="ig-post-sub">${escapeHtml(item.groupName || '')}</div>
       </div>
-      <div class="ig-post-date">${item.date ? fmtDate(item.date) : ''}</div>
+      <div class="ig-post-date">${item.date ? fmtDateTime(item.date, I18N.lang==='kk'?'kk-KZ':'ru-RU') : ''}</div>
     </div>
     <div class="ig-post-body">${blocks.length ? blocks.join('') : unavailableBlockHtml('Пока ничего не загружено')}</div>
   </div>`;

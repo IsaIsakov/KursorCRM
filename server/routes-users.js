@@ -14,7 +14,7 @@ const router = express.Router();
 router.use(authRequired);
 
 // Допустимые роли (CHECK на уровне БД снят — валидируем здесь)
-const ROLES = ['admin', 'teacher', 'assistant', 'curator', 'student', 'parent'];
+const ROLES = ['admin', 'teacher', 'curator', 'student', 'parent'];
 const roleSchema = z.enum(ROLES);
 const languagesSchema = z.array(z.string().trim().min(1).max(50)).max(30);
 const createUserSchema = z.strictObject({
@@ -90,8 +90,8 @@ router.get('/students', requireRole('teacher', 'assistant', 'admin'), (req, res)
   res.json(rows.map(rowToUser));
 });
 
-router.get('/staff', requireRole('assistant','admin'), (_req,res)=>{
-  res.json(db.prepare("SELECT * FROM users WHERE role IN ('teacher','assistant') ORDER BY role,name").all().map(rowToUser));
+router.get('/staff', requireRole('curator','admin'), (_req,res)=>{
+  res.json(db.prepare("SELECT * FROM users WHERE role='teacher' ORDER BY name").all().map(rowToUser));
 });
 
 router.post('/', requireRole('admin'), validateBody(createUserSchema), (req, res) => {

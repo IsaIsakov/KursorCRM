@@ -48,6 +48,15 @@ function canManageGroup(user, groupId) {
   const g = db.prepare('SELECT teacher_id, assistant_id FROM groups WHERE id = ?').get(groupId);
   return g && (g.teacher_id === user.id || g.assistant_id === user.id);
 }
+function canManageSession(user, session) {
+  return canManageGroup(user,session.group_id) ||
+    (user.role==='teacher' && [session.scheduled_teacher_id,session.scheduled_assistant_id].includes(user.id));
+}
+function isLessonMember(session,studentId) {
+  const overridden=db.prepare('SELECT COUNT(*) n FROM lesson_session_members WHERE lesson_session_id=?').get(session.id).n;
+  if(overridden)return !!db.prepare('SELECT 1 FROM lesson_session_members WHERE lesson_session_id=? AND student_id=? AND active=1').get(session.id,studentId);
+  return validateGroupStudents(db,session.group_id,[studentId],sessionTimestamp(session.date)).valid;
+}
 
 function rowToArtifact(r) {
   const o = {
@@ -77,7 +86,7 @@ router.get('/', (req, res) => {
   else if (req.user.role === 'parent') { return res.status(403).json({ error: 'Используйте /api/parent/artifacts' }); }
 
   const rows = db.prepare(`
-    SELECT sa.*, ls.group_id, ls.date AS session_date, ls.topic
+    SELECT sa.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id,ls.date AS session_date,ls.topic
     FROM session_artifacts sa
     JOIN lesson_sessions ls ON ls.id = sa.lesson_session_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -86,7 +95,7 @@ router.get('/', (req, res) => {
 
   const filtered = rows.filter(r => {
     if (req.user.role === 'admin' || req.user.role === 'student') return true;
-    return canManageGroup(req.user, r.group_id);
+    return canManageSession(req.user, r);
   });
   res.json(filtered.map(rowToArtifact));
 });
@@ -119,15 +128,14 @@ router.use(authRequired);
 // backwards compatibility with small legacy dataUrl clients.
 router.post('/', multipartArtifact, validateArtifact, (req, res) => {
   const { lessonSessionId, studentId, type, title, dataUrl, url } = req.body || {};
-  if (!['admin', 'teacher', 'assistant'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
+  if (!['admin', 'teacher'].includes(req.user.role)) return res.status(403).json({ error: 'Недостаточно прав' });
   if (!lessonSessionId || !studentId || !['video', 'screenshot', 'file', 'link'].includes(type)) {
     return res.status(400).json({ error: 'lessonSessionId, studentId, корректный type обязательны' });
   }
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
   if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
-  if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
-  const membership = validateGroupStudents(db, ls.group_id, [studentId], sessionTimestamp(ls.date));
-  if (!membership.valid) return res.status(400).json({ error: 'Ученик не состоит в группе этого занятия' });
+  if (!canManageSession(req.user, ls)) return res.status(403).json({ error: 'Это не ваше занятие' });
+  if (!isLessonMember(ls,studentId)) return res.status(400).json({ error: 'Ученик не входит в состав этого занятия' });
   if (req.user.role !== 'admin' && !hasPermission(req.user, 'upload_artifacts')) {
     return res.status(403).json({ error: 'Нет права загружать материалы' });
   }
@@ -207,10 +215,10 @@ router.post('/', multipartArtifact, validateArtifact, (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
-  const row = db.prepare(`SELECT sa.*, ls.group_id FROM session_artifacts sa
+  const row = db.prepare(`SELECT sa.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM session_artifacts sa
     JOIN lesson_sessions ls ON ls.id = sa.lesson_session_id WHERE sa.id = ?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Не найдено' });
-  if (req.user.role !== 'admin' && !canManageGroup(req.user, row.group_id)) {
+  if (!canManageSession(req.user,row)) {
     return res.status(403).json({ error: 'Недоступно' });
   }
   if (row.file_path) storage.deleteFile(row.file_path);

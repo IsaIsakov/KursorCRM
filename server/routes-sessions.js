@@ -17,7 +17,13 @@ const storage = require('./storage');
 const router = express.Router();
 router.use(authRequired);
 
-const lessonSchema = z.strictObject({ groupId: idSchema, date: timestamp, topic: optionalText(500) });
+const lessonSchema = z.strictObject({
+  groupId: idSchema, date: timestamp, lessonDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
+  durationMin: z.coerce.number().int().min(10).max(720).optional(),
+  teacherId: idSchema.nullable().optional(), assistantId: idSchema.nullable().optional(),
+  topic: optionalText(500),
+});
 const attendanceSchema = z.strictObject({ lessonSessionId: idSchema, records: z.array(z.strictObject({ studentId: idSchema, status: z.enum(['present','absent','excused','late']), reason: optionalText(1000) })).max(500) });
 const homeworkSchema = z.strictObject({
   lessonSessionId: idSchema,
@@ -28,16 +34,49 @@ const homeworkSchema = z.strictObject({
   description: optionalText(5000),
   linkUrl: z.string().url().max(2048).refine(v => /^https?:\/\//i.test(v), 'Разрешены только http/https ссылки').nullable().optional(),
 });
+const lessonManageSchema = z.strictObject({
+  teacherId: idSchema.nullable().optional(),
+  assistantId: idSchema.nullable().optional(),
+  studentIds: z.array(idSchema).max(500).optional(),
+  topic: optionalText(500),
+});
 
 function canManageGroup(user, groupId) {
   if (user.role === 'admin') return true;
-  if (!['teacher', 'assistant'].includes(user.role)) return false;
+  if (user.role === 'curator') return !!db.prepare(`SELECT 1 FROM groups g JOIN curator_branches cb ON cb.branch_id=g.branch_id
+    WHERE g.id=? AND cb.curator_id=?`).get(groupId,user.id);
+  if (user.role !== 'teacher') return false;
   const g = db.prepare('SELECT teacher_id, assistant_id,branch_id FROM groups WHERE id = ?').get(groupId);
   if (!g) return false;
   if (g.teacher_id === user.id || g.assistant_id === user.id) return true;
-  // Ассистент выполняет роль куратора филиала: назначение хотя бы в одну группу
-  // филиала даёт ему управление учебным календарём этого филиала.
-  return user.role === 'assistant' && !!db.prepare('SELECT 1 FROM groups WHERE assistant_id=? AND branch_id=? LIMIT 1').get(user.id,g.branch_id);
+  return false;
+}
+function canManageSession(user, session) {
+  if (!session) return false;
+  if (canManageGroup(user,session.group_id)) return true;
+  return user.role==='teacher' && [session.scheduled_teacher_id,session.scheduled_assistant_id].includes(user.id);
+}
+
+function effectiveLessonMembers(session) {
+  const overrides = db.prepare(`
+    SELECT lsm.student_id, lsm.active, u.name, u.login, u.avatar_url,
+           COALESCE(sc.video_consent,0) video_consent
+    FROM lesson_session_members lsm
+    JOIN users u ON u.id=lsm.student_id AND u.role='student'
+    LEFT JOIN students_crm sc ON sc.user_id=u.id
+    WHERE lsm.lesson_session_id=? ORDER BY u.name
+  `).all(session.id);
+  if (overrides.length) return overrides.filter(r => r.active);
+  const at = sessionTimestamp(session.date);
+  return db.prepare(`
+    SELECT gm.student_id,1 active,u.name,u.login,u.avatar_url,
+           COALESCE(sc.video_consent,0) video_consent
+    FROM group_members gm
+    JOIN users u ON u.id=gm.student_id AND u.role='student'
+    LEFT JOIN students_crm sc ON sc.user_id=u.id
+    WHERE gm.group_id=? AND gm.since<=? AND (gm.until IS NULL OR gm.until>=?)
+    ORDER BY u.name
+  `).all(session.group_id,at,at);
 }
 
 /* ============================================================
@@ -62,28 +101,49 @@ router.get('/lesson-sessions', (req, res) => {
   `).all(...params);
   res.json(rows.map(r => ({
     id: r.id, groupId: r.group_id, date: r.date, topic: r.topic || '',
+    lessonDay: r.lesson_day || null, status: r.status || 'conducted',
+    startTime: r.start_time || null, durationMin: r.duration_min || null,
+    teacherId: r.scheduled_teacher_id || null, assistantId: r.scheduled_assistant_id || null,
     conductedBy: r.conducted_by || null, conductorName: r.conductor_name || null,
-    createdAt: r.created_at, presentCount: r.present_count || 0,
+    createdAt: r.created_at, updatedAt: r.updated_at || r.created_at, presentCount: r.present_count || 0,
   })));
 });
 
 router.post('/lesson-sessions', validateBody(lessonSchema), (req, res) => {
-  const { groupId, date, topic } = req.body || {};
+  const { groupId, date, topic, lessonDay, startTime, durationMin, teacherId, assistantId } = req.body || {};
   if (!groupId || !date) return res.status(400).json({ error: 'groupId, date обязательны' });
   if (!canManageGroup(req.user, groupId)) return res.status(403).json({ error: 'Это не ваша группа' });
-  if (req.user.role !== 'admin' && !hasPermission(req.user, 'conduct_lessons')) {
+  if (!['admin','curator'].includes(req.user.role) && !hasPermission(req.user, 'conduct_lessons')) {
     return res.status(403).json({ error: 'Нет права проводить занятия' });
   }
-  const id = genId('ls');
-  db.prepare('INSERT INTO lesson_sessions (id, group_id, date, topic, conducted_by, created_at) VALUES (?,?,?,?,?,?)')
-    .run(id, groupId, date, topic || null, req.user.id, Date.now());
-  res.status(201).json({ id, groupId, date, topic: topic || '', conductedBy: req.user.id });
+  const day=lessonDay||_ymd(new Date(Number(date)));
+  const existing=db.prepare('SELECT * FROM lesson_sessions WHERE group_id=? AND lesson_day=?').get(groupId,day);
+  if(existing) return res.json({id:existing.id,groupId,date:existing.date,lessonDay:existing.lesson_day,status:existing.status,existing:true});
+  const group=db.prepare('SELECT teacher_id,assistant_id FROM groups WHERE id=?').get(groupId);
+  for(const staffId of [teacherId,assistantId].filter(Boolean)) {
+    if(!db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(staffId)) return res.status(400).json({error:'На занятие можно назначить только преподавателя'});
+  }
+  const id = genId('ls'),now=Date.now();
+  try {
+    db.prepare(`INSERT INTO lesson_sessions
+      (id,group_id,date,lesson_day,status,start_time,duration_min,scheduled_teacher_id,scheduled_assistant_id,topic,conducted_by,created_at,updated_at)
+      VALUES (?,?,?,?,'draft',?,?,?,?,?,?,?,?)`)
+      .run(id,groupId,date,day,startTime||null,durationMin||null,teacherId||group?.teacher_id||null,
+        assistantId||group?.assistant_id||null,topic||null,null,now,now);
+  } catch(error) {
+    if(String(error.code||'').startsWith('SQLITE_CONSTRAINT')) {
+      const same=db.prepare('SELECT * FROM lesson_sessions WHERE group_id=? AND lesson_day=?').get(groupId,day);
+      if(same)return res.json({id:same.id,groupId,date:same.date,lessonDay:same.lesson_day,status:same.status,existing:true});
+    }
+    throw error;
+  }
+  res.status(201).json({ id, groupId, date, lessonDay:day, status:'draft', topic: topic || '', conductedBy: null });
 });
 
 router.delete('/lesson-sessions/:id', (req, res) => {
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(req.params.id);
   if (!ls) return res.status(404).json({ error: 'Не найдено' });
-  if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  if (!canManageSession(req.user, ls)) return res.status(403).json({ error: 'Это не ваше занятие' });
   // вернуть посещения, списанные за это занятие
   // «present» и «late» в равной степени списывали визит — возвращаем оба.
   const present = db.prepare("SELECT student_id FROM attendance WHERE lesson_session_id = ? AND status IN ('present','late','absent')").all(req.params.id);
@@ -103,11 +163,79 @@ router.delete('/lesson-sessions/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Состав и преподаватели конкретного занятия. Изменение не затрагивает
+// постоянный состав группы и удобно для замен/разовых посещений.
+router.get('/lesson-sessions/:id/manage', (req, res) => {
+  const ls = db.prepare(`SELECT ls.*,g.branch_id,g.name group_name,
+    COALESCE(ls.scheduled_teacher_id,g.teacher_id) teacher_id,
+    COALESCE(ls.scheduled_assistant_id,g.assistant_id) assistant_id
+    FROM lesson_sessions ls JOIN groups g ON g.id=ls.group_id WHERE ls.id=?`).get(req.params.id);
+  if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
+  if (!canManageSession(req.user,ls)) return res.status(403).json({ error: 'Нет доступа к занятию' });
+  const staff = db.prepare("SELECT id,name FROM users WHERE role='teacher' ORDER BY name").all();
+  const students = db.prepare(`SELECT u.id,u.name,sc.branch_id
+    FROM users u LEFT JOIN students_crm sc ON sc.user_id=u.id
+    WHERE u.role='student' AND (sc.branch_id=? OR sc.branch_id IS NULL) ORDER BY u.name`).all(ls.branch_id);
+  const selected = new Set(effectiveLessonMembers(ls).map(r => r.student_id));
+  res.json({
+    id:ls.id,groupId:ls.group_id,groupName:ls.group_name,lessonDay:ls.lesson_day,
+    status:ls.status,startTime:ls.start_time,durationMin:ls.duration_min,topic:ls.topic||'',
+    teacherId:ls.teacher_id||null,assistantId:ls.assistant_id||null,staff,
+    students:students.map(s=>({id:s.id,name:s.name,selected:selected.has(s.id)})),
+  });
+});
+
+router.put('/lesson-sessions/:id/manage', requireRole('admin','curator'), validateBody(lessonManageSchema), (req, res) => {
+  const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id=?').get(req.params.id);
+  if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
+  if (!canManageGroup(req.user,ls.group_id)) return res.status(403).json({ error: 'Нет доступа к занятию' });
+  const { teacherId,assistantId,studentIds,topic } = req.body || {};
+  if (teacherId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(teacherId)) {
+    return res.status(400).json({ error:'Основной преподаватель не найден' });
+  }
+  if (assistantId && !db.prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'").get(assistantId)) {
+    return res.status(400).json({ error:'Вторым преподавателем можно назначить только преподавателя' });
+  }
+  if (teacherId && assistantId && teacherId === assistantId) {
+    return res.status(400).json({ error:'Основной и второй преподаватель должны быть разными' });
+  }
+  const uniqueStudents = studentIds === undefined ? null : [...new Set(studentIds)];
+  if (uniqueStudents) {
+    const valid = uniqueStudents.length ? db.prepare(`SELECT id FROM users WHERE role='student' AND id IN (${uniqueStudents.map(()=>'?').join(',')})`).all(...uniqueStudents) : [];
+    if (valid.length !== uniqueStudents.length) return res.status(400).json({ error:'Один из выбранных учеников не найден' });
+  }
+  db.transaction(() => {
+    db.prepare(`UPDATE lesson_sessions SET scheduled_teacher_id=?,scheduled_assistant_id=?,
+      topic=?,updated_at=? WHERE id=?`).run(
+      teacherId !== undefined ? (teacherId||null) : ls.scheduled_teacher_id,
+      assistantId !== undefined ? (assistantId||null) : ls.scheduled_assistant_id,
+      topic !== undefined ? (String(topic||'').trim()||null) : ls.topic,
+      Date.now(),ls.id);
+    if (uniqueStudents) {
+      db.prepare('DELETE FROM lesson_session_members WHERE lesson_session_id=?').run(ls.id);
+      const put=db.prepare(`INSERT INTO lesson_session_members
+        (lesson_session_id,student_id,active,updated_by,updated_at) VALUES (?,?,1,?,?)`);
+      for (const sid of uniqueStudents) put.run(ls.id,sid,req.user.id,Date.now());
+    }
+  })();
+  res.json({ok:true});
+});
+
+router.get('/lesson-sessions/:id/members', (req, res) => {
+  const ls=db.prepare('SELECT * FROM lesson_sessions WHERE id=?').get(req.params.id);
+  if(!ls)return res.status(404).json({error:'Занятие не найдено'});
+  if(!canManageSession(req.user,ls))return res.status(403).json({error:'Нет доступа'});
+  res.json(effectiveLessonMembers(ls).map(r=>({
+    studentId:r.student_id,name:r.name,login:r.login,avatarUrl:r.avatar_url||null,
+    videoConsent:!!r.video_consent,
+  })));
+});
+
 // Детали занятия с посещаемостью
 router.get('/lesson-sessions/:id/attendance', (req, res) => {
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(req.params.id);
   if (!ls) return res.status(404).json({ error: 'Не найдено' });
-  if (!canManageGroup(req.user, ls.group_id) && req.user.role !== 'admin') {
+  if (!canManageSession(req.user, ls)) {
     return res.status(403).json({ error: 'Недоступно' });
   }
   const rows = db.prepare(`
@@ -146,16 +274,18 @@ router.post('/attendance', validateBody(attendanceSchema), (req, res) => {
   }
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
   if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
-  if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
-  if (req.user.role !== 'admin' && !hasPermission(req.user, 'conduct_lessons')) {
+  if (!canManageSession(req.user, ls)) return res.status(403).json({ error: 'Это не ваше занятие' });
+  if (!['admin','curator'].includes(req.user.role) && !hasPermission(req.user, 'conduct_lessons')) {
     return res.status(403).json({ error: 'Нет права отмечать посещаемость' });
   }
   const malformed = records.filter(rec => !rec || !rec.studentId || !['present', 'absent', 'excused', 'late'].includes(rec.status));
   if (malformed.length) return res.status(400).json({ error: 'Все записи посещаемости должны содержать корректные studentId и status' });
-  const membership = validateGroupStudents(db, ls.group_id, records.map(r => r.studentId), sessionTimestamp(ls.date));
-  if (!membership.valid) return res.status(400).json({
-    error: membership.duplicates.length ? 'Список посещаемости содержит дубликаты учеников' : 'Один или несколько учеников не состоят в этой группе',
-    invalidStudentIds: membership.duplicates.length ? membership.duplicates : membership.outsiders,
+  const ids=records.map(r=>r.studentId),duplicates=ids.filter((id,i)=>ids.indexOf(id)!==i);
+  const allowed=new Set(effectiveLessonMembers(ls).map(r=>r.student_id));
+  const outsiders=ids.filter(id=>!allowed.has(id));
+  if (duplicates.length || outsiders.length) return res.status(400).json({
+    error: duplicates.length ? 'Список посещаемости содержит дубликаты учеников' : 'Один или несколько учеников не входят в состав этого занятия',
+    invalidStudentIds: duplicates.length ? [...new Set(duplicates)] : outsiders,
   });
 
   const getPrev = db.prepare('SELECT status FROM attendance WHERE lesson_session_id = ? AND student_id = ?');
@@ -204,6 +334,8 @@ router.post('/attendance', validateBody(attendanceSchema), (req, res) => {
         if (result.applied) charged.push({ studentId, action: 'refunded', balance: result.balance });
       }
     }
+    db.prepare("UPDATE lesson_sessions SET status='conducted',conducted_by=?,updated_at=? WHERE id=?")
+      .run(req.user.id,Date.now(),lessonSessionId);
   });
   txn();
 
@@ -252,7 +384,7 @@ router.post('/attendance', validateBody(attendanceSchema), (req, res) => {
         VALUES (?, ?, 'missing_report', ?, '/admin/index.html', 'in_app', 0, ?)
       `);
       const namesList = missingReports.map(m => m.name).join(', ');
-      const roleLabel = req.user.role === 'assistant' ? 'ассистент' : req.user.role === 'admin' ? 'администратор' : 'преподаватель';
+      const roleLabel = req.user.role === 'admin' ? 'администратор' : req.user.role === 'curator' ? 'куратор' : 'преподаватель';
       for (const uid of recipients) {
         const notifId = `missing_report_${lessonSessionId}_${uid}`;
         if (missingReports.length) {
@@ -294,15 +426,16 @@ router.post('/homework', validateBody(homeworkSchema), (req, res) => {
   if (!lessonSessionId) return res.status(400).json({ error: 'lessonSessionId обязателен' });
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
   if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
-  if (!canManageGroup(req.user, ls.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  if (!canManageSession(req.user, ls)) return res.status(403).json({ error: 'Это не ваше занятие' });
 
   const id = genId('hw');
   // назначения: конкретным ученикам или всей группе (по составу)
   let targets = Array.isArray(studentIds) && studentIds.length
     ? [...new Set(studentIds.map(String))]
-    : activeMemberIds(db, ls.group_id, sessionTimestamp(ls.date));
-  const targetCheck = validateGroupStudents(db, ls.group_id, targets, sessionTimestamp(ls.date));
-  if (!targetCheck.valid) return res.status(400).json({ error: 'Домашнее задание содержит ученика не из этой группы', invalidStudentIds: targetCheck.outsiders });
+    : effectiveLessonMembers(ls).map(r=>r.student_id);
+  const allowedTargets=new Set(effectiveLessonMembers(ls).map(r=>r.student_id));
+  const invalidTargets=targets.filter(id=>!allowedTargets.has(id));
+  if (invalidTargets.length) return res.status(400).json({ error: 'Домашнее задание содержит ученика не из состава этого занятия', invalidStudentIds: invalidTargets });
   const insA = db.prepare('INSERT INTO homework_assignments (id, homework_id, student_id) VALUES (?,?,?)');
   if (!moduleId && !(taskIds && taskIds.length) && !String(description || '').trim() && !linkUrl) {
     return res.status(400).json({ error: 'Добавьте задачи платформы, текст, ссылку или файл' });
@@ -332,9 +465,9 @@ router.post('/homework', validateBody(homeworkSchema), (req, res) => {
 const homeworkUpload = parseMultipart({ maxFileBytes: 30 * 1024 * 1024, maxFields: 2 });
 router.post('/homework/:id/file', homeworkUpload, (req, res) => {
   if (!req.upload?.size) return res.status(400).json({ error: 'Выберите файл' });
-  const hw = db.prepare(`SELECT h.*,ls.group_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
+  const hw = db.prepare(`SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
   if (!hw) return res.status(404).json({ error: 'Домашнее задание не найдено' });
-  if (!canManageGroup(req.user, hw.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  if (!canManageSession(req.user,hw)) return res.status(403).json({ error: 'Это не ваше занятие' });
   if (hw.file_path) storage.deleteFile(hw.file_path);
   const safeId = String(hw.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const original = String(req.upload.filename || 'homework-file').slice(0, 180);
@@ -349,10 +482,10 @@ router.post('/homework/:id/file', homeworkUpload, (req, res) => {
 });
 
 router.get('/homework/:id/file', (req, res) => {
-  const hw = db.prepare(`SELECT h.*,ls.group_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
+  const hw = db.prepare(`SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
   if (!hw?.file_path) return res.status(404).json({ error: 'Файл не найден' });
   const assigned = req.user.role === 'student' && db.prepare('SELECT 1 FROM homework_assignments WHERE homework_id=? AND student_id=?').get(hw.id, req.user.id);
-  const allowed = assigned || canManageGroup(req.user, hw.group_id) ||
+  const allowed = assigned || canManageSession(req.user,hw) ||
     (req.user.role === 'parent' && !!db.prepare(`SELECT 1 FROM homework_assignments ha JOIN parent_children pc ON pc.student_id=ha.student_id
       WHERE ha.homework_id=? AND pc.parent_id=?`).get(hw.id, req.user.id));
   if (!allowed) return res.status(403).json({ error: 'Недостаточно прав' });
@@ -423,9 +556,9 @@ router.get('/homework/me', requireRole('student'), (req, res) => {
 });
 
 router.delete('/homework/:id', (req, res) => {
-  const hw = db.prepare('SELECT h.*, ls.group_id FROM homework h JOIN lesson_sessions ls ON ls.id = h.lesson_session_id WHERE h.id = ?').get(req.params.id);
+  const hw = db.prepare('SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM homework h JOIN lesson_sessions ls ON ls.id = h.lesson_session_id WHERE h.id = ?').get(req.params.id);
   if (!hw) return res.status(404).json({ error: 'Не найдено' });
-  if (!canManageGroup(req.user, hw.group_id)) return res.status(403).json({ error: 'Это не ваша группа' });
+  if (!canManageSession(req.user, hw)) return res.status(403).json({ error: 'Это не ваше занятие' });
   if (hw.file_path) storage.deleteFile(hw.file_path);
   db.prepare('DELETE FROM homework WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
@@ -451,6 +584,11 @@ function _ymd(d) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+function _scheduledAt(ymd,time) {
+  const [y,m,d]=ymd.split('-').map(Number),[hh,mm]=String(time||'00:00').split(':').map(Number);
+  const offset=Number(process.env.APP_TIMEZONE_OFFSET_MINUTES||300);
+  return Date.UTC(y,m-1,d,hh,mm)-offset*60000;
+}
 
 router.get('/calendar', (req, res) => {
   const { from, to, branch_id } = req.query;
@@ -471,10 +609,12 @@ router.get('/calendar', (req, res) => {
   `).all();
   if (branch_id) groups = groups.filter(g => g.branch_id === branch_id);
   if (req.user.role === 'teacher') {
-    groups = groups.filter(g => g.teacher_id === req.user.id || g.assistant_id === req.user.id);
-  } else if (req.user.role === 'assistant') {
-    const branches = new Set(db.prepare('SELECT DISTINCT branch_id FROM groups WHERE assistant_id=?').all(req.user.id).map(r=>r.branch_id));
-    groups = groups.filter(g => branches.has(g.branch_id));
+    groups = groups.filter(g => {
+      g._baseTeacher = g.teacher_id===req.user.id || g.assistant_id===req.user.id;
+      return g._baseTeacher || !!db.prepare(`SELECT 1 FROM lesson_sessions WHERE group_id=?
+        AND lesson_day BETWEEN ? AND ? AND (scheduled_teacher_id=? OR scheduled_assistant_id=?) LIMIT 1`)
+        .get(g.id,from,to,req.user.id,req.user.id);
+    });
   }
   if (!groups.length) return res.json([]);
 
@@ -486,17 +626,20 @@ router.get('/calendar', (req, res) => {
 
   // Все занятия этих групп; фильтруем по дате в JS (date хранится по-разному).
   const sessionRows = db.prepare(`
-    SELECT ls.*,
+    SELECT ls.*,stu.name scheduled_teacher_name,sau.name scheduled_assistant_name,
       (SELECT COUNT(*) FROM attendance a WHERE a.lesson_session_id = ls.id AND a.status IN ('present','late')) AS present_count
-    FROM lesson_sessions ls WHERE ls.group_id IN (${ph})
+    FROM lesson_sessions ls
+    LEFT JOIN users stu ON stu.id=ls.scheduled_teacher_id
+    LEFT JOIN users sau ON sau.id=ls.scheduled_assistant_id
+    WHERE ls.group_id IN (${ph})
   `).all(...groupIds);
 
   // Карта занятий по ключу groupId|YYYY-MM-DD (массив — на случай нескольких в день)
   const sessByKey = {};
   for (const s of sessionRows) {
     const d = _toDateServer(s.date);
-    if (!d) continue;
-    const key = s.group_id + '|' + _ymd(d);
+    if (!d && !s.lesson_day) continue;
+    const key = s.group_id + '|' + (s.lesson_day || _ymd(d));
     (sessByKey[key] = sessByKey[key] || []).push(s);
   }
 
@@ -513,15 +656,19 @@ router.get('/calendar', (req, res) => {
       const key = sc.group_id + '|' + ymd;
       const pool = sessByKey[key] || [];
       const sess = pool.find(s => !used.has(s.id));
+      if(req.user.role==='teacher' && !g._baseTeacher &&
+        ![sess?.scheduled_teacher_id,sess?.scheduled_assistant_id].includes(req.user.id)) continue;
       if (sess) used.add(sess.id);
       events.push({
         date: ymd, weekday: wd, startTime: sc.start_time, durationMin: sc.duration_min,
         groupId: g.id, groupName: g.name, lessonKind: g.lesson_kind,
         branchId: g.branch_id, branchName: g.branch_name || '',
-        courseTitle: g.course_title || '', teacherName: g.teacher_name || '',
-        assistantName: g.assistant_name || '',
+        courseTitle: g.course_title || '', teacherName: sess?.scheduled_teacher_name || g.teacher_name || '',
+        assistantName: sess?.scheduled_assistant_name || g.assistant_name || '',
         sessionId: sess ? sess.id : null,
-        conducted: !!sess,
+        conducted: !!sess && sess.status === 'conducted',
+        draft: !!sess && sess.status !== 'conducted',
+        overdue: (!sess || sess.status !== 'conducted') && (_scheduledAt(ymd,sc.start_time)+sc.duration_min*60000<Date.now()),
         presentCount: sess ? (sess.present_count || 0) : 0,
         topic: sess ? (sess.topic || '') : '',
       });
@@ -531,6 +678,8 @@ router.get('/calendar', (req, res) => {
   // Внеплановые занятия (есть запись, но нет слота в расписании в этот день)
   for (const s of sessionRows) {
     if (used.has(s.id)) continue;
+    if(req.user.role==='teacher' && !gById[s.group_id]?._baseTeacher &&
+      ![s.scheduled_teacher_id,s.scheduled_assistant_id].includes(req.user.id)) continue;
     const d = _toDateServer(s.date);
     if (!d || d < fromD || d > toD) continue;
     const g = gById[s.group_id]; if (!g) continue;
@@ -540,7 +689,7 @@ router.get('/calendar', (req, res) => {
       branchId: g.branch_id, branchName: g.branch_name || '',
       courseTitle: g.course_title || '', teacherName: g.teacher_name || '',
       assistantName: g.assistant_name || '',
-      sessionId: s.id, conducted: true, adhoc: true,
+      sessionId: s.id, conducted: s.status === 'conducted', draft:s.status !== 'conducted', adhoc: true,
       presentCount: s.present_count || 0, topic: s.topic || '',
     });
   }

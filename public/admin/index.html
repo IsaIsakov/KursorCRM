@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=21">
+<link rel="stylesheet" href="/css/style.css?v=23">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,10 +38,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=21"></script>
-<script src="/js/i18n.js?v=21"></script>
-<script src="/js/api.js?v=21"></script>
-<script src="/js/app.js?v=21"></script>
+<script src="/data/database.js?v=23"></script>
+<script src="/js/i18n.js?v=23"></script>
+<script src="/js/api.js?v=23"></script>
+<script src="/js/app.js?v=23"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -294,6 +294,7 @@ function renderUsers() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
       <h1 data-i18n="admin.users">Пользователи</h1>
       <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="openPasswordResetRequests()">Запросы пароля</button>
         <button class="btn btn-ghost btn-sm" onclick="API.exportDownload('users','csv')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965335.png" alt=""> <span data-i18n="common.export">Экспорт</span></button>
         <button class="btn btn-ghost btn-sm" onclick="openImport('users')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/2965/2965300.png" alt=""> <span data-i18n="common.import">Импорт</span></button>
         <button class="btn" onclick="openUserForm()">Создать аккаунт</button>
@@ -320,6 +321,18 @@ function renderUsers() {
       </tbody>
     </table>
   `;
+}
+
+async function openPasswordResetRequests(){
+  try{
+    const rows=await API._request('GET','/api/auth/password-reset/requests');
+    document.getElementById('modalContent').innerHTML=`<h2>Запросы восстановления доступа</h2><p style="color:#64748b">Новый временный пароль заменит старый. Если WhatsApp подключён и номер указан, система отправит доступ автоматически.</p><div style="display:grid;gap:8px">${rows.length?rows.map(r=>`<div class="notice-box"><div><b>${escapeHtml(r.name||r.login_snapshot)}</b><br><small>${escapeHtml(r.login_snapshot)} · ${escapeHtml(r.role||'')} · ${escapeHtml(r.branch_name||'без филиала')} · ${fmtDateTime(r.requested_at)}</small></div><button class="btn btn-sm" onclick="resolvePasswordReset('${r.id}',this)">Создать и отправить пароль</button></div>`).join(''):'<div class="empty-state">Новых заявок нет</div>'}</div><div class="modal-actions"><button class="btn" onclick="closeModal()">Закрыть</button></div>`;
+    document.getElementById('modal').classList.add('active');
+  }catch(e){alert(e.message)}
+}
+async function resolvePasswordReset(id,button){
+  button.disabled=true;
+  try{const r=await API._request('POST',`/api/auth/password-reset/requests/${id}/resolve`,{});const text=`Логин: ${r.login}\nНовый пароль: ${r.password}`;document.getElementById('modalContent').innerHTML=`<h2>Новый доступ создан</h2><div class="credential-card"><pre>${escapeHtml(text)}</pre><button class="btn btn-outline btn-sm" onclick='copyText(${JSON.stringify(text)})'>Копировать</button></div><div class="notice-box">${r.delivered?'Доступ отправлен на WhatsApp.':r.phone?`WhatsApp не отправлен: ${escapeHtml(r.deliveryError||'проверьте подключение')}. Скопируйте доступ вручную.`:'Номер не указан. Скопируйте доступ и передайте пользователю вручную.'}</div><div class="modal-actions"><button class="btn" onclick="openPasswordResetRequests()">К списку</button></div>`;}catch(e){alert(e.message);button.disabled=false}
 }
 
 async function openCuratorBranches(curatorId){
@@ -365,7 +378,6 @@ async function openUserForm(id) {
       <select class="form-input" id="f_role" onchange="toggleStudentFields()">
         <option value="student" ${u.role==='student'?'selected':''}>Ученик</option>
         <option value="teacher" ${u.role==='teacher'?'selected':''}>Учитель</option>
-        <option value="assistant" ${u.role==='assistant'?'selected':''}>Ассистент</option>
         <option value="curator" ${u.role==='curator'?'selected':''}>Куратор</option>
         <option value="parent" ${u.role==='parent'?'selected':''}>Родитель</option>
         <option value="admin" ${u.role==='admin'?'selected':''}>Администратор</option>
@@ -988,7 +1000,7 @@ async function renderAccess() {
 }
 function openAccessForm(id) {
   const a = id ? _byId(window._access||[], id) : null;
-  const teachers = cache.users.filter(u => u.role === 'teacher' || u.role === 'assistant');
+  const teachers = cache.users.filter(u => u.role === 'teacher');
   const defExp = a ? new Date(a.expiresAt).toISOString().slice(0,10) : new Date(Date.now()+90*864e5).toISOString().slice(0,10);
   document.getElementById('modalContent').innerHTML = `
     <h2>${id ? 'Изменить' : 'Выдать'} доступ</h2>
@@ -1146,7 +1158,7 @@ async function renderGroups() {
       <td>${g.memberCount ?? 0}</td>
       <td><span class="badge badge-info">${g.lessonKind==='extra'?I18N.t('admin.type_extra'):I18N.t('admin.type_main')}</span></td>
       <td><button class="btn btn-ghost btn-sm" onclick="openGroupDetail('${g.id}')">${I18N.t('common.open')}</button>
-        ${(isAdmin||user.role==='assistant') ? `<button class="btn btn-ghost btn-sm" onclick="openGroupForm('${g.id}')">${I18N.t('common.edit')}</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openGroupForm('${g.id}')">${I18N.t('common.edit')}</button>` : ''}
         ${isAdmin ? `<button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroup('${g.id}')">${I18N.t('common.delete')}</button>` : ''}</td>
     </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
     </tbody></table>`;
@@ -1159,7 +1171,7 @@ async function openGroupForm(id) {
   // старый кэш мог содержать уже удалённого преподавателя/филиал и приводил к FK-ошибке.
   const [staff, freshBranches, freshModules] = await Promise.all([API.getStaff(), API.getBranches(), API.getModules(true)]);
   const teachers = staff.filter(u=>u.role==='teacher');
-  const assistants = staff.filter(u=>u.role==='assistant');
+  const assistants = teachers;
   const branches = freshBranches;
   cache.modules = freshModules;
   const ensureBranches = Promise.resolve(branches);
@@ -1175,7 +1187,7 @@ async function openGroupForm(id) {
         ${cache.modules.map(m=>`<option value="${m.id}" ${g.courseId===m.id?'selected':''}>${escapeHtml(m.title)}</option>`).join('')}</select></div>
       <div class="form-group"><label>Преподаватель</label><select class="form-input" id="g_teacher">
         <option value="">—</option>${teachers.map(t=>`<option value="${t.id}" ${g.teacherId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Ассистент</label><select class="form-input" id="g_assistant">
+      <div class="form-group"><label>Второй преподаватель <small style="color:#64748b">(ассистент только в этой группе)</small></label><select class="form-input" id="g_assistant">
         <option value="">—</option>${assistants.map(t=>`<option value="${t.id}" ${g.assistantId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></div>
       <div class="form-group"><label>${I18N.t('admin.lesson_type_col')}</label><select class="form-input" id="g_kind">
         <option value="main" ${g.lessonKind==='main'?'selected':''}>${I18N.t('admin.type_main')}</option>
@@ -1502,7 +1514,7 @@ async function removeClient(id) {
 // ---------- Права преподавателей ----------
 async function renderPermissions() {
   const keys = await API.getPermissionKeys();
-  const teachers = cache.users.filter(u=>u.role==='teacher'||u.role==='assistant');
+  const teachers = cache.users.filter(u=>u.role==='teacher');
   tabEl().innerHTML = `
     <h1 data-i18n="admin.permissions">Права доступа</h1>
     <p style="color:#64748b;margin:6px 0 16px">${I18N.t('admin.perm_intro')}</p>
@@ -1681,14 +1693,14 @@ function calBlockHtml(e, lane) {
     ? `${e.startTime}–${String(Math.floor(endMin/60)).padStart(2,'0')}:${String(endMin%60).padStart(2,'0')}`
     : '';
   const kind = e.lessonKind === 'extra' ? I18N.t('cal.kind_extra') : I18N.t('cal.kind_main');
-  const cls = e.conducted ? 'conducted' : 'planned';
+  const cls = e.conducted ? 'conducted' : e.overdue ? 'overdue' : e.draft ? 'draft' : 'planned';
   const status = e.conducted
-    ? `✓ ${e.presentCount} ${I18N.t('cal.present')}`
-    : I18N.t('cal.conduct');
+    ? `✓ Проведено · ${e.presentCount} ${I18N.t('cal.present')}`
+    : e.overdue ? 'Не отмечено — провести' : e.draft ? 'Черновик — завершить' : I18N.t('cal.conduct');
   const teachers = [e.teacherName, e.assistantName].filter(Boolean).join(', ');
-  const onclick = e.conducted
+  const onclick = e.sessionId
     ? `openAttendance('${e.sessionId}','${e.groupId}')`
-    : `conductSlot('${e.groupId}','${e.date}')`;
+    : `conductSlot('${e.groupId}','${e.date}','${e.startTime||''}',${e.durationMin||60})`;
   return `<div class="cal-block ${cls} kind-${e.lessonKind}" onclick="${onclick}"
       style="top:${top}px;height:${h}px;left:calc(${leftPct}% + 2px);width:calc(${widthPct}% - 4px)"
       title="${escapeHtml(e.groupName)} ${timeStr}">
@@ -1708,11 +1720,12 @@ function calSetView(v) { _cal.view = v; renderCalendar(); }
 function calSetBranch(b) { _cal.branchId = b; renderCalendar(); }
 
 // Клик по пустому слоту: создаём занятие на эту дату и открываем проведение
-async function conductSlot(groupId, ymd) {
+async function conductSlot(groupId, ymd, startTime, durationMin) {
   try {
     const [y,m,d] = ymd.split('-').map(Number);
-    const ms = new Date(y, m-1, d, 0, 0, 0, 0).getTime();
-    const s = await API.createSession({ groupId, date: ms, topic: '' });
+    const [hh,mm]=(startTime||'00:00').split(':').map(Number);
+    const ms = new Date(y, m-1, d, hh, mm, 0, 0).getTime();
+    const s = await API.createSession({ groupId, date: ms, lessonDay:ymd, startTime:startTime||null, durationMin:durationMin||60, topic: '' });
     await renderCalendar();
     openAttendance(s.id, groupId);
   } catch (e) { alert(e.message); }
@@ -1776,11 +1789,12 @@ async function removeSession(id) {
 let _lesson = { sessionId: null, groupId: null, artifacts: [], missing: [] };
 
 async function openAttendance(sessionId, groupId) {
-  const [existing, members, artifacts, homework] = await Promise.all([
+  const [existing, members, artifacts, homework, lessonInfo] = await Promise.all([
     API.getSessionAttendance(sessionId),
-    groupId ? API.getMembers(groupId) : Promise.resolve([]),
+    API.getSessionMembers(sessionId),
     API.getArtifacts('lesson_session_id=' + encodeURIComponent(sessionId)).catch(() => []),
     groupId ? API.getHomework('group_id=' + encodeURIComponent(groupId)).catch(() => []) : Promise.resolve([]),
+    API.getSessionManage(sessionId),
   ]);
   const existMap = {};
   (existing || []).forEach(r => { existMap[r.studentId] = r; });
@@ -1791,20 +1805,21 @@ async function openAttendance(sessionId, groupId) {
   (existing || []).forEach(r => { if (!seen.has(r.studentId)) { roster.push({ studentId: r.studentId, name: r.name || userName(r.studentId) }); seen.add(r.studentId); } });
 
   const group = (window._groups || []).find(g => g.id === groupId);
-  _lesson = { sessionId, groupId, artifacts: artifacts || [], missing: [], homework:(homework||[]).filter(h=>h.lessonSessionId===sessionId) };
+  _lesson = { sessionId, groupId, artifacts: artifacts || [], missing: [], homework:(homework||[]).filter(h=>h.lessonSessionId===sessionId), uploading:0 };
 
   const modalContent=document.getElementById('modalContent');
   modalContent.classList.add('lesson-modal');
   modalContent.innerHTML = `
     <div class="lesson-modal-head">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-        <div><h2 data-i18n="session.conduct">Проведение занятия</h2><p style="color:#64748b;font-size:13px;margin:3px 0 0">${escapeHtml(group?.name||'Группа')} · ${roster.length} учеников</p></div>
-        <button class="lesson-expand" aria-label="Закрыть" onclick="closeModal()">${uiIcon('close')}</button>
+        <div><h2>${lessonInfo.status==='conducted'?'Проведённое занятие':'Провести занятие'}</h2><p style="color:#64748b;font-size:13px;margin:3px 0 0">${escapeHtml(group?.name||lessonInfo.groupName||'Группа')} · ${lessonInfo.lessonDay?fmtDateTime(new Date(`${lessonInfo.lessonDay}T${lessonInfo.startTime||'00:00'}:00`).getTime()):''} · ${roster.length} учеников</p></div>
+        <button class="lesson-expand" aria-label="Закрыть" onclick="closeLessonModal()">${uiIcon('close')}</button>
       </div>
       <div class="lesson-help"><b>Сначала главное:</b><span>1. Присутствие</span><span>2. Две оценки</span><span>3. Отчёт присутствующим</span><span>4. ДЗ группе</span></div>
     </div>
-    <div class="lesson-modal-body">
+      <div class="lesson-modal-body">
       <div class="lesson-toolbar"><b>Ученики</b><div class="lesson-toolbar-actions">
+        ${user.role==='admin'?`<button class="btn btn-ghost btn-sm" onclick="openLessonManagement('${sessionId}','${groupId}')">Состав и преподаватели</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="setAllAttendance('present')">Все присутствуют</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAllLessonRows(true)">Раскрыть всех</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAllLessonRows(false)">Свернуть</button>
@@ -1814,12 +1829,32 @@ async function openAttendance(sessionId, groupId) {
       ${lessonHomeworkHtml(sessionId)}
     </div>
     <div class="lesson-modal-footer"><div id="modalErr" class="lesson-save-status"></div><div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeModal()" data-i18n="common.close">Закрыть</button>
-      <button class="btn btn-success" onclick="saveAttendance('${sessionId}')">Сохранить занятие</button>
+      <button class="btn btn-outline" onclick="closeLessonModal()" data-i18n="common.close">Закрыть</button>
+      <button class="btn btn-success" id="saveLessonBtn" onclick="saveAttendance('${sessionId}')">${lessonInfo.status==='conducted'?'Сохранить изменения':'Сохранить и провести занятие'}</button>
     </div></div>`;
   document.getElementById('modal').classList.add('active');
   I18N.applyI18n(document.getElementById('modalContent'));
   document.querySelectorAll('.att_sel').forEach(updateAttendanceReason);
+}
+
+async function openLessonManagement(sessionId,groupId){
+  const data=await API.getSessionManage(sessionId);
+  const selected=new Set(data.students.filter(s=>s.selected).map(s=>s.id));
+  document.getElementById('modalContent').classList.remove('lesson-modal');
+  document.getElementById('modalContent').innerHTML=`<h2>Настройки конкретного занятия</h2>
+    <p style="color:#64748b">Изменения действуют только ${data.lessonDay?fmtDate(data.lessonDay):'для этого занятия'} и не меняют постоянную группу.</p>
+    <div class="form-grid-2"><div class="form-group"><label>Основной преподаватель</label><select class="form-input" id="lm_teacher"><option value="">— не назначен —</option>${data.staff.map(t=>`<option value="${t.id}" ${data.teacherId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Второй преподаватель (ассистент на этом уроке)</label><select class="form-input" id="lm_assistant"><option value="">— нет —</option>${data.staff.map(t=>`<option value="${t.id}" ${data.assistantId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}</select></div></div>
+    <div class="form-group"><label>Тема</label><input class="form-input" id="lm_topic" value="${escapeHtml(data.topic||'')}"></div>
+    <div class="lesson-toolbar"><b>Состав занятия: <span id="lm_count">${selected.size}</span></b><div><button class="btn btn-ghost btn-sm" onclick="document.querySelectorAll('.lm_student').forEach(x=>x.checked=true);lm_count.textContent=document.querySelectorAll('.lm_student').length">Выбрать всех</button><button class="btn btn-ghost btn-sm" onclick="document.querySelectorAll('.lm_student').forEach(x=>x.checked=false);lm_count.textContent=0">Снять</button></div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:7px;max-height:340px;overflow:auto;padding:5px">${data.students.map(s=>`<label class="notice-box" style="margin:0;display:flex;align-items:center;gap:9px"><input class="lm_student" type="checkbox" value="${s.id}" ${s.selected?'checked':''} onchange="lm_count.textContent=document.querySelectorAll('.lm_student:checked').length"><span>${escapeHtml(s.name)}</span></label>`).join('')}</div>
+    <div id="modalErr" class="form-error"></div><div class="modal-actions"><button class="btn btn-outline" onclick="openAttendance('${sessionId}','${groupId}')">Назад</button><button class="btn btn-success" onclick="saveLessonManagement('${sessionId}','${groupId}')">Сохранить настройки</button></div>`;
+}
+async function saveLessonManagement(sessionId,groupId){
+  try{
+    await API.updateSessionManage(sessionId,{teacherId:lm_teacher.value||null,assistantId:lm_assistant.value||null,topic:lm_topic.value.trim(),studentIds:Array.from(document.querySelectorAll('.lm_student:checked')).map(x=>x.value)});
+    showToast('Настройки занятия сохранены','success');await openAttendance(sessionId,groupId);
+  }catch(e){modalErr.textContent=e.message}
 }
 
 // Разметка строки одного ученика в окне проведения занятия
@@ -1892,6 +1927,13 @@ function tasksForModule(moduleId){return cache.tasks.filter(t=>String(t.module)=
 function taskPickerHtml(tasks,inputClass){return tasks.length?tasks.map(t=>`<label class="lesson-task-option"><input type="checkbox" class="${inputClass}" value="${t.id}"><span><b>${escapeHtml(t.title)}</b><br><small style="color:#64748b">${escapeHtml(t.description||'')}</small></span></label>`).join(''):'<span style="color:#64748b">В этом модуле задач нет.</span>'}
 function renderLessonTaskPicker(moduleId){const box=document.getElementById('lessonTaskPicker');box.innerHTML=taskPickerHtml(tasksForModule(moduleId),'lesson-hw-task')}
 function selectAllLessonTasks(){document.querySelectorAll('.lesson-hw-task').forEach(x=>x.checked=true)}
+function homeworkDraftPresent(){
+  return !!(document.getElementById('lessonHwModule')?.value||
+    document.querySelector('.lesson-hw-task:checked')||
+    document.getElementById('lessonHwDescription')?.value.trim()||
+    document.getElementById('lessonHwLink')?.value.trim()||
+    document.getElementById('lessonHwFile')?.files?.[0]);
+}
 async function saveLessonHomework(sessionId){
   const moduleId=document.getElementById('lessonHwModule')?.value||null;
   const taskIds=[...document.querySelectorAll('.lesson-hw-task:checked')].map(x=>Number(x.value));
@@ -1900,8 +1942,8 @@ async function saveLessonHomework(sessionId){
   const linkUrl=document.getElementById('lessonHwLink')?.value.trim()||null;
   const file=document.getElementById('lessonHwFile')?.files?.[0]||null;
   const err=document.getElementById('modalErr');
-  if(!moduleId&&!taskIds.length&&!description&&!linkUrl&&!file){err.textContent='Добавьте задачи платформы, текст, ссылку или файл';return}
-  if(file&&file.size>30*1024*1024){err.textContent='Файл ДЗ больше 30 МБ';return}
+  if(!moduleId&&!taskIds.length&&!description&&!linkUrl&&!file){err.textContent='Добавьте задачи платформы, текст, ссылку или файл';return null}
+  if(file&&file.size>30*1024*1024){err.textContent='Файл ДЗ больше 30 МБ';return null}
   err.style.color='#4f46e5';err.textContent=file?'Создаём ДЗ и загружаем файл…':'Назначаем домашнее задание…';
   let created=null;
   try{
@@ -1912,7 +1954,9 @@ async function saveLessonHomework(sessionId){
     err.textContent='Домашнее задание назначено. Ученики получили уведомление.';
     err.style.color='#059669';showToast('ДЗ назначено и уведомления отправлены','success');
     document.getElementById('lessonHwDescription').value='';document.getElementById('lessonHwLink').value='';document.getElementById('lessonHwFile').value='';
-  }catch(e){err.style.color='#ef4444';err.textContent=created&&file?`ДЗ назначено и уведомление отправлено, но файл не загрузился: ${e.message}. Повторно приложите файл из журнала ДЗ.`:e.message}
+    document.getElementById('lessonHwModule').value='';document.getElementById('lessonTaskPicker').innerHTML='<span style="color:#64748b">Сначала выберите модуль — появится понятный список задач.</span>';
+    return hw;
+  }catch(e){err.style.color='#ef4444';err.textContent=created&&file?`ДЗ назначено и уведомление отправлено, но файл не загрузился: ${e.message}. Повторно приложите файл из журнала ДЗ.`:e.message;return null}
 }
 
 function artChipHtml(a) {
@@ -1939,6 +1983,9 @@ async function uploadArtifact(studentId, kind, inputEl) {
   const sizeMb = (file.size / 1024 / 1024).toFixed(1);
   err.style.color = '#4f46e5';
   err.textContent = `Загружаем «${file.name}» (${sizeMb} МБ). Не закрывайте окно…`;
+  _lesson.uploading = (_lesson.uploading || 0) + 1;
+  const saveButton=document.getElementById('saveLessonBtn');
+  if(saveButton){saveButton.disabled=true;saveButton.textContent=`Загрузка файлов… (${_lesson.uploading})`;}
   try {
     const art = await API.createArtifact({
       lessonSessionId: _lesson.sessionId, studentId, type,
@@ -1951,7 +1998,11 @@ async function uploadArtifact(studentId, kind, inputEl) {
     err.textContent = ''; err.style.color = '#ef4444';
     showToast(I18N.t('common.saved'), 'success');
   } catch (e) { err.style.color = '#ef4444'; err.textContent = e.message; }
-  finally { inputEl.value = ''; }
+  finally {
+    inputEl.value = '';
+    _lesson.uploading=Math.max(0,(_lesson.uploading||1)-1);
+    if(saveButton){saveButton.disabled=!!_lesson.uploading;saveButton.textContent=_lesson.uploading?`Загрузка файлов… (${_lesson.uploading})`:'Сохранить всё занятие';}
+  }
 }
 
 async function removeArtifact(id) {
@@ -1972,17 +2023,35 @@ function refreshArtList(studentId) {
 }
 
 async function saveAttendance(sessionId) {
+  const button=document.getElementById('saveLessonBtn');
+  const err=document.getElementById('modalErr');
+  if(_lesson.uploading){err.style.color='#b45309';err.textContent='Дождитесь окончания загрузки файлов';return}
+  if(button){button.disabled=true;button.textContent='Сохраняем всё…'}
   const records = Array.from(document.querySelectorAll('.att_sel')).map(s => ({ studentId: s.dataset.student, status: s.value, reason: document.querySelector(`.att_reason[data-student="${s.dataset.student}"]`)?.value.trim() || '' }));
   try {
-    const resp = await API.saveAttendance({ lessonSessionId: sessionId, records });
+    if(homeworkDraftPresent()){
+      const homeworkSaved=await saveLessonHomework(sessionId);
+      if(!homeworkSaved)throw new Error('Домашнее задание не сохранено. Исправьте ошибку и повторите.');
+    }
     const assessments=records.map(r=>({studentId:r.studentId,classScore:document.querySelector(`.assess_class[data-student="${r.studentId}"]`)?.value||null,homeworkScore:document.querySelector(`.assess_hw[data-student="${r.studentId}"]`)?.value||null,homeworkStatus:document.querySelector(`.assess_hw_status[data-student="${r.studentId}"]`)?.value||'none',engagement:document.querySelector(`.assess_engagement[data-student="${r.studentId}"]`)?.value||null,difficulty:document.querySelector(`.assess_difficulty[data-student="${r.studentId}"]`)?.value||null,interest:document.querySelector(`.assess_interest[data-student="${r.studentId}"]`)?.value||null,privateComment:document.querySelector(`.assess_private[data-student="${r.studentId}"]`)?.value.trim()||''}));
     await API._request('POST','/api/student-assessments',{lessonSessionId:sessionId,records:assessments});
+    // Посещаемость сохраняется последней: именно этот успешный запрос переводит
+    // черновик в «Проведён». При ошибке оценок урок не получит ложный статус.
+    const resp = await API.saveAttendance({ lessonSessionId: sessionId, records });
     const missing = resp && resp.missingReports || [];
     renderMissingReportWarning(missing);
     if (missing.length === 0) { closeModal(); }
+    if(typeof renderCalendar==='function')renderCalendar().catch(()=>{});
     showToast(I18N.t('common.saved'), missing.length ? 'warning' : 'success');
   }
-  catch (e) { document.getElementById('modalErr').textContent = e.message; }
+  catch (e) { err.style.color='#ef4444';err.textContent = e.message; }
+  finally {if(button&&document.body.contains(button)){button.disabled=false;button.textContent='Сохранить всё занятие'}}
+}
+
+function closeLessonModal(){
+  if(_lesson?.uploading){alert('Дождитесь окончания загрузки файлов. Иначе файл может не сохраниться.');return}
+  if(homeworkDraftPresent()&&!confirm('Домашнее задание ещё не сохранено. Закрыть окно и потерять черновик?'))return;
+  closeModal();
 }
 
 // Подсветить строки учеников, которым не загружен отчёт, и показать предупреждение красным.

@@ -9,6 +9,7 @@ const db = require('./db');
 const storage = require('./storage');
 const { genId } = require('./util');
 let timer = null;
+let lessonTimer = null;
 
 function cleanupExpiredVideos() {
   try {
@@ -58,6 +59,35 @@ function generateNotifications() {
   }
 }
 
+function generateUnmarkedLessonNotifications() {
+  try {
+    const offset=Number(process.env.APP_TIMEZONE_OFFSET_MINUTES||300),now=Date.now();
+    for(const daysAgo of [0,1]){
+      const local=new Date(now+offset*60000-daysAgo*86400000);
+      const ymd=`${local.getUTCFullYear()}-${String(local.getUTCMonth()+1).padStart(2,'0')}-${String(local.getUTCDate()).padStart(2,'0')}`;
+      const weekday=local.getUTCDay();
+      const schedules=db.prepare(`SELECT gs.start_time,gs.duration_min,g.id group_id,g.name group_name,g.branch_id
+        FROM group_schedule gs JOIN groups g ON g.id=gs.group_id
+        WHERE gs.weekday=? AND g.status='active'`).all(weekday);
+      for(const row of schedules){
+        const [hh,mm]=row.start_time.split(':').map(Number);
+        const end=Date.UTC(local.getUTCFullYear(),local.getUTCMonth(),local.getUTCDate(),hh,mm)-offset*60000+row.duration_min*60000;
+        if(end>=now)continue;
+        const done=db.prepare("SELECT 1 FROM lesson_sessions WHERE group_id=? AND lesson_day=? AND status='conducted'").get(row.group_id,ymd);
+        if(done)continue;
+        const recipients=[
+          ...db.prepare(`SELECT cb.curator_id id,'/curator/index.html#lessons' link FROM curator_branches cb WHERE cb.branch_id=?`).all(row.branch_id),
+          ...db.prepare(`SELECT id,'/admin/index.html#calendar' link FROM users WHERE role='admin'`).all(),
+        ];
+        for(const recipient of recipients)db.prepare(`INSERT OR IGNORE INTO notifications
+          (id,user_id,type,text,link,channel,read,created_at) VALUES (?,?, 'unmarked_lesson', ?, ?, 'in_app',0,?)`)
+          .run(`unmarked_${row.group_id}_${ymd}_${recipient.id}`,recipient.id,
+            `Занятие «${row.group_name}» ${ymd} в ${row.start_time} не проведено вовремя`,recipient.link,now);
+      }
+    }
+  } catch(e){ console.error('[cleanup] Ошибка контроля непроведённых занятий:',e.message); }
+}
+
 function runAll() {
   cleanupExpiredVideos();
   generateNotifications();
@@ -68,8 +98,11 @@ function start() {
   runAll(); // при старте
   timer = setInterval(runAll, 24 * 60 * 60 * 1000); // раз в сутки
   timer.unref();
-  console.log('[cleanup] Фоновые задачи запущены (раз в сутки).');
+  generateUnmarkedLessonNotifications();
+  lessonTimer=setInterval(generateUnmarkedLessonNotifications,5*60*1000);
+  lessonTimer.unref();
+  console.log('[cleanup] Фоновые задачи запущены (обслуживание раз в сутки, контроль уроков каждые 5 минут).');
 }
-function stop() { if (timer) clearInterval(timer); timer = null; }
+function stop() { if (timer) clearInterval(timer);if(lessonTimer)clearInterval(lessonTimer);timer=null;lessonTimer=null; }
 
-module.exports = { start, stop, runAll, cleanupExpiredVideos, generateNotifications };
+module.exports = { start, stop, runAll, cleanupExpiredVideos, generateNotifications, generateUnmarkedLessonNotifications };

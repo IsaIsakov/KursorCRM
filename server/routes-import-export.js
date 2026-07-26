@@ -96,7 +96,7 @@ router.post('/import/users', requireRole('admin'), (req, res) => {
   const rows = parsePayload(req.body || {});
   if (!rows) return res.status(400).json({ error: 'Не удалось разобрать данные (JSON/CSV)' });
 
-  const ROLES = ['admin', 'teacher', 'assistant', 'curator', 'student', 'parent'];
+  const ROLES = ['admin', 'teacher', 'curator', 'student', 'parent'];
   const result = { total: rows.length, toCreate: 0, toUpdate: 0, errors: [], items: [] };
   const existingLogins = new Map(db.prepare('SELECT id, login FROM users').all().map(u => [u.login, u.id]));
 
@@ -104,7 +104,10 @@ router.post('/import/users', requireRole('admin'), (req, res) => {
     const line = i + 2;
     const name = (r.name || '').toString().trim();
     const login = (r.login || '').toString().trim();
-    const role = (r.role || 'student').toString().trim();
+    const rawRole = (r.role || 'student').toString().trim();
+    // Старые выгрузки остаются импортируемыми: прежняя глобальная роль
+    // ассистента теперь является обычным преподавателем.
+    const role = rawRole === 'assistant' ? 'teacher' : rawRole;
     if (!name || !login) { result.errors.push({ line, error: 'Пустые имя или логин' }); return; }
     if (!ROLES.includes(role)) { result.errors.push({ line, error: `Неизвестная роль "${role}"` }); return; }
     const existsId = existingLogins.get(login);

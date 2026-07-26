@@ -1,6 +1,6 @@
 {
   "name": "kursor-platform",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "description": "KURSOR — школа программирования: Node.js + Express + SQLite + JWT + WebSocket",
   "main": "server/index.js",
   "scripts": {

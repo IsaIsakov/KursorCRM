@@ -12,6 +12,9 @@ test('lesson homework supports text, links and a protected file', () => {
   assert.match(routes, /homework_assignments WHERE homework_id=\? AND student_id=\?/);
   assert.match(admin, /PDF или другой файл/);
   assert.match(admin, /uploadHomeworkFile/);
+  assert.match(admin, /Сохранить всё занятие/);
+  assert.match(admin, /if\(homeworkDraftPresent\(\)\)/);
+  assert.match(admin, /Дождитесь окончания загрузки файлов/);
   assert.match(dashboard, /hw\.fileUrl/);
 });
 

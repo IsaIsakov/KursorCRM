@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 14);
+  assert.equal((await ready.json()).schemaVersion, 15);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -61,6 +61,8 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.equal((await api('GET','/api/crm/overview')).body.leads.trial, 1);
   const student = (await api('POST', '/api/users', { name: 'E2E Student', login: `student_${port}`, password: 'Student-2026!', role: 'student', languages: [] }, 201)).body;
   const teacher = (await api('POST', '/api/users', { name: 'E2E Teacher', login: `teacher_${port}`, password: 'Teacher-2026!', role: 'teacher', languages: [] }, 201)).body;
+  const substitute = (await api('POST', '/api/users', { name: 'E2E Substitute', login: `substitute_${port}`, password: 'Substitute-2026!', role: 'teacher', languages: [] }, 201)).body;
+  await api('POST', '/api/users', { name: 'Legacy Assistant', login: `assistant_${port}`, password: 'Assistant-2026!', role: 'assistant', languages: [] }, 400);
   const curator = (await api('POST', '/api/users', { name: 'E2E Curator', login: `curator_${port}`, password: 'Curator-2026!', role: 'curator', languages: [] }, 201)).body;
   await api('PUT', `/api/curator/admin/${curator.id}/branches`, { branchIds: [branch.id] });
 
@@ -124,7 +126,11 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.equal(privateMessages.messages[0].body,'Помогите проверить проект');
   await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'POST',`/api/chats/student-threads/${privateThread.id}/messages`,{body:'Да, посмотрю сегодня'},201);
   const lesson = (await api('POST', '/api/lesson-sessions', { groupId: group.id, date: Date.now(), topic: 'Integration' }, 201)).body;
+  assert.equal(lesson.status, 'draft');
   await api('POST', '/api/attendance', { lessonSessionId: lesson.id, records: [{ studentId: student.id, status: 'present' }] });
+  const duplicateLesson=(await api('POST','/api/lesson-sessions',{groupId:group.id,date:Date.now()+1000,topic:'Duplicate'})).body;
+  assert.equal(duplicateLesson.id,lesson.id);
+  assert.equal(duplicateLesson.existing,true);
   const subscriptions = (await api('GET', `/api/subscriptions?student_id=${encodeURIComponent(student.id)}`)).body;
   assert.equal(subscriptions[0].visits_left, 3);
 
@@ -149,6 +155,14 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   const curatorBootstrap = await curatorApi('GET', '/api/curator/bootstrap');
   assert.deepEqual(curatorBootstrap.branches.map(item => item.id), [branch.id]);
   assert.ok((await curatorApi('GET', '/api/curator/students')).some(item => item.user_id === student.id));
+  const lessonManage=await curatorApi('GET',`/api/lesson-sessions/${lesson.id}/manage`);
+  assert.ok(lessonManage.students.some(item=>item.id===student.id&&item.selected));
+  await curatorApi('PUT',`/api/lesson-sessions/${lesson.id}/manage`,{
+    teacherId:substitute.id,assistantId:teacher.id,studentIds:[student.id],topic:'Edited by curator',
+  });
+  const managedLesson=await curatorApi('GET',`/api/lesson-sessions/${lesson.id}/manage`);
+  assert.equal(managedLesson.teacherId,substitute.id);
+  assert.equal(managedLesson.assistantId,teacher.id);
   await curatorApi('POST', `/api/curator/cases/${absenceCase.id}/take`, { comment: 'Calling parent' });
   await curatorApi('POST', `/api/curator/cases/${debtorCase.id}/take`, { comment: 'Second client' }, 409);
   await curatorApi('POST', `/api/curator/cases/${absenceCase.id}/complete`, { comment: 'Parent confirmed the next lesson', outcome: 'resolved' });
@@ -169,6 +183,15 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.match(material.content, /^\/api\/materials\//);
   const materialFile = await api('GET', material.content, undefined, 200);
   assert.equal(materialFile.body, 'streamed material');
+
+  const resetRequest=await fetch(`${base}/api/auth/password-reset/request`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:`student_${port}`})});
+  assert.equal(resetRequest.status,200);
+  const resetRows=(await api('GET','/api/auth/password-reset/requests')).body;
+  const studentReset=resetRows.find(row=>row.user_id===student.id);
+  assert.ok(studentReset);
+  const resetResult=(await api('POST',`/api/auth/password-reset/requests/${studentReset.id}/resolve`,{})).body;
+  assert.equal(resetResult.login,`student_${port}`);
+  assert.ok(resetResult.password.length>=10);
 
   await api('POST', '/api/auth/logout', {});
   const after = await fetch(`${base}/api/auth/me`, { headers: { Cookie: 'kursor_session=' } });

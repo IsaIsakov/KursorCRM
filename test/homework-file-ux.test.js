@@ -15,7 +15,12 @@ test('lesson homework supports text, links and a protected file', () => {
   assert.match(admin, /Сохранить всё занятие/);
   assert.match(admin, /if\(homeworkDraftPresent\(\)\)/);
   assert.match(admin, /Дождитесь окончания загрузки файлов/);
+  assert.match(routes, /router\.get\('\/homework\/:id\/progress'/);
+  assert.match(routes, /router\.post\('\/homework\/:id\/submit'/);
+  assert.match(admin, /Кто выполнил/);
+  assert.match(admin, /openHomeworkProgress/);
   assert.match(dashboard, /hw\.fileUrl/);
+  assert.match(dashboard, /submitDashboardHomework/);
 });
 
 test('mobile lesson cards never require horizontal scrolling', () => {
@@ -27,10 +32,14 @@ test('mobile lesson cards never require horizontal scrolling', () => {
 
 test('parent panel exposes assigned homework and lesson media', () => {
   const parent = fs.readFileSync('public/pages/parent.html', 'utf8');
+  const teacher = fs.readFileSync('public/pages/teacher.html', 'utf8');
   assert.match(parent, /key: 'homework'/);
   assert.match(parent, /API\.getHomework\('student_id='/);
   assert.match(parent, /function buildParentHomework/);
   assert.match(parent, /function artifactBlockHtml/);
   assert.match(parent, /if \(a\.type === 'video'\) return videoBlockHtml/);
   assert.match(parent, /if \(a\.isImage \|\| a\.type === 'screenshot'\) return imageBlockHtml/);
+  assert.match(parent, /hw\.assignmentStatus/);
+  assert.match(teacher, /API\.getArtifacts\(\)/);
+  assert.match(teacher, /Отчёты с занятий/);
 });

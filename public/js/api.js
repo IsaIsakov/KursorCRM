@@ -252,6 +252,9 @@
   const getMyHomework    = () => API_.get('/api/homework/me');
   const createHomework   = (data) => API_.post('/api/homework', data);
   const uploadHomeworkFile = (id, file) => { const form = new FormData(); form.append('file', file); return request('POST', '/api/homework/' + encodeURIComponent(id) + '/file', form); };
+  const getHomeworkProgress = id => API_.get('/api/homework/' + encodeURIComponent(id) + '/progress');
+  const submitHomework = id => API_.post('/api/homework/' + encodeURIComponent(id) + '/submit', {});
+  const reviewHomework = (id, studentId, data) => API_.put('/api/homework/' + encodeURIComponent(id) + '/assignments/' + encodeURIComponent(studentId), data);
   const deleteHomework   = (id) => API_.del('/api/homework/' + encodeURIComponent(id));
 
   /* ---------- Фаза 4: артефакты занятий ---------- */
@@ -351,7 +354,7 @@
     // фаза 3
     getSessions, getCalendar, createSession, deleteSession, getSessionAttendance,
     getSessionMembers, getSessionManage, updateSessionManage, saveAttendance,
-    getHomework, getMyHomework, createHomework, uploadHomeworkFile, deleteHomework,
+    getHomework, getMyHomework, createHomework, uploadHomeworkFile, getHomeworkProgress, submitHomework, reviewHomework, deleteHomework,
     // фаза 4
     getArtifacts, createArtifact, deleteArtifact,
     // фаза 5

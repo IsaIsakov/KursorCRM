@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=24">
+<link rel="stylesheet" href="/css/style.css?v=25">
 <style>
 /* ======= PARENT PANEL STYLES ======= */
 .parent-layout {
@@ -310,10 +310,10 @@
   <div class="p-loader">Загружаем кабинет…</div>
 </div>
 
-<script src="/data/database.js?v=24"></script>
-<script src="/js/i18n.js?v=24"></script>
-<script src="/js/api.js?v=24"></script>
-<script src="/js/app.js?v=24"></script>
+<script src="/data/database.js?v=25"></script>
+<script src="/js/i18n.js?v=25"></script>
+<script src="/js/api.js?v=25"></script>
+<script src="/js/app.js?v=25"></script>
 <script>
 const user = requireAuth(['parent']);
 let child = null;     // единственный ребёнок
@@ -440,7 +440,14 @@ function renderSection(key) {
 function buildParentHomework(){
   const rows=cachedData.homework||[];
   if(!rows.length)return `<h1 class="section-heading"><span class="sh-icon">${uiIcon('book')}</span> Домашнее задание</h1>`+emptyState('thinking','Домашних заданий пока нет','Здесь родитель увидит задания, сроки и приложенные файлы');
-  return `<h1 class="section-heading"><span class="sh-icon">${uiIcon('book')}</span> Домашнее задание</h1><div class="feed-list">${rows.map(hw=>`<div class="ig-post"><div class="ig-post-header"><div class="ig-post-avatar">${uiIcon('book')}</div><div style="flex:1;min-width:0"><div class="ig-post-title">${escapeHtml(hw.moduleTitle||hw.fileName||'Домашнее задание')}</div><div class="ig-post-sub">${hw.dueDate?'Сдать до '+fmtDate(hw.dueDate):'Без срока'}</div></div></div><div class="ig-post-body" style="padding:16px">${hw.description?`<p style="white-space:pre-wrap;margin:0 0 12px">${escapeHtml(hw.description)}</p>`:''}<div style="display:flex;gap:8px;flex-wrap:wrap">${hw.fileUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(hw.fileUrl)}" target="_blank" rel="noopener">${escapeHtml(hw.fileName||'Открыть файл')}</a>`:''}${hw.linkUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(hw.linkUrl)}" target="_blank" rel="noopener">Открыть ссылку</a>`:''}${(hw.taskIds||[]).length?`<span class="badge badge-info">Задач на платформе: ${hw.taskIds.length}</span>`:''}</div></div></div>`).join('')}</div>`;
+  return `<h1 class="section-heading"><span class="sh-icon">${uiIcon('book')}</span> Домашнее задание</h1><div class="feed-list">${rows.map(hw=>{
+    const status=hw.assignmentStatus==='checked'
+      ? `<span class="badge badge-success">Проверено${hw.assignmentScore?` · ${hw.assignmentScore}/5`:''}</span>`
+      : ['submitted','checking'].includes(hw.assignmentStatus)
+        ? `<span class="badge badge-info">${hw.assignmentStatus==='checking'?'На проверке':'Ребёнок сдал'}</span>`
+        : `<span class="badge badge-warning">${hw.total?`Выполнено ${hw.done}/${hw.total}`:'Ещё не выполнено'}</span>`;
+    return `<div class="ig-post"><div class="ig-post-header"><div class="ig-post-avatar">${uiIcon('book')}</div><div style="flex:1;min-width:0"><div class="ig-post-title">${escapeHtml(hw.moduleTitle||hw.fileName||'Домашнее задание')}</div><div class="ig-post-sub">${hw.dueDate?'Сдать до '+fmtDate(hw.dueDate):'Без срока'}</div></div>${status}</div><div class="ig-post-body" style="padding:16px">${hw.description?`<p style="white-space:pre-wrap;margin:0 0 12px">${escapeHtml(hw.description)}</p>`:''}${hw.total?`<div class="progress-bar" style="margin-bottom:12px"><div class="progress-fill" style="width:${hw.percent||0}%"></div></div>`:''}<div style="display:flex;gap:8px;flex-wrap:wrap">${hw.fileUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(hw.fileUrl)}" target="_blank" rel="noopener">${escapeHtml(hw.fileName||'Открыть файл')}</a>`:''}${hw.linkUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(hw.linkUrl)}" target="_blank" rel="noopener">Открыть ссылку</a>`:''}${hw.total?`<span class="badge badge-info">Задач на платформе: ${hw.total}</span>`:''}</div></div></div>`;
+  }).join('')}</div>`;
 }
 
 function requestStatus(status) {

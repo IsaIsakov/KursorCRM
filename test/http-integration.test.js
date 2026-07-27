@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 16);
+  assert.equal((await ready.json()).schemaVersion, 17);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -133,6 +133,17 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.equal(duplicateLesson.existing,true);
   const subscriptions = (await api('GET', `/api/subscriptions?student_id=${encodeURIComponent(student.id)}`)).body;
   assert.equal(subscriptions[0].visits_left, 3);
+  const homework=(await api('POST','/api/homework',{
+    lessonSessionId:lesson.id,description:'Подготовить проект к следующему уроку',dueDate:Date.now()+86400000,
+  },201)).body;
+  const initialHomeworkProgress=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET',`/api/homework/${homework.id}/progress`);
+  assert.ok(initialHomeworkProgress.students.some(item=>item.studentId===student.id&&item.status==='assigned'));
+  await sessionApi(studentCookie,studentLoginBody.csrfToken,'POST',`/api/homework/${homework.id}/submit`,{});
+  const submittedHomeworkProgress=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET',`/api/homework/${homework.id}/progress`);
+  assert.equal(submittedHomeworkProgress.students.find(item=>item.studentId===student.id).status,'submitted');
+  await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'PUT',`/api/homework/${homework.id}/assignments/${student.id}`,{status:'checked',score:5});
+  const checkedHomeworkProgress=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET',`/api/homework/${homework.id}/progress`);
+  assert.equal(checkedHomeworkProgress.students.find(item=>item.studentId===student.id).score,5);
 
   const absenceCase = (await api('POST', '/api/curator/cases', { studentId: student.id, category: 'absence', description: 'E2E absence' }, 201)).body;
   const debtorCase = (await api('POST', '/api/curator/cases', { studentId: student.id, category: 'debtor', description: 'E2E debt' }, 201)).body;
@@ -173,6 +184,8 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   artifactForm.append('file', new Blob([Buffer.from('fake-png-stream')], { type: 'image/png' }), 'screen.png');
   const artifact = (await api('POST', '/api/session-artifacts', artifactForm, 201)).body;
   assert.match(artifact.url, /^\/api\/session-artifacts\//);
+  const teacherArtifacts=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET','/api/session-artifacts');
+  assert.ok(teacherArtifacts.some(item=>item.id===artifact.id&&item.studentName===student.name&&item.groupName===group.name));
   const file = await api('GET', artifact.url, undefined, 200);
   assert.equal(file.body, 'fake-png-stream');
 

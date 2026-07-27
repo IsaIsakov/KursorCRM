@@ -150,6 +150,18 @@ a:hover { text-decoration: underline; }
 .lesson-task-option { display:flex; gap:8px; align-items:flex-start; padding:8px 9px; border:1px solid #e2e8f0; border-radius:9px; font-size:13px; }
 .lesson-modal-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 18px; border-top:1px solid var(--border); background:rgba(255,255,255,.97); backdrop-filter:blur(8px); }
 .lesson-save-status { min-height:18px; color:var(--danger); font-weight:700; font-size:13px; }
+.homework-progress-modal { max-width:1180px; }
+.homework-summary { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:9px; margin:16px 0; }
+.homework-summary > div { display:grid; gap:2px; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
+.homework-summary b { font-size:24px; line-height:1; }
+.homework-summary span { color:#64748b; font-size:12px; }
+.homework-summary .danger { background:#fff1f2; border-color:#fecdd3; color:#be123c; }
+.homework-progress-table .hw-review-score { width:72px; min-width:72px; padding:7px; }
+.teacher-report-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:11px; }
+.teacher-report-card { border:1px solid #e2e8f0; border-radius:13px; padding:13px; background:#fff; display:grid; gap:8px; }
+.teacher-report-card header { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+.teacher-report-card small { color:#64748b; }
+.teacher-report-card .btn { justify-self:start; }
 .page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; }
 .page-head p { color:var(--text-muted); margin-top:3px; }
 .head-actions,.modal-actions { display:flex; gap:9px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
@@ -1063,6 +1075,7 @@ button, input, select, textarea { font:inherit; }
   .lesson-report-copy,.lesson-report-row .art_desc { grid-column:1 / -1; }
   .lesson-homework-grid { grid-template-columns:1fr; }
   .lesson-task-picker { grid-template-columns:1fr; }
+  .homework-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-width:520px) {
   .teacher-workspace-nav { grid-template-columns:1fr; }

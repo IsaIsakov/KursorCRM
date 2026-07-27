@@ -511,6 +511,15 @@ const MIGRATIONS = [
       if (columns.has('video_consent_date')) db.exec('ALTER TABLE students_crm DROP COLUMN video_consent_date');
     },
   },
+  {
+    version: 17,
+    name: 'persistent_lesson_videos',
+    up(db) {
+      // Отчёты уроков являются частью истории обучения и не должны исчезать
+      // через 30 дней. Файлы остаются в Railway Volume вместе с базой.
+      db.prepare("UPDATE session_artifacts SET expires_at=NULL WHERE type='video' AND deleted=0").run();
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

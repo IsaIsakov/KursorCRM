@@ -34,6 +34,10 @@ const homeworkSchema = z.strictObject({
   description: optionalText(5000),
   linkUrl: z.string().url().max(2048).refine(v => /^https?:\/\//i.test(v), 'Разрешены только http/https ссылки').nullable().optional(),
 });
+const homeworkReviewSchema = z.strictObject({
+  status: z.enum(['assigned','submitted','checking','checked','missing']),
+  score: z.coerce.number().int().min(1).max(5).nullable().optional(),
+});
 const lessonManageSchema = z.strictObject({
   teacherId: idSchema.nullable().optional(),
   assistantId: idSchema.nullable().optional(),
@@ -416,6 +420,66 @@ function rowToHw(r) {
   };
 }
 
+function homeworkTaskIds(row) {
+  let ids = [];
+  try { ids = row.task_ids ? JSON.parse(row.task_ids) : []; } catch {}
+  ids = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter(Number.isInteger))];
+  // Если преподаватель выбрал конкретные задачи, считаем только их. Весь
+  // модуль становится домашней работой только когда список задач не задан.
+  if (!ids.length && row.module_id) {
+    ids = db.prepare('SELECT id FROM tasks WHERE module_id=? ORDER BY id').all(row.module_id).map(x => x.id);
+  }
+  return ids;
+}
+
+function homeworkAssignmentProgress(homework, assignment) {
+  const taskIds = homeworkTaskIds(homework);
+  const statuses = {};
+  let done = 0;
+  for (const taskId of taskIds) {
+    const progress = db.prepare('SELECT status FROM task_progress WHERE user_id=? AND task_id=?')
+      .get(assignment.student_id, taskId);
+    const status = progress?.status || 'new';
+    statuses[taskId] = status;
+    if (status === 'done') done++;
+  }
+  const tasksCompleted = taskIds.length > 0 && done === taskIds.length;
+  let status = assignment.status || 'assigned';
+  if (tasksCompleted && status === 'assigned') {
+    const submittedAt = assignment.submitted_at || Date.now();
+    db.prepare("UPDATE homework_assignments SET status='submitted',submitted_at=? WHERE id=?")
+      .run(submittedAt, assignment.id);
+    status = 'submitted';
+    assignment.submitted_at = submittedAt;
+  }
+  const completed = tasksCompleted || ['submitted','checking','checked'].includes(status);
+  return {
+    assignmentId: assignment.id,
+    studentId: assignment.student_id,
+    studentName: assignment.student_name || null,
+    status,
+    score: assignment.score || null,
+    submittedAt: assignment.submitted_at || null,
+    checkedAt: assignment.checked_at || null,
+    taskIds,
+    statuses,
+    done,
+    total: taskIds.length,
+    percent: taskIds.length ? Math.round(done * 100 / taskIds.length) : (completed ? 100 : 0),
+    completed,
+    overdue: !!homework.due_date && Number(homework.due_date) < Date.now() && !completed,
+  };
+}
+
+function homeworkProgressRows(homework) {
+  const assignments = db.prepare(`
+    SELECT ha.*,u.name student_name FROM homework_assignments ha
+    JOIN users u ON u.id=ha.student_id
+    WHERE ha.homework_id=? ORDER BY u.name
+  `).all(homework.id);
+  return assignments.map(row => homeworkAssignmentProgress(homework, row));
+}
+
 router.post('/homework', validateBody(homeworkSchema), (req, res) => {
   const { lessonSessionId, moduleId, taskIds, dueDate, studentIds, description, linkUrl } = req.body || {};
   if (!lessonSessionId) return res.status(400).json({ error: 'lessonSessionId обязателен' });
@@ -502,19 +566,48 @@ router.get('/homework', (req, res) => {
       LEFT JOIN modules m ON m.id = h.module_id
       WHERE ls.group_id = ? ORDER BY h.created_at DESC
     `).all(group_id);
-    return res.json(rows.map(rowToHw));
+    return res.json(rows.map(row => {
+      const progress = homeworkProgressRows(row);
+      return {
+        ...rowToHw(row),
+        assignedCount: progress.length,
+        completedCount: progress.filter(x => x.completed).length,
+        checkedCount: progress.filter(x => x.status === 'checked').length,
+      };
+    }));
   }
   if (student_id) {
     if (!canAccessStudent(db, req.user, student_id)) return res.status(403).json({ error: 'Недоступно' });
     const rows = db.prepare(`
-      SELECT h.*, ls.group_id, ls.date AS session_date, m.title AS module_title
+      SELECT h.*,ha.id assignment_id,ha.status assignment_status,ha.submitted_at,ha.checked_at,ha.score,
+        ls.group_id,ls.date AS session_date,m.title AS module_title
       FROM homework h
       JOIN homework_assignments ha ON ha.homework_id = h.id
       JOIN lesson_sessions ls ON ls.id = h.lesson_session_id
       LEFT JOIN modules m ON m.id = h.module_id
       WHERE ha.student_id = ? ORDER BY h.created_at DESC
     `).all(student_id);
-    return res.json(rows.map(rowToHw));
+    return res.json(rows.map(row => {
+      const progress = homeworkAssignmentProgress(row, {
+        id: row.assignment_id,
+        student_id,
+        status: row.assignment_status,
+        submitted_at: row.submitted_at,
+        checked_at: row.checked_at,
+        score: row.score,
+      });
+      return {
+        ...rowToHw(row),
+        assignmentStatus: progress.status,
+        assignmentScore: progress.score,
+        done: progress.done,
+        total: progress.total,
+        percent: progress.percent,
+        completed: progress.completed,
+        submittedAt: progress.submittedAt,
+        checkedAt: progress.checkedAt,
+      };
+    }));
   }
   res.status(400).json({ error: 'Нужен group_id или student_id' });
 });
@@ -522,7 +615,8 @@ router.get('/homework', (req, res) => {
 // ДЗ текущего ученика + статусы выполнения (из task_progress)
 router.get('/homework/me', requireRole('student'), (req, res) => {
   const rows = db.prepare(`
-    SELECT h.*, ls.date AS session_date, m.title AS module_title
+    SELECT h.*,ha.id assignment_id,ha.status assignment_status,ha.submitted_at,ha.checked_at,ha.score,
+      ls.date AS session_date, m.title AS module_title
     FROM homework h
     JOIN homework_assignments ha ON ha.homework_id = h.id
     JOIN lesson_sessions ls ON ls.id = h.lesson_session_id
@@ -532,22 +626,110 @@ router.get('/homework/me', requireRole('student'), (req, res) => {
 
   const out = rows.map(r => {
     const hw = rowToHw(r);
-    // статусы задач
-    const ids = [...hw.taskIds];
-    if (hw.moduleId) {
-      const modTasks = db.prepare('SELECT id FROM tasks WHERE module_id = ?').all(hw.moduleId).map(t => t.id);
-      for (const tid of modTasks) if (!ids.includes(tid)) ids.push(tid);
-    }
-    const statuses = {};
-    for (const tid of ids) {
-      const tp = db.prepare("SELECT status FROM task_progress WHERE user_id = ? AND task_id = ?").get(req.user.id, tid);
-      statuses[tid] = tp ? tp.status : 'new';
-    }
-    const total = ids.length;
-    const done = Object.values(statuses).filter(s => s === 'done').length;
-    return { ...hw, taskList: ids, statuses, total, done, allDone: total > 0 && done === total };
+    const progress = homeworkAssignmentProgress(r, {
+      id: r.assignment_id,
+      student_id: req.user.id,
+      status: r.assignment_status,
+      submitted_at: r.submitted_at,
+      checked_at: r.checked_at,
+      score: r.score,
+    });
+    return {
+      ...hw,
+      assignmentStatus: progress.status,
+      assignmentScore: progress.score,
+      submittedAt: progress.submittedAt,
+      checkedAt: progress.checkedAt,
+      taskList: progress.taskIds,
+      statuses: progress.statuses,
+      total: progress.total,
+      done: progress.done,
+      percent: progress.percent,
+      allDone: progress.completed,
+      canSubmit: progress.total === 0 && progress.status === 'assigned',
+    };
   });
   res.json(out);
+});
+
+// Полный прогресс ДЗ для администратора или преподавателя группы.
+router.get('/homework/:id/progress', (req, res) => {
+  const homework = db.prepare(`
+    SELECT h.*,ls.group_id,ls.date session_date,ls.topic,g.name group_name,m.title module_title
+    FROM homework h
+    JOIN lesson_sessions ls ON ls.id=h.lesson_session_id
+    JOIN groups g ON g.id=ls.group_id
+    LEFT JOIN modules m ON m.id=h.module_id
+    WHERE h.id=?
+  `).get(req.params.id);
+  if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
+  if (!canManageSession(req.user, homework)) return res.status(403).json({ error: 'Это не ваше занятие' });
+  const students = homeworkProgressRows(homework);
+  res.json({
+    homework: rowToHw(homework),
+    groupName: homework.group_name,
+    students,
+    summary: {
+      assigned: students.length,
+      completed: students.filter(x => x.completed).length,
+      checked: students.filter(x => x.status === 'checked').length,
+      overdue: students.filter(x => x.overdue).length,
+    },
+  });
+});
+
+// Для текстового, файлового или ссылочного ДЗ ученик подтверждает сдачу сам.
+// Для задач платформы сдача разрешается только после выполнения всех задач.
+router.post('/homework/:id/submit', requireRole('student'), (req, res) => {
+  const homework = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
+  if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
+  const assignment = db.prepare('SELECT * FROM homework_assignments WHERE homework_id=? AND student_id=?')
+    .get(homework.id, req.user.id);
+  if (!assignment) return res.status(403).json({ error: 'Это домашнее задание вам не назначено' });
+  if (assignment.status === 'checked') return res.status(409).json({ error: 'Домашнее задание уже проверено' });
+  const progress = homeworkAssignmentProgress(homework, { ...assignment, student_name: req.user.name });
+  if (progress.total > 0 && progress.done < progress.total) {
+    return res.status(409).json({ error: `Сначала выполните все задачи: готово ${progress.done} из ${progress.total}` });
+  }
+  const now = Date.now();
+  db.prepare("UPDATE homework_assignments SET status='submitted',submitted_at=?,checked_at=NULL WHERE id=?")
+    .run(now, assignment.id);
+  res.json({ ok: true, status: 'submitted', submittedAt: now });
+});
+
+router.put('/homework/:id/assignments/:studentId', validateBody(homeworkReviewSchema), (req, res) => {
+  const homework = db.prepare(`
+    SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id
+    FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?
+  `).get(req.params.id);
+  if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
+  if (!canManageSession(req.user, homework)) return res.status(403).json({ error: 'Это не ваше занятие' });
+  const assignment = db.prepare('SELECT * FROM homework_assignments WHERE homework_id=? AND student_id=?')
+    .get(homework.id, req.params.studentId);
+  if (!assignment) return res.status(404).json({ error: 'Назначение ученика не найдено' });
+  const { status, score } = req.body;
+  const now = Date.now();
+  const submittedAt = ['submitted','checking','checked'].includes(status)
+    ? (assignment.submitted_at || now) : null;
+  const checkedAt = status === 'checked' ? now : null;
+  const finalScore = score === undefined ? assignment.score : score;
+  db.transaction(() => {
+    db.prepare('UPDATE homework_assignments SET status=?,score=?,submitted_at=?,checked_at=? WHERE id=?')
+      .run(status, finalScore, submittedAt, checkedAt, assignment.id);
+    const mappedStatus = status;
+    const updated = db.prepare(`
+      UPDATE student_assessments SET homework_score=?,homework_status=?,updated_by=?,updated_at=?
+      WHERE lesson_session_id=? AND student_id=?
+    `).run(finalScore, mappedStatus, req.user.id, now, homework.lesson_session_id, req.params.studentId);
+    if (!updated.changes) {
+      db.prepare(`
+        INSERT INTO student_assessments
+        (lesson_session_id,student_id,homework_score,homework_status,updated_by,updated_at)
+        VALUES (?,?,?,?,?,?)
+      `).run(homework.lesson_session_id, req.params.studentId, finalScore, mappedStatus, req.user.id, now);
+    }
+  })();
+  res.json({ ok: true, status, score: finalScore, submittedAt, checkedAt });
 });
 
 router.delete('/homework/:id', (req, res) => {

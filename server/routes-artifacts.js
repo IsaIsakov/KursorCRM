@@ -1,7 +1,6 @@
 /* ============================================================
    KURSOR — Видеоотчёты и файлы работ: /api/session-artifacts
-   video → expires_at = created_at + 30 дней (автоудаление).
-   screenshot/file/link → хранятся постоянно.
+   Видео, изображения и файлы урока хранятся постоянно в private volume.
    ============================================================ */
 const express = require('express');
 const db = require('./db');
@@ -39,7 +38,6 @@ function validateArtifact(req, res, next) {
   return validateBody(artifactSchema)(req, res, next);
 }
 
-const VIDEO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 const MAX_BYTES = ARTIFACT_MAX_BYTES;           // 150 МБ на файл
 
 function canManageGroup(user, groupId) {
@@ -64,6 +62,7 @@ function rowToArtifact(r) {
     type: r.type, title: r.title || null, createdAt: r.created_at,
     expiresAt: r.expires_at || null, deleted: !!r.deleted,
     sessionDate: r.session_date || null, topic: r.topic || null,
+    studentName: r.student_name || null, groupName: r.group_name || null,
   };
   if (r.deleted) {
     o.url = null;
@@ -75,7 +74,7 @@ function rowToArtifact(r) {
 }
 
 // GET /api/session-artifacts?student_id=&lesson_session_id=
-router.get('/', (req, res) => {
+router.get('/', authRequired, (req, res) => {
   const { student_id, lesson_session_id } = req.query;
   const where = []; const params = [];
   if (student_id) { where.push('sa.student_id = ?'); params.push(student_id); }
@@ -86,9 +85,12 @@ router.get('/', (req, res) => {
   else if (req.user.role === 'parent') { return res.status(403).json({ error: 'Используйте /api/parent/artifacts' }); }
 
   const rows = db.prepare(`
-    SELECT sa.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id,ls.date AS session_date,ls.topic
+    SELECT sa.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id,ls.date AS session_date,ls.topic,
+      u.name student_name,g.name group_name
     FROM session_artifacts sa
     JOIN lesson_sessions ls ON ls.id = sa.lesson_session_id
+    JOIN users u ON u.id=sa.student_id
+    JOIN groups g ON g.id=ls.group_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY sa.created_at DESC
   `).all(...params);
@@ -108,9 +110,6 @@ router.get('/:id/content', (req, res) => {
   }
   const row = db.prepare('SELECT id, type, title, file_path, deleted, expires_at FROM session_artifacts WHERE id = ?').get(req.params.id);
   if (!row || row.deleted || !row.file_path) return res.status(404).json({ error: 'Файл недоступен' });
-  if (row.type === 'video' && row.expires_at && row.expires_at < Date.now()) {
-    return res.status(410).json({ error: 'Срок хранения видео истёк' });
-  }
   let full;
   try { full = storage.resolveFile(row.file_path); }
   catch { return res.status(400).json({ error: 'Некорректный путь файла' }); }
@@ -142,7 +141,7 @@ router.post('/', multipartArtifact, validateArtifact, (req, res) => {
 
   const now = Date.now();
   const id = genId('sa');
-  const expiresAt = type === 'video' ? now + VIDEO_TTL_MS : null;
+  const expiresAt = null;
 
   let filePath = null, linkUrl = null;
   if (type === 'link') {
@@ -201,8 +200,12 @@ router.post('/', multipartArtifact, validateArtifact, (req, res) => {
     .catch(error => console.error('[whatsapp] Не удалось уведомить об отчёте:', error.message)));
 
   const row = db.prepare(`
-    SELECT sa.*, ls.date AS session_date, ls.topic FROM session_artifacts sa
-    JOIN lesson_sessions ls ON ls.id = sa.lesson_session_id WHERE sa.id = ?`).get(id);
+    SELECT sa.*,ls.date AS session_date,ls.topic,u.name student_name,g.name group_name
+    FROM session_artifacts sa
+    JOIN lesson_sessions ls ON ls.id=sa.lesson_session_id
+    JOIN users u ON u.id=sa.student_id
+    JOIN groups g ON g.id=ls.group_id
+    WHERE sa.id=?`).get(id);
   res.status(201).json(rowToArtifact(row));
 });
 

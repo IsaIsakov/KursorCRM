@@ -1,7 +1,7 @@
 'use strict';
 
 // A maintainable, source-controlled curriculum. Each topic contains a lesson,
-// a checkpoint and seven varied tasks (112 tasks total across both tracks).
+// a checkpoint and exactly ten varied tasks (160 tasks across both tracks).
 const tracks = [
   {
     track: 'Python', level: 'База', prefix: 'python',
@@ -47,13 +47,37 @@ const tracks = [
   }
 ];
 
+// The tenth task in every topic is deliberately blank: the student receives a
+// concrete specification and testable output, but no ready-made solution.
+const independentChallenges = {
+  start: ['Периметр прямоугольника', 'Создай переменные width = 8 и height = 5. Вычисли и выведи периметр прямоугольника одним числом.', '# Напиши решение с нуля\n', '26'],
+  types: ['Секунды во время', 'В переменной total_seconds хранится 3671. С помощью // и % выведи часы, минуты и секунды через пробел.', 'total_seconds = 3671\n# Напиши вычисления и print\n', '1 1 11'],
+  conditions: ['Итоговая оценка', 'Для score = 73 выведи A при 85+, B при 70+, C при 50+, иначе F. Используй if/elif/else.', 'score = 73\n# Напиши ветвление\n', 'B'],
+  loops: ['Сумма чётных чисел', 'Циклом вычисли сумму всех чётных чисел от 2 до 20 включительно и выведи результат.', '# Нельзя писать готовое число в print\n', '110'],
+  collections: ['Чистый список', 'Из списка values убери повторы, отсортируй результат по возрастанию и выведи новый список.', 'values = [4, 1, 7, 4, 9, 1]\n# Напиши решение\n', '[1, 4, 7, 9]'],
+  dicts: ['Стоимость корзины', 'По словарю prices и корзине cart посчитай полную стоимость покупки. Выведи одно число.', 'prices = {"book": 1200, "pen": 100}\ncart = {"book": 1, "pen": 5}\n# Напиши решение\n', '1700'],
+  functions: ['Проверка простого числа', 'Напиши функцию is_prime(n), возвращающую bool. Проверь её на числе 29 и выведи результат.', '# Определи функцию is_prime\n\nprint(is_prime(29))\n', 'True'],
+  files_project: ['Безопасный импорт чисел', 'В списке есть числа и испорченное значение. Через try/except сложи только корректные целые числа.', 'rows = ["10", "oops", "25"]\ntotal = 0\n# Обработай каждую строку безопасно\n\nprint(total)\n', '35'],
+  pythonic: ['Рейтинг имён', 'Оставь имена длиной не меньше 5 символов, переведи их в верхний регистр и отсортируй. Используй comprehension.', 'names = ["Mira", "Aruana", "Timur", "Li"]\n# Напиши одно ясное преобразование\n', "['ARUANA', 'TIMUR']"],
+  functions_pro: ['Фабрика умножителей', 'Напиши make_multiplier(k), которая возвращает функцию умножения на k. Выведи результат умножения 7 на 6.', '# Определи make_multiplier\n\ntimes_six = make_multiplier(6)\nprint(times_six(7))\n', '42'],
+  oop: ['Корзина как объект', 'Создай класс Cart с методом add(price) и свойством total. Добавь 500 и 750, затем выведи сумму.', '# Создай класс Cart\n\ncart = Cart()\ncart.add(500)\ncart.add(750)\nprint(cart.total)\n', '1250'],
+  protocols: ['Своя коллекция', 'Создай Team: len(team) возвращает число участников, а итерирование отдаёт имена. Выведи длину и первое имя.', '# Создай класс Team\n\nteam = Team(["Алия", "Мира", "Тимур"])\nprint(len(team), next(iter(team)))\n', '3 Алия'],
+  generators: ['Ленивые квадраты', 'Напиши генератор squares(n), выдающий квадраты от 0 до n-1. Выведи список для n = 5.', '# Определи генератор squares\n\nprint(list(squares(5)))\n', '[0, 1, 4, 9, 16]'],
+  decorators: ['Декоратор результата', 'Напиши декоратор brackets, который превращает результат функции text() из ok в [ok].', '# Напиши brackets\n\n@brackets\ndef text():\n    return "ok"\n\nprint(text())\n', '[ok]'],
+  quality: ['Функция под тестами', 'Реализуй clamp(value, low, high). Три assert должны пройти, после чего программа выведет OK.', 'def clamp(value: int, low: int, high: int) -> int:\n    # Напиши реализацию\n    pass\n\nassert clamp(5, 0, 10) == 5\nassert clamp(-3, 0, 10) == 0\nassert clamp(20, 0, 10) == 10\nprint("OK")\n', 'OK'],
+  algorithms_project: ['Кратчайший путь BFS', 'Граф задан словарём. С помощью очереди найди число рёбер кратчайшего пути из A в E.', 'from collections import deque\n\ngraph = {"A": ["B", "C"], "B": ["D"], "C": ["D"], "D": ["E"], "E": []}\n# Реализуй BFS и выведи длину пути\n', '3'],
+};
+
 function makeLesson(track, level, prefix, topic, index, previousId) {
   const [slug, title, description, concepts, insight, keyword, order, videoId, videoStart, trace, practice] = topic;
   const moduleId = `${prefix}_${String(index + 1).padStart(2, '0')}_${slug}`;
   const video = `https://www.youtube.com/embed/${videoId}?start=${videoStart}&rel=0`;
   const task = (type, name, extra = {}) => ({ type, title: name, description: extra.description || '', difficulty: extra.difficulty || 1, explain: extra.explain || insight, ...extra });
+  const challengeKey = slug === 'functions' && prefix === 'python_pro' ? 'functions_pro' : slug;
+  const challenge = independentChallenges[challengeKey];
+  if (!challenge) throw new Error(`Для ${moduleId} не настроена самостоятельная задача`);
   return {
-    moduleId, lang: 'python', track, level, estimatedMin: index === 7 ? 150 : 90,
+    moduleId, lang: 'python', track, level, estimatedMin: index === 7 ? 180 : 120,
     prerequisiteId: previousId || '', title: `${index + 1}. ${title}`, description,
     intro: [
       { emoji: track === 'Python Pro' ? '🧠' : '🐍', title: 'Зачем это нужно', body: `<p>${description}</p><p><b>Результат урока:</b> ты сможешь применить тему в новой задаче, а не только повторить пример.</p>`, video },
@@ -71,6 +95,9 @@ function makeLesson(track, level, prefix, topic, index, previousId) {
       task('code', 'Самостоятельная практика', { description: 'Заверши решение. Не меняй формат итогового вывода.', starter: practice[0], expectedOutput: practice[1], difficulty: 2 }),
       task('quiz', 'Найди риск в коде', { description: 'Что сильнее всего снижает надёжность решения?', options: ['Неучтённые граничные данные и неясный контракт', 'Понятные имена переменных', 'Один конкретный ожидаемый результат', 'Разбиение задачи на шаги'], answer: 0, difficulty: 2 }),
       task('code', 'Задача со звёздочкой', { description: `Создай собственный короткий пример по теме «${title}», сохранив требуемый вывод. Затем упрости решение без изменения поведения.`, starter: `# Решение по теме: ${title}\n${practice[0]}`, expectedOutput: practice[1], difficulty: 3 }),
+      task('quiz', 'Контрольный тест: предскажи вывод', { description: `Не запускай код сразу. Какой точный результат даст этот фрагмент?\n\n${trace[0]}`, options: [trace[1], 'Ошибка выполнения', 'None', 'Код ничего не выведет'], answer: 0, difficulty: 2, explain: `Правильный вывод: ${trace[1]}. Проследи изменение каждого значения построчно.` }),
+      task('fill', 'Быстрая проверка результата', { description: 'Какой точный результат должна вывести практическая программа по этой теме?', answer: practice[1], difficulty: 2, explain: `Ожидаемый результат: ${practice[1]}.` }),
+      task('code', `Сам пишу код: ${challenge[0]}`, { description: `${challenge[1]} Здесь нет готового решения: напиши основную логику самостоятельно.`, starter: challenge[2], expectedOutput: challenge[3], difficulty: 3, explain: 'Разбей задачу на маленькие шаги, проверь промежуточные значения и соблюдай точный формат вывода.' }),
     ]
   };
 }

@@ -30,6 +30,18 @@ test('lesson modal keeps attendance, assessments, reports and guided homework', 
   assert.doesNotMatch(css, /\.lesson-student-main \.assess_class,[^\n]+display:none/);
 });
 
+test('staff student cards expose safe avatar editing', () => {
+  const usersRoute = fs.readFileSync(path.join(root, 'server/routes-users.js'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'public/js/app.js'), 'utf8');
+  const curator = fs.readFileSync(path.join(root, 'public/curator/index.html'), 'utf8');
+  assert.match(admin, /changeClientAvatar/);
+  assert.match(teacher, /changeTeacherStudentAvatar/);
+  assert.match(app, /enhanceCuratorStudentPhoto/);
+  assert.match(curator, /student-photo/);
+  assert.match(usersRoute, /user\.role === 'curator'/);
+  assert.match(usersRoute, /accessibleStudentIds\(db, user\)/);
+});
+
 test('standalone homework form uses task choices instead of manual task IDs', () => {
   assert.match(admin, /id="hwf_task_picker"/);
   assert.match(admin, /taskPickerHtml\(tasksForModule\(moduleId\),'hwf-task'\)/);

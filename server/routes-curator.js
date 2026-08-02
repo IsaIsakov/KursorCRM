@@ -3,6 +3,7 @@ const db = require('./db');
 const { authRequired, requireRole } = require('./auth');
 const { genId } = require('./util');
 const { createCase, syncAutomaticCases } = require('./curator-cases');
+const { lessonTimestamp } = require('./lesson-date');
 
 const router = express.Router(); router.use(authRequired);
 const DAY=86400000, MAX_FOLLOWUP=14*DAY;
@@ -66,7 +67,8 @@ router.get('/curator/students/:id', requireCurator, (req,res)=>{
   if(!s||!allowedBranch(req.user,s.branch_id))return res.status(404).json({error:'Студент не найден'});
   const groups=db.prepare(`SELECT g.id,g.name,g.lesson_kind,t.name teacher_name FROM group_members gm JOIN groups g ON g.id=gm.group_id LEFT JOIN users t ON t.id=g.teacher_id WHERE gm.student_id=? AND (gm.until IS NULL OR gm.until>=?) ORDER BY g.name`).all(req.params.id,Date.now());
   const schedules=db.prepare(`SELECT gs.*,g.name group_name FROM group_schedule gs JOIN groups g ON g.id=gs.group_id JOIN group_members gm ON gm.group_id=g.id WHERE gm.student_id=? AND (gm.until IS NULL OR gm.until>=?) ORDER BY gs.weekday,gs.start_time`).all(req.params.id,Date.now());
-  const attendance=db.prepare(`SELECT a.status,a.reason,ls.date,ls.topic,g.name group_name,sa.class_score,sa.homework_score,sa.homework_status,sa.engagement,sa.difficulty,sa.interest,sa.private_comment FROM attendance a JOIN lesson_sessions ls ON ls.id=a.lesson_session_id JOIN groups g ON g.id=ls.group_id LEFT JOIN student_assessments sa ON sa.lesson_session_id=ls.id AND sa.student_id=a.student_id WHERE a.student_id=? ORDER BY ls.date DESC LIMIT 90`).all(req.params.id);
+  const attendance=db.prepare(`SELECT a.status,a.reason,ls.date,ls.lesson_day,ls.start_time,ls.topic,g.name group_name,sa.class_score,sa.homework_score,sa.homework_status,sa.engagement,sa.difficulty,sa.interest,sa.private_comment FROM attendance a JOIN lesson_sessions ls ON ls.id=a.lesson_session_id JOIN groups g ON g.id=ls.group_id LEFT JOIN student_assessments sa ON sa.lesson_session_id=ls.id AND sa.student_id=a.student_id WHERE a.student_id=? ORDER BY ls.date DESC LIMIT 90`).all(req.params.id);
+  attendance.forEach(row => { row.date = lessonTimestamp(row); });
   const attended=attendance.filter(x=>['present','late'].includes(x.status)).length;
   const payments=db.prepare('SELECT amount,currency,method,status,paid_at FROM subscription_payments WHERE student_id=? ORDER BY paid_at DESC').all(req.params.id);
   const feedback=db.prepare(`SELECT f.text,f.type,f.created_at,u.name teacher_name FROM feedback f LEFT JOIN users u ON u.id=f.teacher_id WHERE f.student_id=? ORDER BY f.created_at DESC LIMIT 30`).all(req.params.id);

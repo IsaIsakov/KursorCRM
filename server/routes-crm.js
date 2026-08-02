@@ -91,6 +91,7 @@ function rowToCrm(r) {
     documentId: r.document_id || null, comment: r.comment || null,
     branchName: r.branch_name || null, tariffName: r.tariff_name || null,
     login: r.login || null, name: r.name || null, age: r.age || 0,
+    avatarUrl: r.avatar_url || null,
   };
 }
 
@@ -331,7 +332,7 @@ router.delete('/groups/:gid/members/:mid', requireRole('admin','curator'), (req,
    КАРТОЧКИ КЛИЕНТОВ /api/students-crm
    ============================================================ */
 const CRM_SELECT = `
-  SELECT c.*, b.name AS branch_name, t.name AS tariff_name, u.login, u.name, u.age
+  SELECT c.*, b.name AS branch_name, t.name AS tariff_name, u.login, u.name, u.age, u.avatar_url
   FROM students_crm c
   LEFT JOIN branches b ON b.id = c.branch_id
   LEFT JOIN tariffs t ON t.id = c.tariff_id
@@ -388,7 +389,7 @@ router.get('/students-crm/:id/overview', requireRole('admin'), (req, res) => {
   const schedules = db.prepare(`SELECT gs.group_id,gs.weekday,gs.start_time,gs.duration_min
     FROM group_schedule gs JOIN group_members gm ON gm.group_id=gs.group_id
     WHERE gm.student_id=? ORDER BY gs.weekday,gs.start_time`).all(req.params.id);
-  const attendance = db.prepare(`SELECT a.status,a.reason,a.marked_at,ls.date,ls.topic,g.name group_name
+  const attendance = db.prepare(`SELECT a.status,a.reason,a.marked_at,ls.date,ls.lesson_day,ls.start_time,ls.topic,g.name group_name
     FROM attendance a JOIN lesson_sessions ls ON ls.id=a.lesson_session_id JOIN groups g ON g.id=ls.group_id
     WHERE a.student_id=? ORDER BY ls.date DESC LIMIT 60`).all(req.params.id);
   const attendanceCounts = { present:0, late:0, excused:0, absent:0 };
@@ -396,6 +397,8 @@ router.get('/students-crm/:id/overview', requireRole('admin'), (req, res) => {
   const feedback = db.prepare(`SELECT f.id,f.type,f.text,f.created_at,u.name teacher_name
     FROM feedback f LEFT JOIN users u ON u.id=f.teacher_id
     WHERE f.student_id=? ORDER BY f.created_at DESC LIMIT 20`).all(req.params.id);
+  const { lessonTimestamp } = require('./lesson-date');
+  attendance.forEach(row => { row.date = lessonTimestamp(row); });
   res.json({ student: rowToCrm(student), groups, schedules, attendance, attendanceCounts, feedback });
 });
 

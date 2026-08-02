@@ -105,6 +105,11 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Маршрут н�
 
 // Статика
 const publicDir = path.join(__dirname, '..', 'public');
+// Public profile photos are non-sensitive, but their files live on the
+// persistent Volume in production rather than in the disposable image layer.
+app.use('/uploads/avatars', express.static(require('./avatar-storage').AVATARS_DIR, {
+  etag: true, maxAge: '1d', immutable: true,
+}));
 // Старые версии хранили детские материалы здесь. Запрещаем прямую раздачу
 // немедленно; storage.js перенесёт их в закрытый каталог по подписанной ссылке.
 app.use('/uploads/sessions', (_req, res) => res.status(404).end());

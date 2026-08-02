@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { activeMemberIds, validateGroupStudents, sessionTimestamp } = require('../server/group-scope');
+const { lessonDay, lessonTimestamp } = require('../server/lesson-date');
 
 function fakeDb(rows) {
   return { prepare: () => ({ all: (_group, at) => rows.filter(r => r.since <= at && (!r.until || r.until >= at)).map(r => ({ id: r.id })) }) };
@@ -25,4 +26,11 @@ test('rejects outsiders and duplicate attendance rows before mutation', () => {
 
 test('lesson date is converted to a stable timestamp', () => {
   assert.equal(sessionTimestamp('2026-07-15'), Date.parse('2026-07-15T12:00:00Z'));
+});
+
+test('legacy and current lesson dates normalize to one API shape', () => {
+  assert.equal(lessonDay('2026-08-02T09:00:00.000Z'), '2026-08-02');
+  assert.equal(lessonDay('1785632400000'), '2026-08-02');
+  assert.equal(lessonTimestamp({ date:null, lesson_day:'2026-08-02', start_time:'09:00' }),
+    new Date('2026-08-02T09:00:00').getTime());
 });

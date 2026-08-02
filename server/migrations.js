@@ -520,6 +520,18 @@ const MIGRATIONS = [
       db.prepare("UPDATE session_artifacts SET expires_at=NULL WHERE type='video' AND deleted=0").run();
     },
   },
+  {
+    version: 18,
+    name: 'normalize_lesson_dates',
+    up(db) {
+      const { lessonDay } = require('./lesson-date');
+      const update = db.prepare('UPDATE lesson_sessions SET lesson_day=? WHERE id=?');
+      for (const row of db.prepare('SELECT id,date,lesson_day FROM lesson_sessions').all()) {
+        const normalized = lessonDay(row.date, lessonDay(row.lesson_day));
+        if (normalized && normalized !== row.lesson_day) update.run(normalized, row.id);
+      }
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

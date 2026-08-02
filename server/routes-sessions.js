@@ -13,6 +13,7 @@ const subscriptions = require('./subscriptions').createSubscriptionService(db);
 const { z, id: idSchema, optionalText, timestamp, validateBody } = require('./validation');
 const { parseMultipart } = require('./multipart');
 const storage = require('./storage');
+const { lessonDay: normalizedLessonDay, lessonTimestamp } = require('./lesson-date');
 
 const router = express.Router();
 router.use(authRequired);
@@ -100,8 +101,8 @@ router.get('/lesson-sessions', (req, res) => {
     ORDER BY ls.date DESC, ls.created_at DESC
   `).all(...params);
   res.json(rows.map(r => ({
-    id: r.id, groupId: r.group_id, date: r.date, topic: r.topic || '',
-    lessonDay: r.lesson_day || null, status: r.status || 'conducted',
+    id: r.id, groupId: r.group_id, date: lessonTimestamp(r), topic: r.topic || '',
+    lessonDay: normalizedLessonDay(r.date, normalizedLessonDay(r.lesson_day)) || null, status: r.status || 'conducted',
     startTime: r.start_time || null, durationMin: r.duration_min || null,
     teacherId: r.scheduled_teacher_id || null, assistantId: r.scheduled_assistant_id || null,
     conductedBy: r.conducted_by || null, conductorName: r.conductor_name || null,

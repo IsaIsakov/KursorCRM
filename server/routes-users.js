@@ -9,6 +9,7 @@ const { authRequired, requireRole, hashPassword } = require('./auth');
 const { isAcceptablePassword } = require('./security-config');
 const { accessibleStudentIds } = require('./access-scope');
 const { z, id: idSchema, text, validateBody } = require('./validation');
+const { AVATARS_DIR } = require('./avatar-storage');
 
 const router = express.Router();
 router.use(authRequired);
@@ -32,8 +33,6 @@ const updateUserSchema = z.strictObject({
 const avatarSchema = z.strictObject({ dataUrl: z.string().min(32).max(3_000_000) });
 const childrenSchema = z.strictObject({ children: z.array(idSchema).max(500) });
 
-const AVATARS_DIR = path.join(__dirname, '..', 'public', 'uploads', 'avatars');
-if (!fs.existsSync(AVATARS_DIR)) fs.mkdirSync(AVATARS_DIR, { recursive: true });
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
 
 function detectImageExt(buf) {
@@ -59,6 +58,31 @@ function rowToUser(row) {
 
 function randomId() {
   return `u_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function canEditAvatar(user, target) {
+  if (!target) return false;
+  if (user.id === target.id || user.role === 'admin') return true;
+  if (target.role !== 'student') return false;
+  if (user.role === 'teacher') {
+    if (accessibleStudentIds(db, user).includes(target.id)) return true;
+    return !!db.prepare(`
+      SELECT 1
+      FROM lesson_session_members lsm
+      JOIN lesson_sessions ls ON ls.id=lsm.lesson_session_id
+      WHERE lsm.student_id=? AND lsm.active=1
+        AND (ls.scheduled_teacher_id=? OR ls.scheduled_assistant_id=?)
+      LIMIT 1
+    `).get(target.id, user.id, user.id);
+  }
+  if (user.role === 'curator') {
+    return !!db.prepare(`
+      SELECT 1 FROM students_crm sc
+      JOIN curator_branches cb ON cb.branch_id=sc.branch_id
+      WHERE sc.user_id=? AND cb.curator_id=?
+    `).get(target.id, user.id);
+  }
+  return false;
 }
 
 router.get('/', (req, res) => {
@@ -185,14 +209,15 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
 });
 
 /* ============================================================
-   АВАТАРКИ: менять может ТОЛЬКО владелец аккаунта.
+   АВАТАРКИ: владелец, администратор, назначенный преподаватель
+   или куратор филиала ученика.
    POST /api/users/:id/avatar   — боди { dataUrl: "data:image/png;base64,..." }
    DELETE /api/users/:id/avatar — удалить
    ============================================================ */
 router.post('/:id/avatar', validateBody(avatarSchema), (req, res) => {
-  if (req.user.id !== req.params.id) {
-    return res.status(403).json({ error: 'Менять аватарку может только владелец аккаунта' });
-  }
+  const target = db.prepare('SELECT id,role FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+  if (!canEditAvatar(req.user, target)) return res.status(403).json({ error: 'Нет права менять фото этого ученика' });
   const { dataUrl } = req.body || {};
   if (!dataUrl || typeof dataUrl !== 'string') {
     return res.status(400).json({ error: 'Ожидается dataUrl' });
@@ -227,9 +252,9 @@ router.post('/:id/avatar', validateBody(avatarSchema), (req, res) => {
 });
 
 router.delete('/:id/avatar', (req, res) => {
-  if (req.user.id !== req.params.id) {
-    return res.status(403).json({ error: 'Удалить аватарку может только владелец аккаунта' });
-  }
+  const target = db.prepare('SELECT id,role FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+  if (!canEditAvatar(req.user, target)) return res.status(403).json({ error: 'Нет права удалить фото этого ученика' });
   const cur = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(req.params.id);
   if (cur && cur.avatar_url) {
     const f = path.join(AVATARS_DIR, path.basename(cur.avatar_url));

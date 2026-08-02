@@ -18,8 +18,11 @@ function validateGroupStudents(db, groupId, studentIds, at = Date.now()) {
 }
 
 function sessionTimestamp(date) {
-  const parsed = Date.parse(`${date}T12:00:00Z`);
-  return Number.isFinite(parsed) ? parsed : Date.now();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+    const noon = Date.parse(`${date}T12:00:00Z`);
+    if (Number.isFinite(noon)) return noon;
+  }
+  return require('./lesson-date').parseLessonDate(date)?.getTime() || Date.now();
 }
 
 module.exports = { activeMemberIds, validateGroupStudents, sessionTimestamp };

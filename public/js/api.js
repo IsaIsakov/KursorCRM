@@ -141,12 +141,14 @@
 
   async function uploadAvatar(userId, dataUrl) {
     const r = await API_.post('/api/users/' + encodeURIComponent(userId) + '/avatar', { dataUrl });
-    if (r && r.user) localStorage.setItem(USER_KEY, JSON.stringify(r.user));
+    const current = getCurrentUser();
+    if (r && r.user && current?.id === userId) localStorage.setItem(USER_KEY, JSON.stringify(r.user));
     return r;
   }
   async function deleteAvatar(userId) {
     const r = await API_.del('/api/users/' + encodeURIComponent(userId) + '/avatar');
-    if (r && r.user) localStorage.setItem(USER_KEY, JSON.stringify(r.user));
+    const current = getCurrentUser();
+    if (r && r.user && current?.id === userId) localStorage.setItem(USER_KEY, JSON.stringify(r.user));
     return r;
   }
 

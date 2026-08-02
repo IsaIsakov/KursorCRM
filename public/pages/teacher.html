@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=25">
+<link rel="stylesheet" href="/css/style.css?v=26">
 <style>
   .live-dot {
     display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;
@@ -28,10 +28,10 @@
 <body>
 <div id="nav"></div>
 <div class="container"><div id="content">Загружаем…</div></div>
-<script src="/data/database.js?v=25"></script>
-<script src="/js/i18n.js?v=25"></script>
-<script src="/js/api.js?v=25"></script>
-<script src="/js/app.js?v=25"></script>
+<script src="/data/database.js?v=26"></script>
+<script src="/js/i18n.js?v=26"></script>
+<script src="/js/api.js?v=26"></script>
+<script src="/js/app.js?v=26"></script>
 <script>
 const user = requireAuth(['teacher','admin','assistant']);
 let state = { students: [], tasks: [], modules: [], progressById: {} };
@@ -126,9 +126,11 @@ function showStudent(id) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay active';
   modal.innerHTML = `
-    <div class="modal">
-      <h2>${escapeHtml(s.name)}</h2>
-      <p>Логин: <code>${escapeHtml(s.login)}</code> · Возраст: ${s.age} · Группа: ${KURSOR_DB.GROUPS[s.group]?.name || '—'}</p>
+    <div class="modal student-overview-modal">
+      <div class="student-profile-head">
+        <button class="student-avatar-lg" onclick="changeTeacherStudentAvatar('${s.id}',this.closest('.modal-overlay'))" title="Изменить фото">${s.avatar_url?`<img src="${escapeHtml(s.avatar_url)}" alt="${escapeHtml(s.name)}">`:escapeHtml(s.name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase())}</button>
+        <div style="min-width:0"><h2 style="margin:0">${escapeHtml(s.name)}</h2><p style="margin:5px 0 0">Логин: <code>${escapeHtml(s.login)}</code> · Возраст: ${s.age} · Группа: ${KURSOR_DB.GROUPS[s.group]?.name || '—'}</p><button class="btn btn-ghost btn-sm student-avatar-edit" onclick="changeTeacherStudentAvatar('${s.id}',this.closest('.modal-overlay'))">${uiIcon('camera')} Изменить фото</button></div>
+      </div>
       <p style="margin-top:10px"><b>Языки:</b> ${(s.languages || []).map(l => KURSOR_DB.LANGS[l]?.name).join(', ') || '—'}</p>
       <div style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap">
         <div><b style="font-size:20px"><img src="https://cdn-icons-png.flaticon.com/512/1828/1828884.png" style="width:14px;height:14px;vertical-align:-2px"> ${p.points}</b><br>очков</div>
@@ -157,6 +159,18 @@ function showStudent(id) {
     </div>`;
   document.body.appendChild(modal);
   modal.onclick = e => { if (e.target === modal) modal.remove(); };
+}
+
+async function changeTeacherStudentAvatar(id, overlay) {
+  try {
+    const result = await uploadStudentAvatar(id);
+    if (!result) return;
+    const student = state.students.find(x => x.id === id);
+    if (student) student.avatar_url = result.avatar_url;
+    overlay?.remove();
+    showToast('Фото ученика обновлено', 'success');
+    showStudent(id);
+  } catch (error) { showToast(error.message, 'error'); }
 }
 
 // ===== Real-time: WebSocket =====

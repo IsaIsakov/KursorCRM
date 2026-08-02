@@ -200,6 +200,37 @@ function fmtDateTime(v, locale) {
   return d ? d.toLocaleString(locale || undefined) : '—';
 }
 
+function chooseImageFile() {
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg';
+    input.style.display = 'none';
+    input.onchange = () => {
+      const file = input.files?.[0] || null;
+      input.remove();
+      resolve(file);
+    };
+    input.addEventListener('cancel', () => { input.remove(); resolve(null); }, { once:true });
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+async function uploadStudentAvatar(userId) {
+  const file = await chooseImageFile();
+  if (!file) return null;
+  if (!['image/png','image/jpeg'].includes(file.type)) throw new Error('Выберите PNG или JPG');
+  if (file.size > 2 * 1024 * 1024) throw new Error('Фото должно быть не больше 2 МБ');
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Не удалось прочитать фото'));
+    reader.readAsDataURL(file);
+  });
+  return API.uploadAvatar(userId, dataUrl);
+}
+
 function getQueryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
@@ -214,6 +245,7 @@ window.escapeHtml = escapeHtml;
 window.toDate = toDate;
 window.fmtDate = fmtDate;
 window.fmtDateTime = fmtDateTime;
+window.uploadStudentAvatar = uploadStudentAvatar;
 window.getQueryParam = getQueryParam;
 window.toggleNotifPanel = toggleNotifPanel;
 window.loadNotifBadge = loadNotifBadge;
@@ -224,4 +256,39 @@ window.markAllNotif = markAllNotif;
 // Подгружаем счётчик уведомлений после отрисовки навбара
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => { if (document.getElementById('notifBell')) loadNotifBadge(); }, 300);
+
+  // Curator cards are rendered dynamically in a compact single-page view.
+  // Add one consistent photo control without duplicating the upload logic.
+  const curatorModal = document.getElementById('modalContent');
+  if (curatorModal && ['curator','admin'].includes(getCurrentUser()?.role)) {
+    const enhanceCuratorStudentPhoto = () => {
+      const hero = curatorModal.querySelector('.student-hero');
+      const photo = hero?.querySelector('.student-photo');
+      if (!hero || !photo || hero.querySelector('.student-avatar-edit')) return;
+      const accessButton = [...curatorModal.querySelectorAll('button')]
+        .find(button => /showCuratorAccess\('/.test(button.getAttribute('onclick') || ''));
+      const match = accessButton?.getAttribute('onclick')?.match(/showCuratorAccess\('([^']+)'\)/);
+      if (!match) return;
+      const studentId = match[1];
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'btn btn-ghost btn-sm student-avatar-edit';
+      edit.innerHTML = `${uiIcon('camera')} Изменить фото`;
+      edit.onclick = async () => {
+        try {
+          const result = await uploadStudentAvatar(studentId);
+          if (!result) return;
+          showToast('Фото ученика обновлено', 'success');
+          if (typeof window.openStudent === 'function') await window.openStudent(studentId);
+        } catch (error) { showToast(error.message, 'error'); }
+      };
+      const identity = hero.children[1] || hero;
+      identity.appendChild(edit);
+      photo.title = 'Изменить фото';
+      photo.style.cursor = 'pointer';
+      photo.onclick = () => edit.click();
+    };
+    new MutationObserver(enhanceCuratorStudentPhoto)
+      .observe(curatorModal, { childList:true, subtree:true });
+  }
 });

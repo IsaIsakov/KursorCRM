@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 18);
+  assert.equal((await ready.json()).schemaVersion, 20);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -86,6 +86,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   await api('POST', '/api/students-crm', { userId: student.id, fullName: student.name, branchId: branch.id,
     tariffId: tariff.id, subscriptionIssuedAt: Date.now() }, 201);
   const modules = (await api('GET', '/api/modules')).body;
+  const allTasks = (await api('GET', '/api/tasks')).body;
   const group = (await api('POST', '/api/groups', { name: 'E2E group', branchId: branch.id, courseId: modules[0].id,
     teacherId: teacher.id, assistantId: null, lessonKind: 'main' }, 201)).body;
   const onboarded = (await api('POST', '/api/import/clients', { format: 'json', data: [{
@@ -144,6 +145,40 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'PUT',`/api/homework/${homework.id}/assignments/${student.id}`,{status:'checked',score:5});
   const checkedHomeworkProgress=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET',`/api/homework/${homework.id}/progress`);
   assert.equal(checkedHomeworkProgress.students.find(item=>item.studentId===student.id).score,5);
+
+  // Combined homework is submitted only after both the platform task and the
+  // student's file/photo are present. The answer remains available to staff.
+  const platformTask=allTasks.find(item=>item.type==='quiz'&&item.answer!==null&&item.answer!==undefined);
+  assert.ok(platformTask);
+  const combinedHomework=(await api('POST','/api/homework',{
+    lessonSessionId:lesson.id,moduleId:platformTask.module,taskIds:[platformTask.id],
+    description:'Пройти тест и приложить фотографию работы',submissionMode:'both',dueDate:Date.now()+86400000,
+  },201)).body;
+  const answerForm=new FormData();
+  answerForm.append('file',new Blob([Buffer.from('%PDF-1.4 student answer')],{type:'application/pdf'}),'answer.pdf');
+  const uploadedAnswer=await fetch(`${base}/api/homework/${combinedHomework.id}/submission`,{
+    method:'POST',headers:{Cookie:studentCookie,'X-CSRF-Token':studentLoginBody.csrfToken},body:answerForm,
+  });
+  const uploadedAnswerText=await uploadedAnswer.text();
+  assert.equal(uploadedAnswer.status,200,uploadedAnswerText);
+  const uploadedAnswerBody=JSON.parse(uploadedAnswerText);
+  assert.equal(uploadedAnswerBody.status,'assigned');
+  assert.equal(uploadedAnswerBody.uploadCompleted,true);
+  assert.equal(uploadedAnswerBody.tasksCompleted,false);
+  await sessionApi(studentCookie,studentLoginBody.csrfToken,'POST','/api/progress/complete',{
+    taskId:platformTask.id,submission:String(platformTask.answer),
+  });
+  const studentHomework=await sessionApi(studentCookie,studentLoginBody.csrfToken,'GET','/api/homework/me');
+  const combinedStudentHomework=studentHomework.find(item=>item.id===combinedHomework.id);
+  assert.equal(combinedStudentHomework.assignmentStatus,'submitted');
+  assert.equal(combinedStudentHomework.submissionFileName,'answer.pdf');
+  const combinedProgress=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET',`/api/homework/${combinedHomework.id}/progress`);
+  const combinedStudent=combinedProgress.students.find(item=>item.studentId===student.id);
+  assert.equal(combinedStudent.status,'submitted');
+  assert.match(combinedStudent.submissionFileUrl,/\/file$/);
+  const answerDownload=await fetch(base+combinedStudent.submissionFileUrl,{headers:{Cookie:teacherCookie}});
+  assert.equal(answerDownload.status,200);
+  assert.equal(await answerDownload.text(),'%PDF-1.4 student answer');
 
   const absenceCase = (await api('POST', '/api/curator/cases', { studentId: student.id, category: 'absence', description: 'E2E absence' }, 201)).body;
   const debtorCase = (await api('POST', '/api/curator/cases', { studentId: student.id, category: 'debtor', description: 'E2E debt' }, 201)).body;

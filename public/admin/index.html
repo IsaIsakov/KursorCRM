@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=27">
+<link rel="stylesheet" href="/css/style.css?v=28">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,10 +38,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=27"></script>
-<script src="/js/i18n.js?v=27"></script>
-<script src="/js/api.js?v=27"></script>
-<script src="/js/app.js?v=27"></script>
+<script src="/data/database.js?v=28"></script>
+<script src="/js/i18n.js?v=28"></script>
+<script src="/js/api.js?v=28"></script>
+<script src="/js/app.js?v=28"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -301,11 +301,12 @@ function renderUsers() {
       </div>
     </div>
     <p style="color:#64748b;margin-bottom:14px">Пароли хранятся на сервере в виде bcrypt-хешей и не показываются.</p>
-    <table class="table">
+    <div class="list-toolbar"><input class="form-input" type="search" placeholder="Поиск по имени, логину или роли" oninput="filterTableRows('usersTable',this.value)"><span data-filter-count="usersTable">Всего: ${cache.users.length}</span></div>
+    <div class="table-wrap"><table class="table" id="usersTable">
       <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Возраст</th><th>Группа</th><th>Языки</th><th>Действия</th></tr></thead>
       <tbody>
         ${cache.users.map(u => `
-          <tr>
+          <tr data-search="${escapeHtml((u.name+' '+u.login+' '+u.role).toLowerCase())}">
             <td><b>${escapeHtml(u.name)}</b></td>
             <td><code>${escapeHtml(u.login)}</code></td>
             <td><span class="badge badge-${u.role==='admin'?'danger':u.role==='teacher'?'warning':'info'}">${u.role}</span></td>
@@ -319,7 +320,7 @@ function renderUsers() {
             </td>
           </tr>`).join('')}
       </tbody>
-    </table>
+    </table></div>
   `;
 }
 
@@ -559,13 +560,14 @@ function renderModules() {
         <button class="btn" onclick="openModuleForm()">${I18N.t('admin.add_module')}</button>
       </div>
     </div>
-    <table class="table">
+    <div class="list-toolbar"><input class="form-input" type="search" placeholder="Поиск модуля, курса или уровня" oninput="filterTableRows('modulesTable',this.value)"><span data-filter-count="modulesTable">Всего: ${cache.modules.length}</span></div>
+    <div class="table-wrap"><table class="table" id="modulesTable">
       <thead><tr><th>ID</th><th>Язык</th><th>Название</th><th>Видео</th><th>Действия</th></tr></thead>
       <tbody>
         ${cache.modules.map(m => {
           const lang = KURSOR_DB.LANGS[m.lang];
           return `
-            <tr>
+            <tr data-search="${escapeHtml(((m.track||'')+' '+(m.level||'')+' '+m.title+' '+m.lang).toLowerCase())}">
               <td><code>${escapeHtml(m.id)}</code></td>
               <td>${lang ? `<span class="lang-badge ${lang.class}">${lang.icon ? `<img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px">` : ''} ${lang.name}</span>` : m.lang}</td>
               <td><b>${escapeHtml(m.title)}</b><div style="font-size:12px;color:#64748b">${escapeHtml((m.description||'').slice(0,80))}</div></td>
@@ -577,7 +579,7 @@ function renderModules() {
             </tr>`;
         }).join('')}
       </tbody>
-    </table>
+    </table></div>
   `;
 }
 
@@ -1150,8 +1152,9 @@ async function renderGroups() {
       <h1 data-i18n="admin.groups">Группы</h1>
       ${isAdmin ? `<button class="btn" onclick="openGroupForm()">${I18N.t('common.add')}</button>` : ''}
     </div>
-    <table class="table"><thead><tr><th data-i18n="common.name">Название</th><th data-i18n="crm.branch">Филиал</th><th data-i18n="admin.teacher_col">Преподаватель</th><th data-i18n="admin.students_count">Учеников</th><th data-i18n="admin.lesson_type_col">Тип</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
-    ${list.length ? list.map(g=>`<tr>
+    <div class="list-toolbar"><input class="form-input" type="search" placeholder="Поиск группы, филиала или преподавателя" oninput="filterTableRows('groupsTable',this.value)"><span data-filter-count="groupsTable">Всего: ${list.length}</span></div>
+    <div class="table-wrap"><table class="table" id="groupsTable"><thead><tr><th data-i18n="common.name">Название</th><th data-i18n="crm.branch">Филиал</th><th data-i18n="admin.teacher_col">Преподаватель</th><th data-i18n="admin.students_count">Учеников</th><th data-i18n="admin.lesson_type_col">Тип</th><th data-i18n="common.actions">Действия</th></tr></thead><tbody>
+    ${list.length ? list.map(g=>`<tr data-search="${escapeHtml(((g.name||'')+' '+(g.branchName||'')+' '+(g.teacherName||'')).toLowerCase())}">
       <td><b>${escapeHtml(g.name)}</b></td>
       <td>${escapeHtml(g.branchName||'—')}</td>
       <td>${escapeHtml(g.teacherName||'—')}</td>
@@ -1161,7 +1164,7 @@ async function renderGroups() {
         ${isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openGroupForm('${g.id}')">${I18N.t('common.edit')}</button>` : ''}
         ${isAdmin ? `<button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="removeGroup('${g.id}')">${I18N.t('common.delete')}</button>` : ''}</td>
     </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
-    </tbody></table>`;
+    </tbody></table></div>`;
   I18N.applyI18n(tabEl());
   window._groups = list;
 }
@@ -1907,9 +1910,17 @@ function lessonHomeworkHtml(sessionId){
     <div class="lesson-homework-head" onclick="this.parentElement.classList.toggle('expanded')"><div style="display:flex;gap:10px;align-items:center">${uiIcon('book')}<span><b>Домашнее задание группе</b><small style="display:block;color:#64748b">${assigned.length?`Уже назначено: ${assigned.length}`:'Можно назначить прямо из этого урока'}</small></span></div>${uiIcon('chevron')}</div>
     <div class="lesson-homework-content" onclick="event.stopPropagation()">
       ${assigned.length?`<div style="display:grid;gap:6px;margin-bottom:12px">${assigned.map(h=>`<div class="notice-box" style="margin:0"><b>${escapeHtml(h.moduleTitle||h.fileName||'Задание')}</b><span>${(h.taskIds||[]).length?`${(h.taskIds||[]).length} задач · `:''}срок ${fmtDate(h.dueDate)}</span></div>`).join('')}</div>`:''}
-      <div class="lesson-homework-grid"><div class="form-group"><label>Тема или модуль</label><select class="form-input" id="lessonHwModule" onchange="renderLessonTaskPicker(this.value)"><option value="">Выберите модуль</option>${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml(m.title)}</option>`).join('')}</select></div><div class="form-group"><label>Сдать до</label><input class="form-input" id="lessonHwDue" type="date" value="${new Date(Date.now()+7*86400000).toISOString().slice(0,10)}"></div></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="font-weight:800">Задачи из модуля</label><button class="btn btn-ghost btn-sm" type="button" onclick="selectAllLessonTasks()">Выбрать все</button></div>
-      <div id="lessonTaskPicker" class="lesson-task-picker"><span style="color:#64748b">Сначала выберите модуль — появится понятный список задач.</span></div>
+      <div class="homework-mode-picker" role="radiogroup" aria-label="Формат домашнего задания">
+        <label><input type="radio" name="lessonHwMode" value="platform" checked onchange="updateHomeworkModeUi('lesson')"><b>На платформе</b><small>Тесты и задачи модуля</small></label>
+        <label><input type="radio" name="lessonHwMode" value="upload" onchange="updateHomeworkModeUi('lesson')"><b>Файл или фото</b><small>Ученик прикрепит свою работу</small></label>
+        <label><input type="radio" name="lessonHwMode" value="both" onchange="updateHomeworkModeUi('lesson')"><b>Оба варианта</b><small>Задачи + обязательный файл</small></label>
+      </div>
+      <div id="lessonHwPlatformFields">
+        <div class="lesson-homework-grid"><div class="form-group"><label>Тема или модуль</label><select class="form-input" id="lessonHwModule" onchange="renderLessonTaskPicker(this.value)"><option value="">Выберите модуль</option>${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml((m.track?m.track+' · ':'')+m.title)}</option>`).join('')}</select></div><div class="form-group"><label>Сдать до</label><input class="form-input" id="lessonHwDue" type="date" value="${new Date(Date.now()+7*86400000).toISOString().slice(0,10)}"></div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="font-weight:800">Задачи из модуля</label><button class="btn btn-ghost btn-sm" type="button" onclick="selectAllLessonTasks()">Выбрать все</button></div>
+        <div id="lessonTaskPicker" class="lesson-task-picker"><span style="color:#64748b">Сначала выберите модуль — появится понятный список задач.</span></div>
+      </div>
+      <div class="form-group" id="lessonHwDueOnly" hidden><label>Сдать до</label><input class="form-input" id="lessonHwDueUpload" type="date" value="${new Date(Date.now()+7*86400000).toISOString().slice(0,10)}"></div>
       <div class="form-group" style="margin-top:12px"><label>Текст домашнего задания</label><textarea class="form-input" id="lessonHwDescription" rows="3" placeholder="Например: изучить материал и выполнить задания из PDF"></textarea></div>
       <div class="lesson-homework-grid">
         <div class="form-group"><label>Ссылка — необязательно</label><input class="form-input" id="lessonHwLink" type="url" placeholder="https://..."></div>
@@ -1922,6 +1933,12 @@ function tasksForModule(moduleId){return cache.tasks.filter(t=>String(t.module)=
 function taskPickerHtml(tasks,inputClass){return tasks.length?tasks.map(t=>`<label class="lesson-task-option"><input type="checkbox" class="${inputClass}" value="${t.id}"><span><b>${escapeHtml(t.title)}</b><br><small style="color:#64748b">${escapeHtml(t.description||'')}</small></span></label>`).join(''):'<span style="color:#64748b">В этом модуле задач нет.</span>'}
 function renderLessonTaskPicker(moduleId){const box=document.getElementById('lessonTaskPicker');box.innerHTML=taskPickerHtml(tasksForModule(moduleId),'lesson-hw-task')}
 function selectAllLessonTasks(){document.querySelectorAll('.lesson-hw-task').forEach(x=>x.checked=true)}
+function selectedHomeworkMode(prefix){return document.querySelector(`input[name="${prefix}HwMode"]:checked`)?.value||'platform'}
+function updateHomeworkModeUi(prefix){
+  const mode=selectedHomeworkMode(prefix),platform=document.getElementById(prefix+'HwPlatformFields'),dueOnly=document.getElementById(prefix+'HwDueOnly');
+  if(platform)platform.hidden=mode==='upload';
+  if(dueOnly)dueOnly.hidden=mode!=='upload';
+}
 function homeworkDraftPresent(){
   return !!(document.getElementById('lessonHwModule')?.value||
     document.querySelector('.lesson-hw-task:checked')||
@@ -1930,19 +1947,21 @@ function homeworkDraftPresent(){
     document.getElementById('lessonHwFile')?.files?.[0]);
 }
 async function saveLessonHomework(sessionId){
-  const moduleId=document.getElementById('lessonHwModule')?.value||null;
-  const taskIds=[...document.querySelectorAll('.lesson-hw-task:checked')].map(x=>Number(x.value));
-  const dueRaw=document.getElementById('lessonHwDue')?.value;
+  const submissionMode=selectedHomeworkMode('lesson');
+  const moduleId=submissionMode==='upload'?null:(document.getElementById('lessonHwModule')?.value||null);
+  const taskIds=submissionMode==='upload'?[]:[...document.querySelectorAll('.lesson-hw-task:checked')].map(x=>Number(x.value));
+  const dueRaw=submissionMode==='upload'?document.getElementById('lessonHwDueUpload')?.value:document.getElementById('lessonHwDue')?.value;
   const description=document.getElementById('lessonHwDescription')?.value.trim()||'';
   const linkUrl=document.getElementById('lessonHwLink')?.value.trim()||null;
   const file=document.getElementById('lessonHwFile')?.files?.[0]||null;
   const err=document.getElementById('modalErr');
-  if(!moduleId&&!taskIds.length&&!description&&!linkUrl&&!file){err.textContent='Добавьте задачи платформы, текст, ссылку или файл';return null}
+  if(['platform','both'].includes(submissionMode)&&!moduleId&&!taskIds.length){err.textContent='Выберите модуль или хотя бы одну задачу платформы';return null}
+  if(['upload','both'].includes(submissionMode)&&!description&&!linkUrl&&!file){err.textContent='Объясните, что загрузить ученику, или приложите файл с заданием';return null}
   if(file&&file.size>30*1024*1024){err.textContent='Файл ДЗ больше 30 МБ';return null}
   err.style.color='#4f46e5';err.textContent=file?'Создаём ДЗ и загружаем файл…':'Назначаем домашнее задание…';
   let created=null;
   try{
-    let hw=await API.createHomework({lessonSessionId:sessionId,moduleId,taskIds,dueDate:dueRaw?new Date(dueRaw+'T12:00:00').getTime():null,description:description||(file?`Файл: ${file.name}`:null),linkUrl});
+    let hw=await API.createHomework({lessonSessionId:sessionId,moduleId,taskIds,dueDate:dueRaw?new Date(dueRaw+'T12:00:00').getTime():null,description:description||(file?`Файл: ${file.name}`:null),linkUrl,submissionMode});
     created=hw;
     if(file)hw=await API.uploadHomeworkFile(hw.id,file);
     _lesson.homework.push(hw);
@@ -2145,12 +2164,21 @@ async function loadHw() {
 function openHwForm(sessionId) {
   document.getElementById('modalContent').innerHTML = `
     <h2>${I18N.t('admin.homework')}</h2>
-    <p style="color:#64748b;margin:-4px 0 16px">Выберите тему, отметьте задания и срок. ДЗ получат все ученики группы.</p>
-    <div class="form-group"><label>${I18N.t('hw.module_opt')}</label><select class="form-input" id="hwf_module" onchange="renderHwFormTasks(this.value)">
-      <option value="">${I18N.t('hw.not_set')}</option>
-      ${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml(m.title)}</option>`).join('')}</select></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="font-weight:800">Задачи</label><button class="btn btn-ghost btn-sm" type="button" onclick="document.querySelectorAll('.hwf-task').forEach(x=>x.checked=true)">Выбрать все</button></div>
-    <div id="hwf_task_picker" class="lesson-task-picker" style="margin-bottom:14px"><span style="color:#64748b">Выберите модуль — здесь появятся его задачи.</span></div>
+    <p style="color:#64748b;margin:-4px 0 16px">Выберите, как ученик должен выполнить и сдать работу. ДЗ получат все ученики группы.</p>
+    <div class="homework-mode-picker" role="radiogroup" aria-label="Формат домашнего задания">
+      <label><input type="radio" name="hwfHwMode" value="platform" checked onchange="updateHomeworkModeUi('hwf')"><b>На платформе</b><small>Тесты и задачи</small></label>
+      <label><input type="radio" name="hwfHwMode" value="upload" onchange="updateHomeworkModeUi('hwf')"><b>Файл или фото</b><small>Загрузка ответа</small></label>
+      <label><input type="radio" name="hwfHwMode" value="both" onchange="updateHomeworkModeUi('hwf')"><b>Оба варианта</b><small>Задачи + файл</small></label>
+    </div>
+    <div id="hwfHwPlatformFields">
+      <div class="form-group"><label>${I18N.t('hw.module_opt')}</label><select class="form-input" id="hwf_module" onchange="renderHwFormTasks(this.value)">
+        <option value="">${I18N.t('hw.not_set')}</option>
+        ${cache.modules.map(m=>`<option value="${m.id}">${escapeHtml((m.track?m.track+' · ':'')+m.title)}</option>`).join('')}</select></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="font-weight:800">Задачи</label><button class="btn btn-ghost btn-sm" type="button" onclick="document.querySelectorAll('.hwf-task').forEach(x=>x.checked=true)">Выбрать все</button></div>
+      <div id="hwf_task_picker" class="lesson-task-picker" style="margin-bottom:14px"><span style="color:#64748b">Выберите модуль — здесь появятся его задачи.</span></div>
+    </div>
+    <div class="form-group"><label>Текст задания</label><textarea class="form-input" id="hwf_description" rows="3" placeholder="Что нужно сделать и что приложить в ответе"></textarea></div>
+    <div class="lesson-homework-grid"><div class="form-group"><label>Ссылка — необязательно</label><input class="form-input" id="hwf_link" type="url" placeholder="https://..."></div><div class="form-group"><label>Файл задания — до 30 МБ</label><input class="form-input" id="hwf_file" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip,image/*"></div></div>
     <div class="form-group"><label>${I18N.t('hw.due_opt')}</label><input class="form-input" id="hwf_due" type="date"></div>
     <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -2162,13 +2190,19 @@ function openHwForm(sessionId) {
 }
 function renderHwFormTasks(moduleId){document.getElementById('hwf_task_picker').innerHTML=taskPickerHtml(tasksForModule(moduleId),'hwf-task')}
 async function saveHw(sessionId) {
-  const taskIds = [...document.querySelectorAll('.hwf-task:checked')].map(x=>Number(x.value));
-  const moduleId = document.getElementById('hwf_module').value || null;
+  const submissionMode=selectedHomeworkMode('hwf');
+  const taskIds = submissionMode==='upload'?[]:[...document.querySelectorAll('.hwf-task:checked')].map(x=>Number(x.value));
+  const moduleId = submissionMode==='upload'?null:(document.getElementById('hwf_module').value || null);
   const dueRaw = document.getElementById('hwf_due').value;
-  const data = { lessonSessionId: sessionId, moduleId, taskIds, dueDate: dueRaw ? new Date(dueRaw).getTime() : null };
+  const description=document.getElementById('hwf_description').value.trim();
+  const linkUrl=document.getElementById('hwf_link').value.trim()||null;
+  const file=document.getElementById('hwf_file').files?.[0]||null;
+  const data = { lessonSessionId: sessionId, moduleId, taskIds, dueDate: dueRaw ? new Date(dueRaw+'T12:00:00').getTime() : null,description:description||(file?`Файл: ${file.name}`:null),linkUrl,submissionMode };
   const err = document.getElementById('modalErr');
-  if (!moduleId && !taskIds.length) { err.textContent = I18N.t('hw.need_module_or_tasks'); return; }
-  try { await API.createHomework(data); closeModal(); await loadHw(); showToast(I18N.t('common.saved'),'success'); }
+  if(['platform','both'].includes(submissionMode)&&!moduleId&&!taskIds.length){err.textContent='Выберите модуль или задачи';return;}
+  if(['upload','both'].includes(submissionMode)&&!description&&!linkUrl&&!file){err.textContent='Опишите работу или приложите файл задания';return;}
+  if(file&&file.size>30*1024*1024){err.textContent='Файл больше 30 МБ';return;}
+  try { let hw=await API.createHomework(data);if(file)hw=await API.uploadHomeworkFile(hw.id,file); closeModal(); await loadHw(); showToast(I18N.t('common.saved'),'success'); }
   catch (e) { err.textContent = e.message; }
 }
 async function removeHw(id) {
@@ -2205,10 +2239,11 @@ async function openHomeworkProgress(homeworkId) {
       <div><b>${s.checked}</b><span>проверено</span></div>
       <div class="${s.overdue?'danger':''}"><b>${s.overdue}</b><span>просрочено</span></div>
     </div>
-    <div class="table-wrap"><table class="table homework-progress-table"><thead><tr><th>Ученик</th><th>Прогресс</th><th>Статус</th><th>Оценка</th><th>Сдано</th><th></th></tr></thead><tbody>
+    <div class="table-wrap"><table class="table homework-progress-table"><thead><tr><th>Ученик</th><th>Задачи</th><th>Файл ответа</th><th>Статус</th><th>Оценка</th><th>Сдано</th><th></th></tr></thead><tbody>
       ${data.students.map(x=>`<tr>
         <td><b>${escapeHtml(x.studentName||x.studentId)}</b></td>
-        <td><div style="min-width:120px"><b>${x.total?`${x.done}/${x.total}`:(x.completed?'100%':'—')}</b>${x.total?`<div class="progress-bar" style="margin-top:5px;height:6px"><div class="progress-fill" style="width:${x.percent}%"></div></div>`:''}</div></td>
+        <td><div style="min-width:100px"><b>${x.requiresTasks?(x.total?`${x.done}/${x.total}`:'Нет задач'):'Не требуется'}</b>${x.requiresTasks&&x.total?`<div class="progress-bar" style="margin-top:5px;height:6px"><div class="progress-fill" style="width:${x.percent}%"></div></div>`:''}</div></td>
+        <td>${x.submissionFileUrl?`<a class="btn btn-outline btn-sm" href="${escapeHtml(x.submissionFileUrl)}" target="_blank" rel="noopener">${uiIcon('file')} ${escapeHtml(x.submissionFileName||'Открыть')}</a>`:(x.requiresUpload?'<span class="badge badge-warning">Не загружен</span>':'Не требуется')}</td>
         <td>${homeworkStatusBadge(x.status)}${x.overdue?'<br><small style="color:#dc2626">Срок прошёл</small>':''}</td>
         <td><select class="form-input hw-review-score" id="hw_score_${x.studentId}" aria-label="Оценка ${escapeHtml(x.studentName||'')}"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${x.score===n?'selected':''}>${n}</option>`).join('')}</select></td>
         <td>${x.submittedAt?fmtDateTime(x.submittedAt):'—'}</td>

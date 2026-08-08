@@ -532,6 +532,44 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 19,
+    name: 'homework_submission_files_and_modes',
+    up(db) {
+      const homeworkCols = new Set(db.prepare('PRAGMA table_info(homework)').all().map(c => c.name));
+      if (!homeworkCols.has('submission_mode')) {
+        // legacy keeps the exact behaviour of assignments created before this
+        // release. New assignments explicitly use platform, upload or both.
+        db.exec("ALTER TABLE homework ADD COLUMN submission_mode TEXT NOT NULL DEFAULT 'legacy'");
+      }
+      const assignmentCols = new Set(db.prepare('PRAGMA table_info(homework_assignments)').all().map(c => c.name));
+      const additions = [
+        ['submission_file_path', 'TEXT'],
+        ['submission_file_name', 'TEXT'],
+        ['submission_file_mime', 'TEXT'],
+        ['submission_file_size', 'INTEGER'],
+        ['submission_note', 'TEXT'],
+      ];
+      for (const [name, type] of additions) {
+        if (!assignmentCols.has(name)) db.exec(`ALTER TABLE homework_assignments ADD COLUMN ${name} ${type}`);
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_ha_status_submitted ON homework_assignments(homework_id,status,submitted_at)');
+    },
+  },
+  {
+    version: 20,
+    name: 'ordered_tasks_inside_modules',
+    up(db) {
+      const columns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
+      if (!columns.has('position')) db.exec('ALTER TABLE tasks ADD COLUMN position INTEGER');
+      const update = db.prepare('UPDATE tasks SET position=? WHERE id=? AND position IS NULL');
+      for (const module of db.prepare('SELECT id FROM modules').all()) {
+        db.prepare('SELECT id FROM tasks WHERE module_id=? ORDER BY id').all(module.id)
+          .forEach((task, index) => update.run(index + 1, task.id));
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_module_position ON tasks(module_id,position,id)');
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

@@ -1,7 +1,7 @@
 'use strict';
 
 // A maintainable, source-controlled curriculum. Each topic contains a lesson,
-// a checkpoint and exactly ten varied tasks (160 tasks across both tracks).
+// a checkpoint and exactly fifteen varied tasks (240 tasks across both tracks).
 const tracks = [
   {
     track: 'Python', level: 'База', prefix: 'python',
@@ -47,7 +47,7 @@ const tracks = [
   }
 ];
 
-// The tenth task in every topic is deliberately blank: the student receives a
+// The final task in every topic is deliberately open-ended: the student receives a
 // concrete specification and testable output, but no ready-made solution.
 const independentChallenges = {
   start: ['Периметр прямоугольника', 'Создай переменные width = 8 и height = 5. Вычисли и выведи периметр прямоугольника одним числом.', '# Напиши решение с нуля\n', '26'],
@@ -97,6 +97,11 @@ function makeLesson(track, level, prefix, topic, index, previousId) {
       task('code', 'Задача со звёздочкой', { description: `Создай собственный короткий пример по теме «${title}», сохранив требуемый вывод. Затем упрости решение без изменения поведения.`, starter: `# Решение по теме: ${title}\n${practice[0]}`, expectedOutput: practice[1], difficulty: 3 }),
       task('quiz', 'Контрольный тест: предскажи вывод', { description: `Не запускай код сразу. Какой точный результат даст этот фрагмент?\n\n${trace[0]}`, options: [trace[1], 'Ошибка выполнения', 'None', 'Код ничего не выведет'], answer: 0, difficulty: 2, explain: `Правильный вывод: ${trace[1]}. Проследи изменение каждого значения построчно.` }),
       task('fill', 'Быстрая проверка результата', { description: 'Какой точный результат должна вывести практическая программа по этой теме?', answer: practice[1], difficulty: 2, explain: `Ожидаемый результат: ${practice[1]}.` }),
+      task('quiz', 'Проверка понимания: выбери верный подход', { description: `Как лучше действовать в задаче по теме «${title}»?`, options: ['Сначала определить входные данные и ожидаемый результат, затем написать и проверить решение', 'Сразу копировать большой фрагмент кода без проверки', 'Игнорировать граничные значения', 'Менять несколько частей программы одновременно и не запускать тесты'], answer: 0, difficulty: 2, explain: 'Надёжное решение начинается с понятного контракта и проверяемого результата.' }),
+      task('order', 'От условия до готового решения', { description: 'Расположи этапы решения новой задачи в правильном порядке.', items: ['Понять условие и формат результата', 'Подобрать данные и алгоритм', 'Написать небольшое решение', 'Проверить обычный и граничный случаи'], difficulty: 2, explain: 'Такой порядок снижает число случайных исправлений и помогает быстрее найти ошибку.' }),
+      task('fill', 'Чтение кода без запуска', { description: `Введи точный вывод программы:\n\n${trace[0]}`, answer: trace[1], difficulty: 2, explain: `Правильный вывод: ${trace[1]}.` }),
+      task('code', 'Закрепление: восстанови рабочую программу', { description: 'Дополни программу и получи точный ожидаемый вывод. После запуска объясни, какая строка формирует результат.', starter: practice[0], expectedOutput: practice[1], difficulty: 2, explain: 'Сравни фактический вывод с ожидаемым символ в символ и проверь типы данных.' }),
+      task('quiz', 'Работа над ошибкой', { description: 'Что нужно сделать сразу после неверного результата программы?', options: ['Сравнить ожидаемый и фактический результат, найти первую строку расхождения', 'Удалить весь код и начать случайно заново', 'Скрыть сообщение об ошибке', 'Сразу усложнить программу'], answer: 0, difficulty: 1, explain: 'Первая точка расхождения обычно быстрее всего приводит к настоящей причине ошибки.' }),
       task('code', `Сам пишу код: ${challenge[0]}`, { description: `${challenge[1]} Здесь нет готового решения: напиши основную логику самостоятельно.`, starter: challenge[2], expectedOutput: challenge[3], difficulty: 3, explain: 'Разбей задачу на маленькие шаги, проверь промежуточные значения и соблюдай точный формат вывода.' }),
     ]
   };

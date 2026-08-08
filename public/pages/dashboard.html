@@ -6,16 +6,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=27">
+<link rel="stylesheet" href="/css/style.css?v=28">
 </head>
 <body>
 <div id="nav"></div>
 <div class="container"><div id="content">Загружаем…</div></div>
 
-<script src="/data/database.js?v=27"></script>
-<script src="/js/i18n.js?v=27"></script>
-<script src="/js/api.js?v=27"></script>
-<script src="/js/app.js?v=27"></script>
+<script src="/data/database.js?v=28"></script>
+<script src="/js/i18n.js?v=28"></script>
+<script src="/js/api.js?v=28"></script>
+<script src="/js/app.js?v=28"></script>
 <script>
 const user = requireAuth(['student']);
 if (user) init();
@@ -89,6 +89,9 @@ function render(tasks, modules, progress, homework) {
       <div style="display:flex;flex-direction:column;gap:12px">
         ${homework.map(hw => {
           const pct = hw.total ? Math.round(hw.done / hw.total * 100) : 0;
+          const modeLabel = hw.submissionMode === 'both' ? 'Нужно: задания + файл'
+            : hw.submissionMode === 'upload' ? 'Нужно загрузить файл или фото'
+              : hw.submissionMode === 'platform' ? 'Нужно выполнить задания на платформе' : 'Домашнее задание';
           const statusBadge = hw.assignmentStatus === 'checked'
             ? `<span class="badge badge-success">Проверено${hw.assignmentScore ? ` · ${hw.assignmentScore}/5` : ''}</span>`
             : ['submitted','checking'].includes(hw.assignmentStatus)
@@ -104,11 +107,14 @@ function render(tasks, modules, progress, homework) {
               </div>
               ${statusBadge}
             </div>
+            <div class="homework-requirement">${escapeHtml(modeLabel)}</div>
             ${hw.description?`<p style="margin:12px 0 0;white-space:pre-wrap">${escapeHtml(hw.description)}</p>`:''}
             ${hw.total?`<div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${pct}%"></div></div>`:''}
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
               ${hw.fileUrl?`<a href="${escapeHtml(hw.fileUrl)}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">${escapeHtml(hw.fileName||'Открыть файл')}</a>`:''}
               ${hw.linkUrl?`<a href="${escapeHtml(hw.linkUrl)}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Открыть ссылку</a>`:''}
+              ${hw.submissionFileUrl?`<a href="${escapeHtml(hw.submissionFileUrl)}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Мой ответ: ${escapeHtml(hw.submissionFileName||'файл')}</a>`:''}
+              ${hw.canUpload?`<input id="hw_answer_${hw.id}" type="file" hidden accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip" onchange="uploadDashboardHomework('${hw.id}',this)"><button class="btn btn-success btn-sm" type="button" onclick="document.getElementById('hw_answer_${hw.id}').click()">${hw.submissionFileUrl?'Заменить ответ':'Загрузить ответ'}</button>`:''}
               ${hw.canSubmit?`<button class="btn btn-success btn-sm" onclick="submitDashboardHomework('${hw.id}',this)">Я выполнил</button>`:''}
               ${(hw.taskList || []).map(tid => {
                 const t = tasks.find(x => String(x.id) === String(tid));
@@ -157,6 +163,22 @@ function render(tasks, modules, progress, homework) {
       <a href="/pages/catalog.html" class="btn btn-lg">${I18N.t('dash.all_tasks')}</a>
     </div>
   `;
+}
+
+async function uploadDashboardHomework(homeworkId, input) {
+  const file=input.files?.[0];
+  if(!file)return;
+  if(file.size>30*1024*1024){showToast('Файл больше 30 МБ','error');input.value='';return;}
+  const button=input.nextElementSibling;
+  if(button){button.disabled=true;button.textContent='Загружаем…';}
+  try {
+    const result=await API.uploadHomeworkSubmission(homeworkId,file);
+    showToast(result.status==='submitted'?'Работа отправлена преподавателю':'Файл сохранён. Заверши задания на платформе.','success');
+    await init();
+  } catch(error) {
+    if(button){button.disabled=false;button.textContent='Загрузить ответ';}
+    showToast(error.message,'error');
+  } finally { input.value=''; }
 }
 
 async function submitDashboardHomework(homeworkId, button) {

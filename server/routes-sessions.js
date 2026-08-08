@@ -34,6 +34,7 @@ const homeworkSchema = z.strictObject({
   studentIds: z.array(idSchema).max(500).optional(),
   description: optionalText(5000),
   linkUrl: z.string().url().max(2048).refine(v => /^https?:\/\//i.test(v), 'Разрешены только http/https ссылки').nullable().optional(),
+  submissionMode: z.enum(['platform','upload','both']).optional(),
 });
 const homeworkReviewSchema = z.strictObject({
   status: z.enum(['assigned','submitted','checking','checked','missing']),
@@ -416,6 +417,7 @@ function rowToHw(r) {
     groupId: r.group_id || null, sessionDate: r.session_date || null,
     moduleTitle: r.module_title || null,
     description: r.description || '', linkUrl: r.link_url || null,
+    submissionMode: r.submission_mode || 'legacy',
     fileName: r.file_name || null, fileMime: r.file_mime || null, fileSize: r.file_size || null,
     fileUrl: r.file_path ? `/api/homework/${encodeURIComponent(r.id)}/file` : null,
   };
@@ -433,8 +435,21 @@ function homeworkTaskIds(row) {
   return ids;
 }
 
+function homeworkRequirements(row) {
+  const taskIds = homeworkTaskIds(row);
+  const mode = ['platform','upload','both'].includes(row.submission_mode) ? row.submission_mode : 'legacy';
+  return {
+    mode,
+    taskIds,
+    requiresTasks: mode === 'platform' || mode === 'both' || (mode === 'legacy' && taskIds.length > 0),
+    requiresUpload: mode === 'upload' || mode === 'both',
+    manualConfirm: mode === 'legacy' && taskIds.length === 0,
+  };
+}
+
 function homeworkAssignmentProgress(homework, assignment) {
-  const taskIds = homeworkTaskIds(homework);
+  const requirements = homeworkRequirements(homework);
+  const taskIds = requirements.taskIds;
   const statuses = {};
   let done = 0;
   for (const taskId of taskIds) {
@@ -444,16 +459,18 @@ function homeworkAssignmentProgress(homework, assignment) {
     statuses[taskId] = status;
     if (status === 'done') done++;
   }
-  const tasksCompleted = taskIds.length > 0 && done === taskIds.length;
+  const tasksCompleted = !requirements.requiresTasks || (taskIds.length > 0 && done === taskIds.length);
+  const uploadCompleted = !requirements.requiresUpload || !!assignment.submission_file_path;
+  const requirementsCompleted = tasksCompleted && uploadCompleted;
   let status = assignment.status || 'assigned';
-  if (tasksCompleted && status === 'assigned') {
+  if (requirementsCompleted && !requirements.manualConfirm && status === 'assigned') {
     const submittedAt = assignment.submitted_at || Date.now();
     db.prepare("UPDATE homework_assignments SET status='submitted',submitted_at=? WHERE id=?")
       .run(submittedAt, assignment.id);
     status = 'submitted';
     assignment.submitted_at = submittedAt;
   }
-  const completed = tasksCompleted || ['submitted','checking','checked'].includes(status);
+  const completed = ['submitted','checking','checked'].includes(status);
   return {
     assignmentId: assignment.id,
     studentId: assignment.student_id,
@@ -462,6 +479,18 @@ function homeworkAssignmentProgress(homework, assignment) {
     score: assignment.score || null,
     submittedAt: assignment.submitted_at || null,
     checkedAt: assignment.checked_at || null,
+    submissionNote: assignment.submission_note || '',
+    submissionFileName: assignment.submission_file_name || null,
+    submissionFileMime: assignment.submission_file_mime || null,
+    submissionFileSize: assignment.submission_file_size || null,
+    submissionFileUrl: assignment.submission_file_path
+      ? `/api/homework/${encodeURIComponent(homework.id)}/assignments/${encodeURIComponent(assignment.student_id)}/file`
+      : null,
+    submissionMode: requirements.mode,
+    requiresTasks: requirements.requiresTasks,
+    requiresUpload: requirements.requiresUpload,
+    tasksCompleted,
+    uploadCompleted,
     taskIds,
     statuses,
     done,
@@ -482,7 +511,8 @@ function homeworkProgressRows(homework) {
 }
 
 router.post('/homework', validateBody(homeworkSchema), (req, res) => {
-  const { lessonSessionId, moduleId, taskIds, dueDate, studentIds, description, linkUrl } = req.body || {};
+  const { lessonSessionId, moduleId, taskIds, dueDate, studentIds, description, linkUrl, submissionMode } = req.body || {};
+  const effectiveSubmissionMode = submissionMode || ((moduleId || (taskIds && taskIds.length)) ? 'platform' : 'legacy');
   if (!lessonSessionId) return res.status(400).json({ error: 'lessonSessionId обязателен' });
   const ls = db.prepare('SELECT * FROM lesson_sessions WHERE id = ?').get(lessonSessionId);
   if (!ls) return res.status(404).json({ error: 'Занятие не найдено' });
@@ -500,10 +530,27 @@ router.post('/homework', validateBody(homeworkSchema), (req, res) => {
   if (!moduleId && !(taskIds && taskIds.length) && !String(description || '').trim() && !linkUrl) {
     return res.status(400).json({ error: 'Добавьте задачи платформы, текст, ссылку или файл' });
   }
-  const insertHomework = db.prepare('INSERT INTO homework (id, lesson_session_id, module_id, task_ids, due_date, description, link_url, created_at) VALUES (?,?,?,?,?,?,?,?)');
+  if (['platform','both'].includes(effectiveSubmissionMode) && !moduleId && !(taskIds && taskIds.length)) {
+    return res.status(400).json({ error: 'Для этого формата выберите модуль или хотя бы одну задачу платформы' });
+  }
+  if (moduleId && !db.prepare('SELECT 1 FROM modules WHERE id=?').get(moduleId)) {
+    return res.status(400).json({ error: 'Выбранный модуль не найден' });
+  }
+  const selectedTaskIds = [...new Set((taskIds || []).map(Number))];
+  if (selectedTaskIds.length) {
+    const placeholders = selectedTaskIds.map(() => '?').join(',');
+    const selectedTasks = db.prepare(`SELECT id,module_id FROM tasks WHERE id IN (${placeholders})`).all(...selectedTaskIds);
+    if (selectedTasks.length !== selectedTaskIds.length) {
+      return res.status(400).json({ error: 'Одна или несколько выбранных задач не найдены' });
+    }
+    if (moduleId && selectedTasks.some(task => task.module_id !== moduleId)) {
+      return res.status(400).json({ error: 'Все задачи должны относиться к выбранному модулю' });
+    }
+  }
+  const insertHomework = db.prepare('INSERT INTO homework (id, lesson_session_id, module_id, task_ids, due_date, description, link_url, submission_mode, created_at) VALUES (?,?,?,?,?,?,?,?,?)');
   const txn = db.transaction(() => {
-    insertHomework.run(id, lessonSessionId, moduleId || null, taskIds && taskIds.length ? JSON.stringify(taskIds) : null,
-      dueDate || null, String(description || '').trim() || null, linkUrl || null, Date.now());
+    insertHomework.run(id, lessonSessionId, moduleId || null, selectedTaskIds.length ? JSON.stringify(selectedTaskIds) : null,
+      dueDate || null, String(description || '').trim() || null, linkUrl || null, effectiveSubmissionMode, Date.now());
     for (const sid of targets) insA.run(genId('ha'), id, sid);
   });
   txn();
@@ -557,6 +604,55 @@ router.get('/homework/:id/file', (req, res) => {
   res.sendFile(full);
 });
 
+const homeworkSubmissionUpload = parseMultipart({ maxFileBytes: 30 * 1024 * 1024, maxFields: 2 });
+router.post('/homework/:id/submission', requireRole('student'), homeworkSubmissionUpload, (req, res) => {
+  if (!req.upload?.size) return res.status(400).json({ error: 'Выберите файл или фотографию выполненной работы' });
+  const homework = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
+  if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
+  const requirements = homeworkRequirements(homework);
+  if (!requirements.requiresUpload) return res.status(409).json({ error: 'Для этого задания загрузка файла не требуется' });
+  const assignment = db.prepare('SELECT * FROM homework_assignments WHERE homework_id=? AND student_id=?')
+    .get(homework.id, req.user.id);
+  if (!assignment) return res.status(403).json({ error: 'Это домашнее задание вам не назначено' });
+  if (assignment.status === 'checked') return res.status(409).json({ error: 'Работа уже проверена. Попросите преподавателя вернуть её на доработку' });
+
+  const original = String(req.upload.filename || 'homework-answer').slice(0, 180);
+  const ext = original.includes('.') ? original.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) : '';
+  const allowedExt = new Set(['jpg','jpeg','png','webp','heic','heif','pdf','doc','docx','ppt','pptx','xls','xlsx','txt','zip']);
+  if (!allowedExt.has(ext)) return res.status(400).json({ error: 'Разрешены фото, PDF, документы Office, TXT и ZIP' });
+  const safeHomework = String(homework.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeStudent = String(req.user.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const rel = `homework-submissions/${safeHomework}/${safeStudent}/${genId('answer')}.${ext}`;
+  storage.importFile(req.upload.tempPath, rel);
+  db.prepare(`UPDATE homework_assignments SET submission_file_path=?,submission_file_name=?,
+    submission_file_mime=?,submission_file_size=?,submission_note=?,status='assigned',submitted_at=NULL,checked_at=NULL
+    WHERE id=?`).run(rel, original, req.upload.mime, req.upload.size,
+      String(req.body?.note || '').trim().slice(0, 1000) || null, assignment.id);
+  if (assignment.submission_file_path && assignment.submission_file_path !== rel) storage.deleteFile(assignment.submission_file_path);
+  const updated = db.prepare('SELECT * FROM homework_assignments WHERE id=?').get(assignment.id);
+  const progress = homeworkAssignmentProgress(homework, { ...updated, student_name: req.user.name });
+  res.json({ ok:true, ...progress });
+});
+
+router.get('/homework/:id/assignments/:studentId/file', (req, res) => {
+  const homework = db.prepare(`SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id
+    FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
+  if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
+  const assignment = db.prepare('SELECT * FROM homework_assignments WHERE homework_id=? AND student_id=?')
+    .get(homework.id, req.params.studentId);
+  if (!assignment?.submission_file_path) return res.status(404).json({ error: 'Файл ответа не найден' });
+  const isOwner = req.user.role === 'student' && req.user.id === req.params.studentId;
+  const isParent = req.user.role === 'parent' && !!db.prepare('SELECT 1 FROM parent_children WHERE parent_id=? AND student_id=?')
+    .get(req.user.id, req.params.studentId);
+  if (!isOwner && !isParent && !canManageSession(req.user, homework)) return res.status(403).json({ error: 'Недостаточно прав' });
+  const full = storage.resolveFile(assignment.submission_file_path);
+  if (!full) return res.status(404).json({ error: 'Файл ответа не найден' });
+  res.setHeader('Content-Type', assignment.submission_file_mime || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(assignment.submission_file_name || 'homework-answer')}`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.sendFile(full);
+});
+
 router.get('/homework', (req, res) => {
   const { group_id, student_id } = req.query;
   if (group_id) {
@@ -581,6 +677,7 @@ router.get('/homework', (req, res) => {
     if (!canAccessStudent(db, req.user, student_id)) return res.status(403).json({ error: 'Недоступно' });
     const rows = db.prepare(`
       SELECT h.*,ha.id assignment_id,ha.status assignment_status,ha.submitted_at,ha.checked_at,ha.score,
+        ha.submission_file_path,ha.submission_file_name,ha.submission_file_mime,ha.submission_file_size,ha.submission_note,
         ls.group_id,ls.date AS session_date,m.title AS module_title
       FROM homework h
       JOIN homework_assignments ha ON ha.homework_id = h.id
@@ -596,6 +693,11 @@ router.get('/homework', (req, res) => {
         submitted_at: row.submitted_at,
         checked_at: row.checked_at,
         score: row.score,
+        submission_file_path: row.submission_file_path,
+        submission_file_name: row.submission_file_name,
+        submission_file_mime: row.submission_file_mime,
+        submission_file_size: row.submission_file_size,
+        submission_note: row.submission_note,
       });
       return {
         ...rowToHw(row),
@@ -607,6 +709,11 @@ router.get('/homework', (req, res) => {
         completed: progress.completed,
         submittedAt: progress.submittedAt,
         checkedAt: progress.checkedAt,
+        submissionFileUrl: progress.submissionFileUrl,
+        submissionFileName: progress.submissionFileName,
+        submissionMode: progress.submissionMode,
+        requiresTasks: progress.requiresTasks,
+        requiresUpload: progress.requiresUpload,
       };
     }));
   }
@@ -617,6 +724,7 @@ router.get('/homework', (req, res) => {
 router.get('/homework/me', requireRole('student'), (req, res) => {
   const rows = db.prepare(`
     SELECT h.*,ha.id assignment_id,ha.status assignment_status,ha.submitted_at,ha.checked_at,ha.score,
+      ha.submission_file_path,ha.submission_file_name,ha.submission_file_mime,ha.submission_file_size,ha.submission_note,
       ls.date AS session_date, m.title AS module_title
     FROM homework h
     JOIN homework_assignments ha ON ha.homework_id = h.id
@@ -634,6 +742,11 @@ router.get('/homework/me', requireRole('student'), (req, res) => {
       submitted_at: r.submitted_at,
       checked_at: r.checked_at,
       score: r.score,
+      submission_file_path: r.submission_file_path,
+      submission_file_name: r.submission_file_name,
+      submission_file_mime: r.submission_file_mime,
+      submission_file_size: r.submission_file_size,
+      submission_note: r.submission_note,
     });
     return {
       ...hw,
@@ -647,7 +760,16 @@ router.get('/homework/me', requireRole('student'), (req, res) => {
       done: progress.done,
       percent: progress.percent,
       allDone: progress.completed,
-      canSubmit: progress.total === 0 && progress.status === 'assigned',
+      submissionMode: progress.submissionMode,
+      requiresTasks: progress.requiresTasks,
+      requiresUpload: progress.requiresUpload,
+      tasksCompleted: progress.tasksCompleted,
+      uploadCompleted: progress.uploadCompleted,
+      submissionFileUrl: progress.submissionFileUrl,
+      submissionFileName: progress.submissionFileName,
+      canUpload: progress.requiresUpload && progress.status !== 'checked',
+      canSubmit: progress.status === 'assigned' && !progress.requiresUpload &&
+        (!progress.requiresTasks || progress.tasksCompleted),
     };
   });
   res.json(out);
@@ -679,8 +801,8 @@ router.get('/homework/:id/progress', (req, res) => {
   });
 });
 
-// Для текстового, файлового или ссылочного ДЗ ученик подтверждает сдачу сам.
-// Для задач платформы сдача разрешается только после выполнения всех задач.
+// Legacy-текстовое ДЗ ученик подтверждает сам. Для новых форматов сервер
+// проверяет каждое требование: задачи платформы, загруженный ответ или оба.
 router.post('/homework/:id/submit', requireRole('student'), (req, res) => {
   const homework = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
   if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
@@ -689,8 +811,11 @@ router.post('/homework/:id/submit', requireRole('student'), (req, res) => {
   if (!assignment) return res.status(403).json({ error: 'Это домашнее задание вам не назначено' });
   if (assignment.status === 'checked') return res.status(409).json({ error: 'Домашнее задание уже проверено' });
   const progress = homeworkAssignmentProgress(homework, { ...assignment, student_name: req.user.name });
-  if (progress.total > 0 && progress.done < progress.total) {
+  if (progress.requiresTasks && !progress.tasksCompleted) {
     return res.status(409).json({ error: `Сначала выполните все задачи: готово ${progress.done} из ${progress.total}` });
+  }
+  if (progress.requiresUpload && !progress.uploadCompleted) {
+    return res.status(409).json({ error: 'Сначала прикрепите файл или фотографию выполненной работы' });
   }
   const now = Date.now();
   db.prepare("UPDATE homework_assignments SET status='submitted',submitted_at=?,checked_at=NULL WHERE id=?")
@@ -738,6 +863,9 @@ router.delete('/homework/:id', (req, res) => {
   if (!hw) return res.status(404).json({ error: 'Не найдено' });
   if (!canManageSession(req.user, hw)) return res.status(403).json({ error: 'Это не ваше занятие' });
   if (hw.file_path) storage.deleteFile(hw.file_path);
+  for (const row of db.prepare('SELECT submission_file_path FROM homework_assignments WHERE homework_id=? AND submission_file_path IS NOT NULL').all(hw.id)) {
+    storage.deleteFile(row.submission_file_path);
+  }
   db.prepare('DELETE FROM homework WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

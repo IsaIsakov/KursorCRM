@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title           TEXT NOT NULL,
   description     TEXT,
   difficulty      INTEGER DEFAULT 1,
+  position        INTEGER,
   explain         TEXT,
   options         TEXT,
   answer          TEXT,
@@ -140,7 +141,7 @@ try {
   if (needsMigration) {
     // собираем список колонок в старой таблице — копируем только их
     const oldCols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
-    const newCols = ['id','module_id','type','title','description','difficulty','explain',
+    const newCols = ['id','module_id','type','title','description','difficulty','position','explain',
                      'options','answer','items','expected_output','starter'];
     if (oldCols.includes('scratch_project_id')) newCols.push('scratch_project_id');
     if (oldCols.includes('stdin')) newCols.push('stdin');
@@ -163,6 +164,7 @@ try {
       title           TEXT NOT NULL,
       description     TEXT,
       difficulty      INTEGER DEFAULT 1,
+      position        INTEGER,
       explain         TEXT,
       options         TEXT,
       answer          TEXT,
@@ -446,6 +448,16 @@ CREATE TABLE IF NOT EXISTS homework (
   module_id         TEXT,
   task_ids          TEXT,
   due_date          TEXT,
+  kind              TEXT NOT NULL DEFAULT 'homework',
+  assignment_text   TEXT,
+  attachment_url    TEXT,
+  description       TEXT,
+  link_url          TEXT,
+  file_path         TEXT,
+  file_name         TEXT,
+  file_mime         TEXT,
+  file_size         INTEGER,
+  submission_mode   TEXT NOT NULL DEFAULT 'legacy',
   created_at        INTEGER NOT NULL,
   FOREIGN KEY (lesson_session_id) REFERENCES lesson_sessions(id) ON DELETE CASCADE
 );
@@ -455,6 +467,15 @@ CREATE TABLE IF NOT EXISTS homework_assignments (
   id          TEXT PRIMARY KEY,
   homework_id TEXT NOT NULL,
   student_id  TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'assigned',
+  submitted_at INTEGER,
+  checked_at  INTEGER,
+  score       INTEGER,
+  submission_file_path TEXT,
+  submission_file_name TEXT,
+  submission_file_mime TEXT,
+  submission_file_size INTEGER,
+  submission_note TEXT,
   FOREIGN KEY (homework_id) REFERENCES homework(id) ON DELETE CASCADE,
   FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -792,6 +813,15 @@ try {
         id          TEXT PRIMARY KEY,
         homework_id TEXT NOT NULL,
         student_id  TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'assigned',
+        submitted_at INTEGER,
+        checked_at  INTEGER,
+        score       INTEGER,
+        submission_file_path TEXT,
+        submission_file_name TEXT,
+        submission_file_mime TEXT,
+        submission_file_size INTEGER,
+        submission_note TEXT,
         FOREIGN KEY (homework_id) REFERENCES homework(id) ON DELETE CASCADE,
         FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
       )`,

@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=27">
+<link rel="stylesheet" href="/css/style.css?v=28">
 <style>
   .module-header {
     display: flex;
@@ -39,6 +39,28 @@
     flex-shrink: 0;
   }
   .lesson-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .module-cluster { margin:0 0 16px; border:1px solid #dfe7f3; border-radius:18px; background:#fff; box-shadow:0 5px 18px rgba(15,23,42,.045); overflow:hidden; }
+  .module-cluster > summary { list-style:none; margin:0; padding:18px 20px; cursor:pointer; user-select:none; }
+  .module-cluster > summary::-webkit-details-marker { display:none; }
+  .module-cluster > summary:before { content:'›'; color:#6366f1; font-size:25px; font-weight:900; transition:transform .2s; }
+  .module-cluster[open] > summary:before { transform:rotate(90deg); }
+  .module-cluster-body { padding:0 20px 22px; border-top:1px solid #eef2f7; }
+  .module-actions { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:14px 0 8px; }
+  .module-actions p { color:#64748b; margin:0; }
+  .module-summary-progress { display:flex; align-items:center; gap:9px; min-width:145px; }
+  .module-summary-progress span { color:#475569; font-size:13px; font-weight:800; }
+  .module-summary-progress i { width:90px; height:7px; border-radius:99px; background:#e2e8f0; overflow:hidden; }
+  .module-summary-progress b { display:block; height:100%; background:linear-gradient(90deg,#6366f1,#10b981); }
+  @media (max-width:640px) {
+    .module-cluster > summary { padding:14px 12px; align-items:flex-start; }
+    .module-header-left { align-items:flex-start; }
+    .module-header-left h2 { font-size:17px; }
+    .module-summary-progress { width:100%; padding-left:30px; min-width:0; }
+    .module-summary-progress i { flex:1; }
+    .module-cluster-body { padding:0 12px 16px; }
+    .module-actions { align-items:stretch; flex-direction:column; }
+    .module-actions .lesson-btn { justify-content:center; }
+  }
 </style>
 </head>
 <body>
@@ -65,16 +87,17 @@
   </div>
 
   <div id="langFilters" class="filters" style="margin-top:-12px"></div>
+  <div id="trackFilters" class="filters" style="margin-top:-12px"></div>
   <div id="tasksContainer">Загружаем…</div>
 </div>
 
-<script src="/data/database.js?v=27"></script>
-<script src="/js/i18n.js?v=27"></script>
-<script src="/js/api.js?v=27"></script>
-<script src="/js/app.js?v=27"></script>
+<script src="/data/database.js?v=28"></script>
+<script src="/js/i18n.js?v=28"></script>
+<script src="/js/api.js?v=28"></script>
+<script src="/js/app.js?v=28"></script>
 <script>
 const user = requireAuth(['student','teacher','admin']);
-let filters = { type:null, status:null, lang:'all', search:'' };
+let filters = { type:null, status:null, lang:'all', track:'all', search:'' };
 let state = { tasks: [], modules: [], progress: null };
 
 if (user) init();
@@ -122,11 +145,20 @@ async function init() {
     const lessonsMap = {};
     (lessons || []).forEach(l => { if (l.has_lesson) lessonsMap[l.id] = true; });
     state = { tasks, modules, progress, lessonsMap };
+    renderTrackFilters();
     render();
   } catch (err) {
     document.getElementById('tasksContainer').innerHTML =
       `<div class="card" style="padding:30px;text-align:center;color:#ef4444">Ошибка: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function renderTrackFilters(){
+  const tracks=[...new Set(state.modules.map(m=>m.track).filter(Boolean))];
+  const box=document.getElementById('trackFilters');
+  if(!tracks.length){box.innerHTML='';return;}
+  box.innerHTML=`<b style="align-self:center;margin-right:4px">Траектория:</b><button class="filter-chip ${filters.track==='all'?'active':''}" data-track="all">Все курсы</button>${tracks.map(t=>`<button class="filter-chip ${filters.track===t?'active':''}" data-track="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}`;
+  box.querySelectorAll('[data-track]').forEach(button=>button.onclick=()=>{filters.track=button.dataset.track;renderTrackFilters();render();});
 }
 
 const typeIcons = {
@@ -154,6 +186,7 @@ function render() {
       if (lang.group !== user.group && !(user.languages || []).includes(m.lang)) return false;
     }
     if (filters.lang !== 'all' && m.lang !== filters.lang) return false;
+    if (filters.track !== 'all' && m.track !== filters.track) return false;
     if (filters.type) {
       if (filters.type === 'interactive') {
         if (!['code','java','cpp','scratch','htmlcss','blockly'].includes(t.type)) return false;
@@ -182,10 +215,15 @@ function render() {
   }
 
   let currentTrack = null;
+  const openedTrack = new Set();
   document.getElementById('tasksContainer').innerHTML = Object.entries(byModule).map(([modId, tList]) => {
     const m = modules.find(m => m.id === modId);
     const lang = m ? KURSOR_DB.LANGS[m.lang] : null;
     const hasLesson = m && state.lessonsMap && state.lessonsMap[m.id];
+    const moduleDone=tList.filter(t=>progress?.tasks[t.id]?.status==='done').length;
+    const modulePercent=tList.length?Math.round(moduleDone*100/tList.length):0;
+    const shouldOpen=!m?.track||(!openedTrack.has(m.track)&&moduleDone<tList.length);
+    if(shouldOpen&&m?.track)openedTrack.add(m.track);
     let trackHeader = '';
     if (m?.track && m.track !== currentTrack) {
       currentTrack = m.track;
@@ -204,23 +242,22 @@ function render() {
     }
 
     return `${trackHeader}
-      <div style="margin-bottom:32px">
-        <div class="module-header">
+      <details class="module-cluster" ${shouldOpen?'open':''}>
+        <summary class="module-header">
           <div class="module-header-left">
             ${lang ? `<span class="lang-badge ${lang.class}"><img src="${lang.icon}" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"> ${lang.name}</span>` : ''}
-            <h2 style="margin:0">${m ? escapeHtml(m.title) : modId}</h2>
+            <div><h2 style="margin:0">${m ? escapeHtml(m.title) : modId}</h2><small>${moduleDone}/${tList.length} выполнено · ${modulePercent}%</small></div>
           </div>
-          ${hasLesson ? `<a href="/pages/lesson.html?id=${m.id}" class="lesson-btn">
-            <img src="https://cdn-icons-png.flaticon.com/512/3273/3273259.png" style="width:15px;height:15px;filter:invert(1)">
-            Открыть урок
-          </a>` : ''}
+          <div class="module-summary-progress"><span>${modulePercent}%</span><i><b style="width:${modulePercent}%"></b></i></div>
+        </summary>
+        <div class="module-cluster-body">
+          <div class="module-actions">${m?.description ? `<p>${escapeHtml(m.description)}</p>` : '<span></span>'}${hasLesson ? `<a href="/pages/lesson.html?id=${m.id}" class="lesson-btn"><img src="https://cdn-icons-png.flaticon.com/512/3273/3273259.png" style="width:15px;height:15px;filter:invert(1)">Открыть урок</a>` : ''}</div>
+          ${m?.track ? `<div style="font-size:13px;color:#64748b;margin-bottom:14px">${escapeHtml(m.level)} · примерно ${m.estimatedMin} минут · ${tList.filter(t=>t.type==='quiz').length} тестов · ${tList.filter(t=>t.type==='code').length} задач с кодом${m.prerequisiteId ? ' · продолжение предыдущего модуля' : ''}</div>` : ''}
+          <div class="tasks-grid">
+            ${tList.sort((a,b)=>(a.position||a.id)-(b.position||b.id)).map(t => renderTaskCard(t, progress, m, lang)).join('')}
+          </div>
         </div>
-        ${m?.description ? `<p style="color:#64748b;margin-bottom:8px;margin-top:-6px">${escapeHtml(m.description)}</p>` : ''}
-        ${m?.track ? `<div style="font-size:13px;color:#64748b;margin-bottom:14px">${escapeHtml(m.level)} · примерно ${m.estimatedMin} минут${m.prerequisiteId ? ' · продолжение предыдущего модуля' : ''}</div>` : ''}
-        <div class="tasks-grid">
-          ${tList.sort((a,b)=>(a.difficulty||1)-(b.difficulty||1)).map(t => renderTaskCard(t, progress, m, lang)).join('')}
-        </div>
-      </div>`;
+      </details>`;
   }).join('');
 }
 

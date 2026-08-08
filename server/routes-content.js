@@ -36,7 +36,7 @@ function moduleRow(r) {
 function taskRow(r) {
   const t = {
     id: r.id, module: r.module_id, type: r.type, title: r.title,
-    description: r.description || '', difficulty: r.difficulty || 1, explain: r.explain || '',
+    description: r.description || '', difficulty: r.difficulty || 1, explain: r.explain || '', position: r.position || 0,
   };
   if (r.options) t.options = JSON.parse(r.options);
   if (r.answer !== null && r.answer !== undefined) {
@@ -93,7 +93,8 @@ router.delete('/modules/:id', requireManageTasks, (req, res) => {
 });
 
 router.get('/tasks', (req, res) => {
-  const rows = db.prepare('SELECT * FROM tasks ORDER BY id').all();
+  const rows = db.prepare(`SELECT t.* FROM tasks t LEFT JOIN modules m ON m.id=t.module_id
+    ORDER BY COALESCE(m.position,999999),COALESCE(t.position,t.id),t.id`).all();
   res.json(rows.map(taskRow));
 });
 
@@ -102,10 +103,13 @@ router.post('/tasks', requireManageTasks, (req, res) => {
   if (!t.module || !t.type || !t.title) return res.status(400).json({ error: 'module, type, title обязательны' });
   const nextId = (db.prepare('SELECT COALESCE(MAX(id), 0)+1 AS n FROM tasks').get().n) || 1;
   const id = t.id || nextId;
+  const position = Number.isInteger(Number(t.position)) && Number(t.position) > 0
+    ? Number(t.position)
+    : db.prepare('SELECT COALESCE(MAX(position),0)+1 n FROM tasks WHERE module_id=?').get(t.module).n;
   db.prepare(`
     INSERT INTO tasks (id, module_id, type, title, description, difficulty, explain,
-                       options, answer, items, expected_output, starter, stdin)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       options, answer, items, expected_output, starter, stdin, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, t.module, t.type, t.title, t.description || '', t.difficulty || 1, t.explain || '',
     t.options ? JSON.stringify(t.options) : null,
@@ -113,7 +117,8 @@ router.post('/tasks', requireManageTasks, (req, res) => {
     t.items ? JSON.stringify(t.items) : null,
     t.expectedOutput || null,
     t.starter || null,
-    t.stdin || null
+    t.stdin || null,
+    position
   );
   if (t.scratchProjectId !== undefined) {
     db.prepare('UPDATE tasks SET scratch_project_id=? WHERE id=?').run(t.scratchProjectId || null, id);
@@ -128,7 +133,7 @@ router.put('/tasks/:id', requireManageTasks, (req, res) => {
   const t = req.body || {};
   db.prepare(`
     UPDATE tasks SET module_id=?, type=?, title=?, description=?, difficulty=?, explain=?,
-                     options=?, answer=?, items=?, expected_output=?, starter=?, stdin=?
+                     options=?, answer=?, items=?, expected_output=?, starter=?, stdin=?,position=?
     WHERE id=?
   `).run(
     t.module || cur.module_id,
@@ -143,6 +148,7 @@ router.put('/tasks/:id', requireManageTasks, (req, res) => {
     t.expectedOutput !== undefined ? t.expectedOutput : cur.expected_output,
     t.starter !== undefined ? t.starter : cur.starter,
     t.stdin !== undefined ? t.stdin : cur.stdin,
+    t.position !== undefined ? Math.max(1,Number(t.position)||1) : cur.position,
     id
   );
   if (t.scratchProjectId !== undefined) {

@@ -77,8 +77,8 @@ function seedContent() {
   const insertTask = db.prepare(`
     INSERT OR REPLACE INTO tasks
       (id, module_id, type, title, description, difficulty, explain,
-       options, answer, items, expected_output, starter, stdin, scratch_project_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       options, answer, items, expected_output, starter, stdin, scratch_project_id, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const txn = db.transaction(() => {
@@ -87,8 +87,10 @@ function seedContent() {
     legacyModules.forEach((m, i) => {
       insertMod.run(m.id, m.lang, m.title, m.description || '', m.video || '', m.explanation || '', i);
     });
+    const modulePositions = new Map();
     (KDB.TASKS || []).filter(t => allowedModuleIds.has(t.module)).forEach(t => {
       try {
+        const taskPosition=(modulePositions.get(t.module)||0)+1;modulePositions.set(t.module,taskPosition);
         insertTask.run(
           t.id, t.module, t.type, t.title, t.description || '',
           t.difficulty || 1, t.explain || '',
@@ -98,7 +100,8 @@ function seedContent() {
           t.expectedOutput || null,
           t.starter || null,
           t.stdin || null,
-          t.scratchProjectId || null
+          t.scratchProjectId || null,
+          taskPosition
         );
       } catch (e) {
         console.warn('[init] Пропускаю задачу id=' + t.id + ' (' + t.type + '): ' + e.message);
@@ -124,8 +127,8 @@ function seedLessons() {
       prerequisite_id=excluded.prerequisite_id`);
   const insertLesson = db.prepare(`INSERT OR REPLACE INTO lessons (module_id, intro, mini_task, updated_at) VALUES (?, ?, ?, ?)`);
   const findTask = db.prepare('SELECT id FROM tasks WHERE module_id = ? AND title = ?');
-  const insertTask = db.prepare(`INSERT INTO tasks (module_id, type, title, description, difficulty, explain, options, answer, items, expected_output, starter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const updateTask = db.prepare(`UPDATE tasks SET type=?, description=?, difficulty=?, explain=?, options=?, answer=?, items=?, expected_output=?, starter=? WHERE id=?`);
+  const insertTask = db.prepare(`INSERT INTO tasks (module_id, type, title, description, difficulty, explain, options, answer, items, expected_output, starter, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const updateTask = db.prepare(`UPDATE tasks SET type=?, description=?, difficulty=?, explain=?, options=?, answer=?, items=?, expected_output=?, starter=?, position=? WHERE id=?`);
   let lessonsLoaded = 0, tasksLoaded = 0;
   const txn = db.transaction(() => {
     const lessonData = [];
@@ -146,17 +149,17 @@ function seedLessons() {
       insertLesson.run(data.moduleId, JSON.stringify(Array.isArray(data.intro) ? data.intro : []),
         data.miniTask ? JSON.stringify(data.miniTask) : null, Date.now());
       lessonsLoaded++;
-      (data.tasks || []).forEach(t => {
+      (data.tasks || []).forEach((t, taskPosition) => {
         const existing = findTask.get(data.moduleId, t.title);
         const opts = t.options ? JSON.stringify(t.options) : null;
         const ans = (t.answer !== undefined && t.answer !== null) ? String(t.answer) : null;
         const items = t.items ? JSON.stringify(t.items) : null;
         if (existing) {
           updateTask.run(t.type, t.description || '', t.difficulty || 1, t.explain || '',
-            opts, ans, items, t.expectedOutput || null, t.starter || null, existing.id);
+            opts, ans, items, t.expectedOutput || null, t.starter || null, taskPosition + 1, existing.id);
         } else {
           insertTask.run(data.moduleId, t.type, t.title, t.description || '', t.difficulty || 1, t.explain || '',
-            opts, ans, items, t.expectedOutput || null, t.starter || null);
+            opts, ans, items, t.expectedOutput || null, t.starter || null, taskPosition + 1);
           tasksLoaded++;
         }
       });

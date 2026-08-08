@@ -135,8 +135,13 @@ document.addEventListener('click', (e) => {
 });
 
 function logout() {
+  const message = window.I18N && I18N.lang === 'kk'
+    ? 'Аккаунттан шыққыңыз келетініне сенімдісіз бе?'
+    : 'Вы уверены, что хотите выйти из аккаунта?';
+  if (!window.confirm(message)) return false;
   API.logout();
   window.location.href = '/index.html';
+  return true;
 }
 
 function showToast(msg, type='info') {
@@ -149,6 +154,15 @@ function showToast(msg, type='info') {
   document.body.appendChild(t);
   setTimeout(() => { t.style.opacity='0'; t.style.transition='all 0.3s'; }, 2500);
   setTimeout(() => t.remove(), 3000);
+}
+
+function filterTableRows(tableId, value) {
+  const query=String(value||'').trim().toLocaleLowerCase();
+  const rows=document.querySelectorAll(`#${tableId} tbody tr[data-search]`);
+  let visible=0;
+  rows.forEach(row=>{const show=!query||String(row.dataset.search||'').includes(query);row.hidden=!show;if(show)visible++;});
+  const counter=document.querySelector(`[data-filter-count="${tableId}"]`);
+  if(counter)counter.textContent=query?`Найдено: ${visible}`:`Всего: ${rows.length}`;
 }
 
 function fireConfetti() {

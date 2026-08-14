@@ -570,6 +570,20 @@ const MIGRATIONS = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_module_position ON tasks(module_id,position,id)');
     },
   },
+  {
+    version: 21,
+    name: 'protect_user_avatars',
+    up(db) {
+      const update = db.prepare('UPDATE users SET avatar_url=? WHERE id=?');
+      for (const row of db.prepare('SELECT id,avatar_url FROM users WHERE avatar_url IS NOT NULL').all()) {
+        const current = String(row.avatar_url || '');
+        const filename = current.includes('?v=')
+          ? decodeURIComponent(current.split('?v=').pop())
+          : current.replace(/\\/g, '/').split('/').pop();
+        if (filename) update.run(`/api/users/${encodeURIComponent(row.id)}/avatar-file?v=${encodeURIComponent(filename)}`, row.id);
+      }
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

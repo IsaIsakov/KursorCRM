@@ -570,25 +570,28 @@ router.post('/homework', validateBody(homeworkSchema), (req, res) => {
 });
 
 const homeworkUpload = parseMultipart({ maxFileBytes: 30 * 1024 * 1024, maxFields: 2 });
-router.post('/homework/:id/file', homeworkUpload, (req, res) => {
+router.post('/homework/:id/file', homeworkUpload, async (req, res, next) => {
   if (!req.upload?.size) return res.status(400).json({ error: 'Выберите файл' });
   const hw = db.prepare(`SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
   if (!hw) return res.status(404).json({ error: 'Домашнее задание не найдено' });
   if (!canManageSession(req.user,hw)) return res.status(403).json({ error: 'Это не ваше занятие' });
-  if (hw.file_path) storage.deleteFile(hw.file_path);
+  const previousPath = hw.file_path;
   const safeId = String(hw.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const original = String(req.upload.filename || 'homework-file').slice(0, 180);
   const ext = original.includes('.') ? original.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) : 'bin';
   const rel = `homework/${safeId}/${genId('file')}.${ext || 'bin'}`;
-  storage.importFile(req.upload.tempPath, rel);
+  let storedPath;
+  try { storedPath = await storage.importFile(req.upload.tempPath, rel, { size: req.upload.size, contentType: req.upload.mime }); }
+  catch (error) { return next(error); }
   db.prepare('UPDATE homework SET file_path=?,file_name=?,file_mime=?,file_size=? WHERE id=?')
-    .run(rel, original, req.upload.mime, req.upload.size, hw.id);
+    .run(storedPath, original, req.upload.mime, req.upload.size, hw.id);
+  if (previousPath && previousPath !== storedPath) storage.deleteFile(previousPath).catch(error => console.error('[storage] old homework cleanup:', error.message));
   const updated = db.prepare(`SELECT h.*,ls.group_id,ls.date session_date,m.title module_title
     FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id LEFT JOIN modules m ON m.id=h.module_id WHERE h.id=?`).get(hw.id);
   res.json(rowToHw(updated));
 });
 
-router.get('/homework/:id/file', (req, res) => {
+router.get('/homework/:id/file', async (req, res, next) => {
   const hw = db.prepare(`SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
   if (!hw?.file_path) return res.status(404).json({ error: 'Файл не найден' });
   const assigned = req.user.role === 'student' && db.prepare('SELECT 1 FROM homework_assignments WHERE homework_id=? AND student_id=?').get(hw.id, req.user.id);
@@ -596,16 +599,14 @@ router.get('/homework/:id/file', (req, res) => {
     (req.user.role === 'parent' && !!db.prepare(`SELECT 1 FROM homework_assignments ha JOIN parent_children pc ON pc.student_id=ha.student_id
       WHERE ha.homework_id=? AND pc.parent_id=?`).get(hw.id, req.user.id));
   if (!allowed) return res.status(403).json({ error: 'Недостаточно прав' });
-  const full = storage.resolveFile(hw.file_path);
-  if (!full) return res.status(404).json({ error: 'Файл не найден' });
-  res.setHeader('Content-Type', hw.file_mime || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(hw.file_name || 'homework-file')}`);
-  res.setHeader('Cache-Control', 'private, no-store');
-  res.sendFile(full);
+  try {
+    const sent = await storage.sendStoredFile(res, hw.file_path, { contentType: hw.file_mime, fileName: hw.file_name || 'homework-file' });
+    if (!sent) return res.status(404).json({ error: 'Файл не найден' });
+  } catch (error) { next(error); }
 });
 
 const homeworkSubmissionUpload = parseMultipart({ maxFileBytes: 30 * 1024 * 1024, maxFields: 2 });
-router.post('/homework/:id/submission', requireRole('student'), homeworkSubmissionUpload, (req, res) => {
+router.post('/homework/:id/submission', requireRole('student'), homeworkSubmissionUpload, async (req, res, next) => {
   if (!req.upload?.size) return res.status(400).json({ error: 'Выберите файл или фотографию выполненной работы' });
   const homework = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
   if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
@@ -623,18 +624,22 @@ router.post('/homework/:id/submission', requireRole('student'), homeworkSubmissi
   const safeHomework = String(homework.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const safeStudent = String(req.user.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const rel = `homework-submissions/${safeHomework}/${safeStudent}/${genId('answer')}.${ext}`;
-  storage.importFile(req.upload.tempPath, rel);
+  let storedPath;
+  try { storedPath = await storage.importFile(req.upload.tempPath, rel, { size: req.upload.size, contentType: req.upload.mime }); }
+  catch (error) { return next(error); }
   db.prepare(`UPDATE homework_assignments SET submission_file_path=?,submission_file_name=?,
     submission_file_mime=?,submission_file_size=?,submission_note=?,status='assigned',submitted_at=NULL,checked_at=NULL
-    WHERE id=?`).run(rel, original, req.upload.mime, req.upload.size,
+    WHERE id=?`).run(storedPath, original, req.upload.mime, req.upload.size,
       String(req.body?.note || '').trim().slice(0, 1000) || null, assignment.id);
-  if (assignment.submission_file_path && assignment.submission_file_path !== rel) storage.deleteFile(assignment.submission_file_path);
+  if (assignment.submission_file_path && assignment.submission_file_path !== storedPath) {
+    storage.deleteFile(assignment.submission_file_path).catch(error => console.error('[storage] old submission cleanup:', error.message));
+  }
   const updated = db.prepare('SELECT * FROM homework_assignments WHERE id=?').get(assignment.id);
   const progress = homeworkAssignmentProgress(homework, { ...updated, student_name: req.user.name });
   res.json({ ok:true, ...progress });
 });
 
-router.get('/homework/:id/assignments/:studentId/file', (req, res) => {
+router.get('/homework/:id/assignments/:studentId/file', async (req, res, next) => {
   const homework = db.prepare(`SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id
     FROM homework h JOIN lesson_sessions ls ON ls.id=h.lesson_session_id WHERE h.id=?`).get(req.params.id);
   if (!homework) return res.status(404).json({ error: 'Домашнее задание не найдено' });
@@ -645,12 +650,12 @@ router.get('/homework/:id/assignments/:studentId/file', (req, res) => {
   const isParent = req.user.role === 'parent' && !!db.prepare('SELECT 1 FROM parent_children WHERE parent_id=? AND student_id=?')
     .get(req.user.id, req.params.studentId);
   if (!isOwner && !isParent && !canManageSession(req.user, homework)) return res.status(403).json({ error: 'Недостаточно прав' });
-  const full = storage.resolveFile(assignment.submission_file_path);
-  if (!full) return res.status(404).json({ error: 'Файл ответа не найден' });
-  res.setHeader('Content-Type', assignment.submission_file_mime || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(assignment.submission_file_name || 'homework-answer')}`);
-  res.setHeader('Cache-Control', 'private, no-store');
-  res.sendFile(full);
+  try {
+    const sent = await storage.sendStoredFile(res, assignment.submission_file_path, {
+      contentType: assignment.submission_file_mime, fileName: assignment.submission_file_name || 'homework-answer',
+    });
+    if (!sent) return res.status(404).json({ error: 'Файл ответа не найден' });
+  } catch (error) { next(error); }
 });
 
 router.get('/homework', (req, res) => {
@@ -858,15 +863,15 @@ router.put('/homework/:id/assignments/:studentId', validateBody(homeworkReviewSc
   res.json({ ok: true, status, score: finalScore, submittedAt, checkedAt });
 });
 
-router.delete('/homework/:id', (req, res) => {
+router.delete('/homework/:id', async (req, res, next) => {
   const hw = db.prepare('SELECT h.*,ls.group_id,ls.scheduled_teacher_id,ls.scheduled_assistant_id FROM homework h JOIN lesson_sessions ls ON ls.id = h.lesson_session_id WHERE h.id = ?').get(req.params.id);
   if (!hw) return res.status(404).json({ error: 'Не найдено' });
   if (!canManageSession(req.user, hw)) return res.status(403).json({ error: 'Это не ваше занятие' });
-  if (hw.file_path) storage.deleteFile(hw.file_path);
-  for (const row of db.prepare('SELECT submission_file_path FROM homework_assignments WHERE homework_id=? AND submission_file_path IS NOT NULL').all(hw.id)) {
-    storage.deleteFile(row.submission_file_path);
-  }
+  const storedPaths = [hw.file_path, ...db.prepare('SELECT submission_file_path FROM homework_assignments WHERE homework_id=? AND submission_file_path IS NOT NULL')
+    .all(hw.id).map(row => row.submission_file_path)].filter(Boolean);
   db.prepare('DELETE FROM homework WHERE id = ?').run(req.params.id);
+  try { await Promise.all(storedPaths.map(filePath => storage.deleteFile(filePath))); }
+  catch (error) { return next(error); }
   res.json({ ok: true });
 });
 

@@ -7,7 +7,6 @@ require('./security-config').assertSecurityConfig();
 const persistence = require('./persistence-config').assertPersistenceConfig();
 
 const path = require('path');
-const fs = require('fs');
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
@@ -59,14 +58,14 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/api/ready', (_req, res) => {
+app.get('/api/ready', async (_req, res) => {
   try {
     db.prepare('SELECT 1').get();
     const version = db.pragma('user_version', { simple: true });
     const latest = require('./migrations').MIGRATIONS.at(-1).version;
     if (version !== latest) throw new Error(`schema ${version}/${latest}`);
-    fs.accessSync(require('./storage').PRIVATE_ROOT, fs.constants.R_OK | fs.constants.W_OK);
-    res.json({ status: 'ready', schemaVersion: version, persistentDataRoot: persistence.root });
+    const fileStorage = await require('./storage').checkReady();
+    res.json({ status: 'ready', schemaVersion: version, persistentDataRoot: persistence.root, fileStorage: fileStorage.mode });
   } catch (error) {
     logger.error('readiness_failed', { message: error.message });
     res.status(503).json({ status: 'not_ready' });
@@ -105,11 +104,8 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Маршрут н�
 
 // Статика
 const publicDir = path.join(__dirname, '..', 'public');
-// Public profile photos are non-sensitive, but their files live on the
-// persistent Volume in production rather than in the disposable image layer.
-app.use('/uploads/avatars', express.static(require('./avatar-storage').AVATARS_DIR, {
-  etag: true, maxAge: '1d', immutable: true,
-}));
+// Детские фотографии выдаются только через авторизованный /api/users/:id/avatar-file.
+app.use('/uploads/avatars', (_req, res) => res.status(404).end());
 // Старые версии хранили детские материалы здесь. Запрещаем прямую раздачу
 // немедленно; storage.js перенесёт их в закрытый каталог по подписанной ссылке.
 app.use('/uploads/sessions', (_req, res) => res.status(404).end());

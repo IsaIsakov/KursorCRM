@@ -28,6 +28,15 @@ test('limits total login traffic from one source', () => {
   assert.equal(blocked.reason, 'ip_rate');
 });
 
+test('allows a full class to sign in behind one school NAT', () => {
+  const now = 1_700_000_000_000;
+  assert.ok(guard.constants.IP_LIMIT >= 200);
+  for (let i = 0; i < 200; i++) {
+    const result = guard.consume('203.0.113.20', `student-${i}`, now + i);
+    assert.equal(result.allowed, true, `student ${i + 1} should not be blocked`);
+  }
+});
+
 test('locks expire and raw identifiers are not returned', () => {
   const now = 1_700_000_000_000;
   let result;

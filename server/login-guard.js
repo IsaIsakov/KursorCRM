@@ -1,7 +1,14 @@
 const crypto = require('crypto');
 
 const WINDOW_MS = 10 * 60 * 1000;
-const IP_LIMIT = 30;
+// Many students sign in through the same school Wi-Fi and therefore share one
+// public IP. A low global limit locks out an entire class even when every
+// password is correct. Pair-level protection below remains strict (5 failed
+// attempts), while the NAT-wide safety valve only stops abnormal floods.
+const configuredIpLimit = Number(process.env.AUTH_IP_REQUEST_LIMIT);
+const IP_LIMIT = Number.isInteger(configuredIpLimit)
+  ? Math.min(10_000, Math.max(200, configuredIpLimit))
+  : 500;
 const FAILURE_LIMIT = 5;
 const LOCK_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 10_000;

@@ -10,6 +10,7 @@ const { readClientFile, makeTemplate } = require('./client-import');
 const router = express.Router();
 router.use(authRequired);
 const adminOnly = requireRole('admin');
+let clientImportRunning = false;
 
 function rowsFrom(body) {
   if (Array.isArray(body?.data)) return body.data;
@@ -22,6 +23,8 @@ function rowsFrom(body) {
 
 const clientFile = parseMultipart({ maxFileBytes: 8 * 1024 * 1024, maxFields: 2 });
 router.post('/import/clients', adminOnly, clientFile, async (req, res, next) => {
+  if (clientImportRunning) return res.status(409).json({ error: 'Другой импорт клиентов уже выполняется. Дождитесь его завершения.' });
+  clientImportRunning = true;
   try {
     const rows = req.upload ? await readClientFile(req.upload) : rowsFrom(req.body || {});
     if (!rows) return res.status(400).json({ error: 'Не удалось разобрать JSON/CSV/XLSX' });
@@ -29,6 +32,7 @@ router.post('/import/clients', adminOnly, clientFile, async (req, res, next) => 
     if (rows.length > 500) return res.status(413).json({ error: 'За один импорт разрешено не более 500 клиентов' });
     res.json(onboardClients(rows, { dryRun: req.query.dryRun === 'true', actorId: req.user.id }));
   } catch (error) { next(error); }
+  finally { clientImportRunning = false; }
 });
 
 router.get('/import/clients/template', adminOnly, async (_req, res, next) => {

@@ -85,6 +85,24 @@ function canEditAvatar(user, target) {
   return false;
 }
 
+function canViewAvatar(user, target) {
+  if (!target || !user) return false;
+  if (target.role !== 'student' || user.id === target.id || user.role === 'admin') return true;
+  if (canEditAvatar(user, target)) return true;
+  if (user.role === 'parent') return !!db.prepare('SELECT 1 FROM parent_children WHERE parent_id=? AND student_id=?').get(user.id, target.id);
+  if (user.role === 'student') return !!db.prepare(`SELECT 1 FROM group_members mine JOIN group_members theirs ON theirs.group_id=mine.group_id
+    WHERE mine.student_id=? AND theirs.student_id=? AND (mine.until IS NULL OR mine.until>=?) AND (theirs.until IS NULL OR theirs.until>=?) LIMIT 1`)
+    .get(user.id, target.id, Date.now(), Date.now());
+  return false;
+}
+
+function avatarFilename(url) {
+  const value = String(url || '');
+  const queryValue = /[?&]v=([^&]+)/.exec(value)?.[1];
+  const filename = queryValue ? decodeURIComponent(queryValue) : path.basename(value);
+  return /^[a-zA-Z0-9_-]+__\w+\.(png|jpg)$/.test(filename) ? filename : null;
+}
+
 router.get('/', (req, res) => {
   if (req.user.role === 'admin') {
     return res.json(db.prepare('SELECT * FROM users ORDER BY role, name').all().map(rowToUser));
@@ -199,7 +217,8 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
   try {
     const u = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(req.params.id);
     if (u && u.avatar_url) {
-      const f = path.join(AVATARS_DIR, path.basename(u.avatar_url));
+      const filename = avatarFilename(u.avatar_url);
+      const f = filename ? path.join(AVATARS_DIR, filename) : '';
       if (f.startsWith(AVATARS_DIR) && fs.existsSync(f)) fs.unlinkSync(f);
     }
   } catch {}
@@ -246,7 +265,7 @@ router.post('/:id/avatar', validateBody(avatarSchema), (req, res) => {
   } catch {}
   const filename = `${safeId}__${Date.now().toString(36)}.${ext}`;
   fs.writeFileSync(path.join(AVATARS_DIR, filename), buf);
-  const avatarUrl = `/uploads/avatars/${filename}`;
+  const avatarUrl = `/api/users/${encodeURIComponent(req.params.id)}/avatar-file?v=${encodeURIComponent(filename)}`;
   db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarUrl, req.params.id);
   res.json({ ok: true, avatar_url: avatarUrl, user: rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)) });
 });
@@ -257,11 +276,26 @@ router.delete('/:id/avatar', (req, res) => {
   if (!canEditAvatar(req.user, target)) return res.status(403).json({ error: 'Нет права удалить фото этого ученика' });
   const cur = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(req.params.id);
   if (cur && cur.avatar_url) {
-    const f = path.join(AVATARS_DIR, path.basename(cur.avatar_url));
+    const filename = avatarFilename(cur.avatar_url);
+    const f = filename ? path.join(AVATARS_DIR, filename) : '';
     if (f.startsWith(AVATARS_DIR) && fs.existsSync(f)) { try { fs.unlinkSync(f); } catch {} }
   }
   db.prepare('UPDATE users SET avatar_url = NULL WHERE id = ?').run(req.params.id);
   res.json({ ok: true, user: rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)) });
+});
+
+router.get('/:id/avatar-file', (req, res) => {
+  const target = db.prepare('SELECT id,role,avatar_url FROM users WHERE id=?').get(req.params.id);
+  if (!target?.avatar_url) return res.status(404).json({ error: 'Фото не найдено' });
+  if (!canViewAvatar(req.user, target)) return res.status(403).json({ error: 'Нет доступа к фото' });
+  const filename = avatarFilename(target.avatar_url);
+  if (!filename) return res.status(404).json({ error: 'Фото не найдено' });
+  const full = path.join(AVATARS_DIR, filename);
+  if (!full.startsWith(AVATARS_DIR + path.sep) || !fs.existsSync(full)) return res.status(404).json({ error: 'Фото не найдено' });
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.type(path.extname(filename));
+  res.sendFile(full);
 });
 
 

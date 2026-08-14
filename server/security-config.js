@@ -25,6 +25,8 @@ function inspectSecurityConfig(env = process.env) {
   const settings = String(env.SETTINGS_ENCRYPTION_KEY || '');
   const recovery = String(env.ADMIN_RECOVERY_CODE || '');
   const origins = String(env.APP_ORIGIN || '').split(',').map(v => v.trim()).filter(Boolean);
+  const bucketVariables = ['BUCKET', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY', 'REGION', 'ENDPOINT'];
+  const configuredBucketVariables = bucketVariables.filter(name => String(env[name] || '').trim());
 
   if (!isStrongSecret(jwt)) (production ? errors : warnings).push(
     `JWT_SECRET должен содержать не менее ${MIN_SECRET_LENGTH} символов и не быть шаблонным`,
@@ -49,6 +51,9 @@ function inspectSecurityConfig(env = process.env) {
   );
   if (production && (!origins.length || origins.some(origin => origin === '*' || !/^https:\/\//i.test(origin)))) {
     errors.push('APP_ORIGIN должен содержать один или несколько production HTTPS origin через запятую');
+  }
+  if (configuredBucketVariables.length && configuredBucketVariables.length !== bucketVariables.length) {
+    errors.push(`Railway Bucket настроен частично: одновременно нужны ${bucketVariables.join(', ')}`);
   }
   return { production, errors, warnings };
 }

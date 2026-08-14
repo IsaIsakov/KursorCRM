@@ -11,13 +11,13 @@ const { genId } = require('./util');
 let timer = null;
 let lessonTimer = null;
 
-function cleanupExpiredVideos() {
+async function cleanupExpiredVideos() {
   try {
     const expired = db.prepare(
       "SELECT * FROM session_artifacts WHERE type='video' AND deleted=0 AND expires_at IS NOT NULL AND expires_at < ?"
     ).all(Date.now());
     for (const row of expired) {
-      if (row.file_path) storage.deleteFile(row.file_path);
+      if (row.file_path) await storage.deleteFile(row.file_path);
       db.prepare("UPDATE session_artifacts SET deleted=1 WHERE id=?").run(row.id);
     }
     if (expired.length) console.log(`[cleanup] Удалено просроченных видео: ${expired.length}`);
@@ -88,15 +88,15 @@ function generateUnmarkedLessonNotifications() {
   } catch(e){ console.error('[cleanup] Ошибка контроля непроведённых занятий:',e.message); }
 }
 
-function runAll() {
-  cleanupExpiredVideos();
+async function runAll() {
+  await cleanupExpiredVideos();
   generateNotifications();
 }
 
 function start() {
   if (timer) return;
-  runAll(); // при старте
-  timer = setInterval(runAll, 24 * 60 * 60 * 1000); // раз в сутки
+  runAll().catch(error => console.error('[cleanup] Ошибка обслуживания:', error.message)); // при старте
+  timer = setInterval(() => runAll().catch(error => console.error('[cleanup] Ошибка обслуживания:', error.message)), 24 * 60 * 60 * 1000); // раз в сутки
   timer.unref();
   generateUnmarkedLessonNotifications();
   lessonTimer=setInterval(generateUnmarkedLessonNotifications,5*60*1000);

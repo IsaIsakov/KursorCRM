@@ -27,12 +27,12 @@ const MAT_EXT = {
 const multipartMaterial = parseMultipart({ maxFileBytes: MAT_MAX_BYTES, maxFields: 10 });
 
 function materialContent(r) {
-  return r.content && r.content.startsWith('materials/') ? `/api/materials/${encodeURIComponent(r.id)}/content` : (r.content || '');
+  return r.content && storage.isManagedPath(r.content, 'materials/') ? `/api/materials/${encodeURIComponent(r.id)}/content` : (r.content || '');
 }
 
 // Legacy path for small old clients. The current frontend uses multipart and
 // never creates a base64 copy of a file in browser/server memory.
-function saveMaterialFile(dataUrl, matId, fileName) {
+async function saveMaterialFile(dataUrl, matId, fileName) {
   const m = /^data:([\w.+/-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');
   if (!m) throw { code: 400, msg: 'Ожидается dataUrl с base64-содержимым файла' };
   let buf;
@@ -45,7 +45,7 @@ function saveMaterialFile(dataUrl, matId, fileName) {
   if (!ext && fileName && /\.([a-z0-9]{1,8})$/i.test(fileName)) ext = fileName.split('.').pop().toLowerCase();
   ext = (ext || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin';
   const rel = `materials/${matId}.${ext}`;
-  return storage.saveFile(buf, rel);
+  return storage.saveFile(buf, rel, { contentType: mime });
 }
 
 const router = express.Router();
@@ -106,19 +106,17 @@ router.get('/materials', (req, res) => {
   res.json(rows.map(rowToMaterial));
 });
 
-router.get('/materials/:id/content', (req, res) => {
+router.get('/materials/:id/content', async (req, res, next) => {
   const row = db.prepare('SELECT * FROM materials WHERE id=?').get(req.params.id);
-  if (!row || !row.content || !row.content.startsWith('materials/')) return res.status(404).json({ error: 'Файл не найден' });
+  if (!row || !row.content || !storage.isManagedPath(row.content, 'materials/')) return res.status(404).json({ error: 'Файл не найден' });
   if (req.user.role !== 'admin' && !teacherHasActiveAccess(req.user.id, row.course_id)) return res.status(403).json({ error: 'Нет доступа к материалу' });
-  let full;
-  try { full = storage.resolveFile(row.content); } catch { return res.status(400).json({ error: 'Некорректный путь' }); }
-  if (!full) return res.status(404).json({ error: 'Файл не найден' });
-  res.setHeader('Cache-Control', 'private, max-age=300');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.download(full, path.basename(full));
+  try {
+    const sent = await storage.sendStoredFile(res, row.content, { fileName: path.basename(storage.managedRelativePath(row.content)), cacheControl: 'private, max-age=300' });
+    if (!sent) return res.status(404).json({ error: 'Файл не найден' });
+  } catch (error) { next(error); }
 });
 
-router.post('/materials', multipartMaterial, (req, res) => {
+router.post('/materials', multipartMaterial, async (req, res, next) => {
   const { courseId, type, title, content, dataUrl, fileName } = req.body || {};
   if (!['admin', 'teacher', 'assistant'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Недостаточно прав' });
@@ -141,9 +139,10 @@ router.post('/materials', multipartMaterial, (req, res) => {
     const ext = MAT_EXT[req.upload.mime];
     if (!ext) return res.status(400).json({ error: 'Тип файла не разрешён' });
     const rel = `materials/${id}.${ext}`;
-    storage.importFile(req.upload.tempPath, rel); finalContent = rel;
+    try { finalContent = await storage.importFile(req.upload.tempPath, rel, { size: req.upload.size, contentType: req.upload.mime }); }
+    catch (error) { return next(error); }
   } else if (dataUrl) {
-    try { finalContent = saveMaterialFile(dataUrl, id, fileName); }
+    try { finalContent = await saveMaterialFile(dataUrl, id, fileName); }
     catch (e) { return res.status(e.code || 400).json({ error: e.msg || 'Ошибка загрузки файла' }); }
   }
   db.prepare(`
@@ -153,7 +152,7 @@ router.post('/materials', multipartMaterial, (req, res) => {
   res.status(201).json(rowToMaterial(db.prepare('SELECT * FROM materials WHERE id = ?').get(id)));
 });
 
-router.put('/materials/:id', multipartMaterial, (req, res) => {
+router.put('/materials/:id', multipartMaterial, async (req, res, next) => {
   const cur = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найден' });
   if (req.user.role !== 'admin') {
@@ -166,11 +165,13 @@ router.put('/materials/:id', multipartMaterial, (req, res) => {
   if (req.upload) {
     const ext = MAT_EXT[req.upload.mime];
     if (!ext) return res.status(400).json({ error: 'Тип файла не разрешён' });
-    if (cur.content && cur.content.startsWith('materials/')) storage.deleteFile(cur.content);
+    const previousContent = storage.isManagedPath(cur.content, 'materials/') ? cur.content : null;
     const rel = `materials/${req.params.id}.${ext}`;
-    storage.importFile(req.upload.tempPath, rel); finalContent = rel;
+    try { finalContent = await storage.importFile(req.upload.tempPath, rel, { size: req.upload.size, contentType: req.upload.mime }); }
+    catch (error) { return next(error); }
+    if (previousContent && previousContent !== finalContent) storage.deleteFile(previousContent).catch(error => console.error('[storage] old material cleanup:', error.message));
   } else if (dataUrl) {
-    try { finalContent = saveMaterialFile(dataUrl, req.params.id, fileName); }
+    try { finalContent = await saveMaterialFile(dataUrl, req.params.id, fileName); }
     catch (e) { return res.status(e.code || 400).json({ error: e.msg || 'Ошибка загрузки файла' }); }
   }
   db.prepare(`UPDATE materials SET type=?, title=?, content=? WHERE id=?`).run(
@@ -182,14 +183,16 @@ router.put('/materials/:id', multipartMaterial, (req, res) => {
   res.json(rowToMaterial(db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id)));
 });
 
-router.delete('/materials/:id', (req, res) => {
+router.delete('/materials/:id', async (req, res, next) => {
   const cur = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Не найден' });
   if (req.user.role !== 'admin') {
     if (!hasPermission(req.user, 'edit_materials')) return res.status(403).json({ error: 'Нет права редактировать материалы' });
     if (!teacherHasActiveAccess(req.user.id, cur.course_id)) return res.status(403).json({ error: 'Нет активного доступа к этому курсу' });
   }
-  if (cur.content && cur.content.startsWith('materials/')) storage.deleteFile(cur.content);
+  if (storage.isManagedPath(cur.content, 'materials/')) {
+    try { await storage.deleteFile(cur.content); } catch (error) { return next(error); }
+  }
   db.prepare('DELETE FROM materials WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

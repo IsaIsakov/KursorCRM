@@ -2,6 +2,57 @@ const fs = require('fs');
 const ExcelJS = require('exceljs');
 const { parseCsv } = require('./util');
 
+const MAX_IMPORT_ROWS = 500;
+const MAX_XLSX_ENTRIES = 200;
+const MAX_XLSX_UNCOMPRESSED = 32 * 1024 * 1024;
+
+// Validate the ZIP central directory before ExcelJS inflates anything. This
+// rejects ZIP bombs, ZIP64 tricks, encrypted entries and workbook archives
+// whose expanded size is unreasonable for a 500-client import.
+function inspectXlsxArchive(filePath) {
+  const archive = fs.readFileSync(filePath);
+  let eocd = -1;
+  for (let i = archive.length - 22; i >= Math.max(0, archive.length - 65_557); i -= 1) {
+    if (archive.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw Object.assign(new Error('Повреждённый XLSX: не найден каталог ZIP'), { status: 400 });
+  const entries = archive.readUInt16LE(eocd + 10);
+  const directorySize = archive.readUInt32LE(eocd + 12);
+  const directoryOffset = archive.readUInt32LE(eocd + 16);
+  if (entries === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) {
+    throw Object.assign(new Error('ZIP64 не поддерживается для импорта клиентов'), { status: 400 });
+  }
+  if (!entries || entries > MAX_XLSX_ENTRIES || directoryOffset + directorySize > archive.length) {
+    throw Object.assign(new Error(`XLSX содержит слишком много частей (максимум ${MAX_XLSX_ENTRIES})`), { status: 413 });
+  }
+  let cursor = directoryOffset; let expanded = 0; let sheets = 0;
+  for (let index = 0; index < entries; index += 1) {
+    if (cursor + 46 > archive.length || archive.readUInt32LE(cursor) !== 0x02014b50) {
+      throw Object.assign(new Error('Повреждённый каталог XLSX'), { status: 400 });
+    }
+    const flags = archive.readUInt16LE(cursor + 8);
+    const compressed = archive.readUInt32LE(cursor + 20);
+    const uncompressed = archive.readUInt32LE(cursor + 24);
+    const nameLength = archive.readUInt16LE(cursor + 28);
+    const extraLength = archive.readUInt16LE(cursor + 30);
+    const commentLength = archive.readUInt16LE(cursor + 32);
+    if ((flags & 1) || compressed === 0xffffffff || uncompressed === 0xffffffff) {
+      throw Object.assign(new Error('Зашифрованные и ZIP64 XLSX не поддерживаются'), { status: 400 });
+    }
+    const next = cursor + 46 + nameLength + extraLength + commentLength;
+    if (next > archive.length) throw Object.assign(new Error('Повреждённый XLSX'), { status: 400 });
+    const name = archive.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8');
+    if (/^xl\/worksheets\/sheet\d+\.xml$/i.test(name)) sheets += 1;
+    expanded += uncompressed;
+    if (expanded > MAX_XLSX_UNCOMPRESSED) {
+      throw Object.assign(new Error('Распакованный XLSX превышает безопасный лимит 32 МБ'), { status: 413 });
+    }
+    cursor = next;
+  }
+  if (!sheets || sheets > 5) throw Object.assign(new Error('В XLSX должно быть от 1 до 5 листов'), { status: 400 });
+  return { entries, expanded, sheets };
+}
+
 const ALIASES = {
   first_name: ['имя','first name','firstname','first_name'],
   last_name: ['фамилия','surname','last name','lastname','last_name'],
@@ -44,12 +95,17 @@ async function readClientFile(file) {
     return normalizeRows([Object.keys(parsed[0] || {}), ...parsed.map(Object.values)]);
   }
   if (!['xlsx', 'xlsm'].includes(ext)) throw Object.assign(new Error('Поддерживаются файлы .xlsx, .xlsm и .csv'), { status: 400 });
+  inspectXlsxArchive(file.tempPath);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(file.tempPath);
   const sheet = workbook.worksheets[0];
   if (!sheet) return [];
-  const matrix = [];
-  sheet.eachRow({ includeEmpty: false }, row => matrix.push(row.values.slice(1).map(value => value?.text ?? value?.result ?? value)));
+  const matrix = []; let overflow = false;
+  sheet.eachRow({ includeEmpty: false }, row => {
+    if (matrix.length >= MAX_IMPORT_ROWS + 1) { overflow = true; return; }
+    matrix.push(row.values.slice(1).map(value => value?.text ?? value?.result ?? value));
+  });
+  if (overflow) throw Object.assign(new Error(`За один импорт разрешено не более ${MAX_IMPORT_ROWS} клиентов`), { status: 413 });
   return normalizeRows(matrix);
 }
 
@@ -74,4 +130,4 @@ async function makeTemplate() {
   return workbook.xlsx.writeBuffer();
 }
 
-module.exports = { normalizeRows, readClientFile, makeTemplate };
+module.exports = { normalizeRows, readClientFile, makeTemplate, inspectXlsxArchive, MAX_IMPORT_ROWS };

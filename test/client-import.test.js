@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const ExcelJS = require('exceljs');
-const { normalizeRows, makeTemplate } = require('../server/client-import');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { normalizeRows, makeTemplate, inspectXlsxArchive } = require('../server/client-import');
 
 test('client spreadsheet reader understands Russian columns and builds full name', () => {
   const rows = normalizeRows([
@@ -21,4 +24,21 @@ test('generated client template is a valid xlsx workbook', async () => {
   await workbook.xlsx.load(buffer);
   assert.equal(workbook.worksheets[0].getCell('A1').value, 'Имя');
   assert.equal(workbook.worksheets[0].getCell('K1').value, 'Комментарий');
+});
+
+test('xlsx archive is bounded before ExcelJS expands it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kursor-xlsx-'));
+  const good = path.join(dir, 'good.xlsx');
+  const bomb = path.join(dir, 'bomb.xlsx');
+  const buffer = Buffer.from(await makeTemplate());
+  fs.writeFileSync(good, buffer);
+  const inspected = inspectXlsxArchive(good);
+  assert.equal(inspected.sheets, 2);
+  let eocd = -1;
+  for (let i = buffer.length - 22; i >= 0; i -= 1) if (buffer.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  const centralOffset = buffer.readUInt32LE(eocd + 16);
+  buffer.writeUInt32LE(40 * 1024 * 1024, centralOffset + 24);
+  fs.writeFileSync(bomb, buffer);
+  assert.throws(() => inspectXlsxArchive(bomb), /безопасный лимит 32 МБ/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

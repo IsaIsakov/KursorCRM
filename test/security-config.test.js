@@ -44,3 +44,10 @@ test('temporary and replacement passwords require at least 10 characters', () =>
   assert.equal(isAcceptablePassword('1234567890'), true);
   assert.equal(isAcceptablePassword(null), false);
 });
+
+test('partial Railway Bucket configuration is rejected', () => {
+  const result = inspectSecurityConfig({ NODE_ENV: 'production', JWT_SECRET: strong,
+    ARTIFACT_URL_SECRET: other, SETTINGS_ENCRYPTION_KEY: settings, ...origin,
+    BUCKET: 'kursor-files', ENDPOINT: 'https://storage.example' });
+  assert.equal(result.errors.some(error => error.includes('Railway Bucket настроен частично')), true);
+});

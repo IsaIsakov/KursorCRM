@@ -132,6 +132,7 @@ ADMIN_RECOVERY_CODE=<четвёртый независимый случайны�
 JWT_EXPIRES_IN=7d
 SESSION_MAX_AGE_MS=604800000
 API_AUTH_BEARER=false
+AUTH_IP_REQUEST_LIMIT=500
 
 DB_PATH=/data/kursor.sqlite
 FILE_STORAGE_DIR=/data/files
@@ -139,6 +140,14 @@ BACKUP_DIR=/data/backups
 PERSISTENT_DATA_DIR=/data
 REQUIRE_PERSISTENT_STORAGE=true
 BACKUP_RETENTION_DAYS=14
+REQUIRE_OFFSITE_BACKUP=true
+
+# Добавляются автоматически через Railway Bucket → Connect
+BUCKET=<имя bucket>
+ACCESS_KEY_ID=<ключ Railway Bucket>
+SECRET_ACCESS_KEY=<секрет Railway Bucket>
+REGION=<регион Railway Bucket>
+ENDPOINT=<S3 endpoint Railway Bucket>
 
 SEED_ADMIN_LOGIN=admin
 SEED_ADMIN_PASSWORD=<уникальный временный пароль не короче 12 символов>
@@ -155,7 +164,7 @@ openssl rand -hex 32
 
 В production сервер не запустится со слабыми, шаблонными, отсутствующими или совпадающими обязательными секретами. `SETTINGS_ENCRYPTION_KEY` защищает интеграционные токены и временно выданные доступы в SQLite. `ADMIN_RECOVERY_CODE` оставляет аварийное серверное восстановление администратора без публичной кнопки; храните его только в Railway и менеджере паролей. `APP_TIMEZONE_OFFSET_MINUTES=300` задаёт Казахстан (UTC+5) для контроля окончания занятий. Первая установка также требует безопасный временный пароль администратора.
 
-`DB_PATH`, `FILE_STORAGE_DIR` и `BACKUP_DIR` должны находиться на постоянном диске. Резервные копии рекомендуется дополнительно реплицировать вне сервера.
+`DB_PATH`, `FILE_STORAGE_DIR` и `BACKUP_DIR` должны находиться на постоянном диске. Для видео, отчётов, материалов и файлов ДЗ рекомендуется Railway Bucket: новые файлы автоматически получают закрытый объектный путь, а пользователям выдаётся только временная подписанная ссылка. Старые файлы на Volume продолжают открываться после обновления. Если указана хотя бы одна Bucket-переменная, приложение потребует все пять и не запустится с частичной конфигурацией.
 
 ### Railway и сохранность аккаунтов
 
@@ -164,12 +173,16 @@ SQLite и загруженные отчёты нельзя хранить тол
 Перед первым production-запуском:
 
 1. откройте сервис KURSOR в Railway;
-2. создайте **Volume**;
+2. создайте небольшой **Volume** для SQLite и локальных резервных копий;
 3. укажите **Mount Path: `/data`**;
 4. оставьте `DB_PATH=/data/kursor.sqlite`, `FILE_STORAGE_DIR=/data/files`, `BACKUP_DIR=/data/backups`;
-5. выполните deploy и проверьте `GET /api/ready`.
+5. создайте **Bucket**, нажмите **Connect** у сервиса KURSOR и добавьте ссылки на `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `REGION`, `ENDPOINT`;
+6. в CORS Bucket разрешите точный адрес из `APP_ORIGIN`, методы `PUT`, `GET`, `HEAD` и заголовок `Content-Type` — тогда видео идёт напрямую из браузера, не расходуя service egress;
+7. выполните deploy и проверьте `GET /api/ready`: поле `fileStorage` должно быть `bucket`.
 
-На Railway приложение намеренно откажется запускаться без Volume `/data`. Это защита от незаметной потери аккаунтов при следующем деплое. Новый код и миграции обновляются отдельно от данных: существующая SQLite-база внутри Volume не удаляется и не пересоздаётся.
+Если CORS Bucket ещё не настроен, загрузка автоматически повторяется через сервер и не блокирует проведение урока. Для старого Bucket включайте `BUCKET_FORCE_PATH_STYLE=true` только когда это прямо указано на его вкладке Credentials; новые Buckets используют стандартные virtual-hosted URL.
+
+На Railway приложение намеренно откажется запускаться без Volume `/data`, даже при подключённом Bucket: Volume хранит SQLite, Bucket — тяжёлые пользовательские файлы. Это защита от незаметной потери аккаунтов при следующем деплое. Новый код и миграции обновляются отдельно от данных: существующая база и ранее загруженные файлы не удаляются и не пересоздаются.
 
 ## Docker
 

@@ -49,7 +49,10 @@
       }
       const detail = data && Array.isArray(data.details) && data.details[0] ? `: ${data.details[0].message}` : '';
       const msg = (data && data.error) ? data.error + detail : `Ошибка ${resp.status}`;
-      throw new Error(msg);
+      const error = new Error(msg);
+      error.status = resp.status;
+      error.data = data;
+      throw error;
     }
     return data;
   }
@@ -68,6 +71,34 @@
       form.append(key, value);
     }
     return form;
+  }
+
+  function directPut(url, file, headers, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url, true);
+      for (const [name, value] of Object.entries(headers || {})) xhr.setRequestHeader(name, value);
+      xhr.timeout = 15 * 60 * 1000;
+      xhr.upload.onprogress = event => {
+        if (event.lengthComputable && typeof onProgress === 'function') onProgress(Math.round(event.loaded * 100 / event.total));
+      };
+      xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Хранилище отклонило загрузку (${xhr.status})`));
+      xhr.onerror = () => reject(new Error('Не удалось отправить файл в хранилище'));
+      xhr.ontimeout = () => reject(new Error('Загрузка файла превысила 15 минут'));
+      xhr.send(file);
+    });
+  }
+
+  async function retry(operation, attempts = 3) {
+    let lastError;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try { return await operation(attempt); }
+      catch (error) {
+        lastError = error;
+        if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, attempt * 700));
+      }
+    }
+    throw lastError;
   }
 
   async function login(loginStr, password) {
@@ -262,7 +293,36 @@
 
   /* ---------- Фаза 4: артефакты занятий ---------- */
   const getArtifacts    = (q) => API_.get('/api/session-artifacts' + (q ? ('?' + q) : ''));
-  const createArtifact  = (data) => data && data.file ? request('POST', '/api/session-artifacts', multipart(data)) : API_.post('/api/session-artifacts', data);
+  const createArtifact  = async (data) => {
+    if (!data?.file) return API_.post('/api/session-artifacts', data);
+    const file = data.file;
+    const fallbackForm = () => multipart({ lessonSessionId: data.lessonSessionId, studentId: data.studentId,
+      type: data.type, title: data.title || undefined, file });
+    let init;
+    try {
+      init = await API_.post('/api/session-artifacts/direct-upload', {
+        lessonSessionId: data.lessonSessionId, studentId: data.studentId, type: data.type,
+        title: data.title || undefined, fileName: file.name || 'lesson-file',
+        mime: file.type || 'application/octet-stream', size: file.size,
+      });
+    } catch (error) {
+      if (error.status === 409) return request('POST', '/api/session-artifacts', fallbackForm());
+      throw error;
+    }
+    let uploaded = false;
+    try {
+      await retry(() => directPut(init.uploadUrl, file, init.headers, data.onProgress));
+      uploaded = true;
+      return await retry(() => API_.post('/api/session-artifacts/direct-upload/complete', { token: init.token }));
+    } catch (error) {
+      API_.post('/api/session-artifacts/direct-upload/cancel', { token: init.token }).catch(() => {});
+      // A newly created Bucket may not have browser CORS configured yet. Keep
+      // the lesson usable through the server path; once CORS is set, videos
+      // automatically use the cheaper direct path.
+      if (!uploaded) return request('POST', '/api/session-artifacts', fallbackForm());
+      throw error;
+    }
+  };
   const deleteArtifact  = (id) => API_.del('/api/session-artifacts/' + encodeURIComponent(id));
 
   /* ---------- Фаза 5: родительский кабинет ---------- */

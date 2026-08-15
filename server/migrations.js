@@ -584,6 +584,18 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 22,
+    name: 'alfacrm_import_identity',
+    up(db) {
+      const columns = new Set(db.prepare('PRAGMA table_info(students_crm)').all().map(row => row.name));
+      if (!columns.has('external_source')) db.exec('ALTER TABLE students_crm ADD COLUMN external_source TEXT');
+      if (!columns.has('external_id')) db.exec('ALTER TABLE students_crm ADD COLUMN external_id TEXT');
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_students_crm_external_identity
+        ON students_crm(external_source,external_id)
+        WHERE external_source IS NOT NULL AND external_id IS NOT NULL`);
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

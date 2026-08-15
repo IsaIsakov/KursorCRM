@@ -30,7 +30,11 @@ router.post('/import/clients', adminOnly, clientFile, async (req, res, next) => 
     if (!rows) return res.status(400).json({ error: 'Не удалось разобрать JSON/CSV/XLSX' });
     if (!rows.length) return res.status(400).json({ error: 'В файле нет строк с клиентами' });
     if (rows.length > 500) return res.status(413).json({ error: 'За один импорт разрешено не более 500 клиентов' });
-    res.json(onboardClients(rows, { dryRun: req.query.dryRun === 'true', actorId: req.user.id }));
+    res.json(onboardClients(rows, {
+      dryRun: req.query.dryRun === 'true', actorId: req.user.id,
+      defaultBranch: String(req.query.defaultBranch || 'Жошы Хан').trim() || 'Жошы Хан',
+      autoCreateStructure: req.query.autoCreateStructure !== 'false',
+    }));
   } catch (error) { next(error); }
   finally { clientImportRunning = false; }
 });

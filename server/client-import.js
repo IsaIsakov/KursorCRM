@@ -62,9 +62,21 @@ const ALIASES = {
   branch: ['филиал','branch','branch name','branch_name','branch_id'],
   parent_name: ['имя родителя','фио родителя','родитель','parent','parent name','parent_name'],
   parent_phone: ['номер родителя','телефон родителя','телефон','номер телефона','phone','parent phone','parent_phone'],
-  visits_left: ['осталось уроков','остаток уроков','уроков осталось','занятий осталось','visits left','visits_left'],
+  visits_left: ['осталось уроков','остаток уроков','уроков осталось','занятий осталось','общий остаток (уроки)','visits left','visits_left'],
   group: ['группа','group','group name','group_name','group_id'],
   comment: ['комментарий','коментарий','примечание','comment','notes'],
+  birth_date: ['дата рождения','birth date','birth_date'],
+  student_email: ['e-mail','email','электронная почта','student email','student_email'],
+  external_id: ['id','id клиента','client id','external_id'],
+  active_groups: ['активные группы','active groups','active_groups'],
+  groups: ['группы','groups'],
+  customer_type: ['тип заказчика','customer type'],
+  customer_name: ['заказчик','customer'],
+  crm_status: ['статус обучения','статус клиента','crm status'],
+  tariff_name: ['тариф клиента','тариф','tariff name'],
+  payment_expires_at: ['дата истечения оплаты','payment expires at'],
+  training_started_at: ['дата начала обучения','training started at'],
+  responsible_teacher: ['отв. педагог','ответственный педагог','responsible teacher'],
 };
 
 function key(value) {
@@ -75,12 +87,22 @@ const aliasMap = new Map(Object.entries(ALIASES).flatMap(([canonical, names]) =>
 function normalizeRows(matrix) {
   const headerIndex = matrix.findIndex(row => row.some(cell => key(cell)));
   if (headerIndex < 0) return [];
+  const originalHeaders = matrix[headerIndex].map(cell => key(cell));
   const headers = matrix[headerIndex].map(cell => aliasMap.get(key(cell)) || key(cell).replace(/\s/g, '_'));
+  const alfaExport = originalHeaders.includes('тип заказчика') && originalHeaders.includes('активные группы');
   return matrix.slice(headerIndex + 1).filter(row => row.some(cell => key(cell))).map(row => {
     const out = {};
     headers.forEach((header, i) => { if (header) out[header] = row[i] instanceof Date ? row[i].toISOString().slice(0, 10) : String(row[i] ?? '').trim(); });
     if (!out.student_name) out.student_name = [out.last_name, out.first_name, out.patronymic].filter(Boolean).join(' ');
-    out._strict_import = '1';
+    if (!out.parent_name && out.customer_name) out.parent_name = out.customer_name;
+    // In AlfaCRM, «Группы» is history while «Активные группы» is the current
+    // roster. An empty active cell must stay empty instead of restoring a
+    // former/summer group from history.
+    if (alfaExport) out.groups = out.active_groups || '';
+    else if (out.active_groups) out.groups = out.active_groups;
+    else if (!out.groups && out.group) out.groups = out.group;
+    out.external_source = alfaExport ? 'alfacrm' : '';
+    out._strict_import = alfaExport ? '0' : '1';
     return out;
   });
 }

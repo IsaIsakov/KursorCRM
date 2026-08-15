@@ -378,8 +378,10 @@
   }
   const importData = (dataset, payload, dryRun) =>
     API_.post('/api/import/' + dataset + (dryRun ? '?dryRun=true' : ''), payload);
-  const importClientFile = (file, dryRun) => { const form = new FormData(); form.append('file', file);
-    return request('POST', '/api/import/clients' + (dryRun ? '?dryRun=true' : ''), form); };
+  const importClientFile = (file, dryRun, options = {}) => { const form = new FormData(); form.append('file', file);
+    const query = new URLSearchParams({ dryRun: String(!!dryRun), autoCreateStructure: String(options.autoCreateStructure !== false) });
+    if (options.defaultBranch) query.set('defaultBranch', options.defaultBranch);
+    return request('POST', '/api/import/clients?' + query.toString(), form); };
 
 
   // Привязка родитель ↔ дети

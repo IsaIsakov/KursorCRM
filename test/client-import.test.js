@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { normalizeRows, makeTemplate, inspectXlsxArchive } = require('../server/client-import');
+const { splitGroups, parseGroupSchedule, lessonKind, firstPhone } = require('../server/import-structure');
 
 test('client spreadsheet reader understands Russian columns and builds full name', () => {
   const rows = normalizeRows([
@@ -41,4 +42,35 @@ test('xlsx archive is bounded before ExcelJS expands it', async () => {
   fs.writeFileSync(bomb, buffer);
   assert.throws(() => inspectXlsxArchive(bomb), /безопасный лимит 32 МБ/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AlfaCRM export prefers active groups and does not require split first and last names', () => {
+  const rows = normalizeRows([
+    ['ID','ФИО','Тип заказчика','Заказчик','Возраст','Дата рождения','Группы','Активные группы','Телефон','Общий остаток (уроки)','E-mail'],
+    [57,'Бейбитхан Мадияр Кайратулы','Физ. лицо','Родитель Мадияра',14,'2011-11-29','Старая группа','Основная группа, Доп группа','+7 701 111 22 33',21,'student@example.kz'],
+  ]);
+  assert.equal(rows[0].student_name, 'Бейбитхан Мадияр Кайратулы');
+  assert.equal(rows[0].parent_name, 'Родитель Мадияра');
+  assert.equal(rows[0].groups, 'Основная группа, Доп группа');
+  assert.equal(rows[0].visits_left, '21');
+  assert.equal(rows[0].external_id, '57');
+  assert.equal(rows[0].external_source, 'alfacrm');
+  assert.equal(rows[0]._strict_import, '0');
+});
+
+test('AlfaCRM does not restore historical groups when active roster is empty', () => {
+  const [row] = normalizeRows([
+    ['ID','ФИО','Тип заказчика','Заказчик','Возраст','Группы','Активные группы','Телефон'],
+    [58,'Новый Ученик','Физ. лицо','Родитель',12,'Летняя старая группа','', '+7 701 111 22 33'],
+  ]);
+  assert.equal(row.groups, '');
+});
+
+test('AlfaCRM group and contact helpers support real export shapes', () => {
+  assert.deepEqual(splitGroups('Основная, Дополнительная'), ['Основная', 'Дополнительная']);
+  assert.equal(firstPhone('+7(701)222-99-89, +7(701)250-76-36'), '+7(701)222-99-89');
+  assert.deepEqual(parseGroupSchedule('Старшая 16.50-18.50(продвинутая) ПН'), { weekday: 1, start_time: '16:50', duration_min: 120 });
+  const extra = parseGroupSchedule('доп урок вторник 11:20-12:20 средняя');
+  assert.equal(extra.weekday, 2);
+  assert.equal(lessonKind('доп урок вторник 11:20-12:20 средняя', extra), 'extra');
 });

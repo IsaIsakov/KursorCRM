@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=29">
+<link rel="stylesheet" href="/css/style.css?v=30">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,10 +38,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=29"></script>
-<script src="/js/i18n.js?v=29"></script>
-<script src="/js/api.js?v=29"></script>
-<script src="/js/app.js?v=29"></script>
+<script src="/data/database.js?v=30"></script>
+<script src="/js/i18n.js?v=30"></script>
+<script src="/js/api.js?v=30"></script>
+<script src="/js/app.js?v=30"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -1378,6 +1378,8 @@ function openClientImport() {
     <div class="notice-box"><b>Обязательные:</b> Имя, Фамилия, Возраст, Имя родителя, Номер родителя.<br><b>Необязательные:</b> Отчество, Пол, Филиал, Осталось уроков, Группа, Комментарий.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><a class="btn btn-outline" href="/api/import/clients/template">⬇ Скачать Excel-шаблон</a><button class="btn btn-outline" type="button" onclick="document.getElementById('imp_file').click()">📎 Выбрать файл</button><span id="imp_file_name" style="align-self:center;color:#64748b">Файл не выбран</span></div>
     <input id="imp_file" type="file" accept=".xlsx,.xlsm,.csv,.txt" hidden onchange="document.getElementById('imp_file_name').textContent=this.files[0]?.name||'Файл не выбран'">
+    <div class="form-group" style="margin-top:12px"><label>Филиал для строк без филиала</label><input class="form-input" id="imp_default_branch" value="Жошы Хан" placeholder="Название филиала"></div>
+    <label style="display:flex;gap:9px;align-items:flex-start;margin:10px 0"><input id="imp_create_structure" type="checkbox" checked style="margin-top:4px"><span><b>Создать недостающие филиалы и группы</b><br><small style="color:#64748b">Расписание и тип занятия будут определены из названий групп. Группы без понятного дня или времени создадутся без расписания для последующей проверки.</small></span></label>
     <details><summary style="cursor:pointer;font-weight:700;margin:10px 0">Или вставить CSV/JSON вручную</summary><textarea class="form-input" id="imp_data" rows="7" style="font-family:Fira Code,monospace;font-size:12px" placeholder="Имя,Фамилия,Возраст,Имя родителя,Номер родителя,Группа&#10;Иван,Иванов,12,Анна Иванова,+77771234567,Python Start"></textarea></details>
     <div id="imp_preview" style="margin-top:10px"></div><div id="modalErr" class="form-error"></div>
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Отмена</button><button class="btn btn-secondary" onclick="runClientImport(true)">Проверить файл</button><button class="btn" id="imp_create" onclick="runClientImport(false)" disabled>Создать аккаунты</button></div>`;
@@ -1389,9 +1391,10 @@ async function runClientImport(dryRun) {
     const file=document.getElementById('imp_file')?.files?.[0];
     const raw=document.getElementById('imp_data')?.value?.trim();
     if(!file&&!raw) throw new Error('Выберите файл или вставьте данные');
-    const r=file?await API.importClientFile(file,dryRun):await API.importData('clients',parseImportInput(),dryRun);
+    const options={defaultBranch:document.getElementById('imp_default_branch')?.value?.trim()||'Жошы Хан',autoCreateStructure:document.getElementById('imp_create_structure')?.checked!==false};
+    const r=file?await API.importClientFile(file,dryRun,options):await API.importData('clients',parseImportInput(),dryRun);
     if(dryRun){
-      document.getElementById('imp_preview').innerHTML=`<div class="card" style="padding:12px"><b>${r.errors.length?'Найдены ошибки':'Файл готов к импорту'}</b><div style="margin-top:5px">Строк: ${r.total} · Будет создано: <b>${r.items.length}</b> · Ошибок: <b>${r.errors.length}</b></div>${r.errors.length?`<div class="form-error" style="margin-top:8px;max-height:150px;overflow:auto">${r.errors.map(e=>`Строка ${e.line}: ${escapeHtml(e.error)}`).join('<br>')}</div>`:''}</div>`;
+      document.getElementById('imp_preview').innerHTML=`<div class="card" style="padding:12px"><b>${r.errors.length?'Найдены ошибки':'Файл готов к импорту'}</b><div style="margin-top:5px">Строк: ${r.total} · Новых клиентов: <b>${r.items.filter(x=>!x.skipped).length}</b> · Уже загружено: <b>${r.skipped||0}</b> · Новых групп: <b>${r.groupsToCreate?.length||0}</b> · Ошибок: <b>${r.errors.length}</b></div>${r.groupsToCreate?.length?`<details style="margin-top:8px"><summary>Группы, которые будут созданы</summary><div style="max-height:130px;overflow:auto;margin-top:6px">${r.groupsToCreate.map(g=>`${escapeHtml(g.name)}${g.schedule?` — ${['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][g.schedule.weekday]} ${g.schedule.start_time}, ${g.schedule.duration_min} мин`:' — расписание нужно указать вручную'}`).join('<br>')}</div></details>`:''}${r.errors.length?`<div class="form-error" style="margin-top:8px;max-height:150px;overflow:auto">${r.errors.map(e=>`Строка ${e.line}: ${escapeHtml(e.error)}`).join('<br>')}</div>`:''}</div>`;
       const create=document.getElementById('imp_create'); create.disabled=!!r.errors.length; return;
     }
     _baseLoaded=false;

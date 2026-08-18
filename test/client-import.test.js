@@ -4,7 +4,8 @@ const ExcelJS = require('exceljs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { normalizeRows, makeTemplate, inspectXlsxArchive } = require('../server/client-import');
+const JSZip = require('jszip');
+const { normalizeRows, readClientFile, makeTemplate, inspectXlsxArchive } = require('../server/client-import');
 const { splitGroups, parseGroupSchedule, lessonKind, firstPhone } = require('../server/import-structure');
 
 test('client spreadsheet reader understands Russian columns and builds full name', () => {
@@ -73,4 +74,30 @@ test('AlfaCRM group and contact helpers support real export shapes', () => {
   const extra = parseGroupSchedule('доп урок вторник 11:20-12:20 средняя');
   assert.equal(extra.weekday, 2);
   assert.equal(lessonKind('доп урок вторник 11:20-12:20 средняя', extra), 'extra');
+});
+
+test('malformed workbook returns a user-facing import error', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kursor-invalid-xlsx-'));
+  const file = path.join(dir, 'invalid.xlsx');
+  const zip = await JSZip.loadAsync(Buffer.from(await makeTemplate()));
+  zip.remove('xl/workbook.xml');
+  fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer' }));
+  await assert.rejects(() => readClientFile({ filename: file, tempPath: file }), /Не удалось прочитать структуру Excel|В Excel не найден лист|Повреждённый XLSX/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('xlsx reader finds the client table even when it is not the first sheet', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kursor-multisheet-xlsx-'));
+  const file = path.join(dir, 'clients.xlsx');
+  const workbook = new ExcelJS.Workbook();
+  workbook.addWorksheet('Инструкция').addRow(['Служебный лист']);
+  const clients = workbook.addWorksheet('Export');
+  clients.addRow(['ID','ФИО','Тип заказчика','Заказчик','Возраст','Активные группы','Телефон']);
+  clients.addRow([1,'Тестовый Ученик','Физ. лицо','Тестовый Родитель','12 лет','Python Start','+7 701 111 22 33']);
+  await workbook.xlsx.writeFile(file);
+  const rows = await readClientFile({ filename: file, tempPath: file });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].student_name, 'Тестовый Ученик');
+  assert.equal(rows.sourceSheet, 'Export');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

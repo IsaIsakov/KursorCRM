@@ -84,9 +84,22 @@ function key(value) {
 }
 const aliasMap = new Map(Object.entries(ALIASES).flatMap(([canonical, names]) => names.map(name => [key(name), canonical])));
 
+function headerScore(row) {
+  const recognized = new Set((row || []).map(cell => aliasMap.get(key(cell))).filter(Boolean));
+  let score = recognized.size;
+  if (recognized.has('student_name') || (recognized.has('first_name') && recognized.has('last_name'))) score += 20;
+  if (recognized.has('parent_name')) score += 5;
+  if (recognized.has('parent_phone')) score += 5;
+  return score;
+}
+
 function normalizeRows(matrix) {
-  const headerIndex = matrix.findIndex(row => row.some(cell => key(cell)));
-  if (headerIndex < 0) return [];
+  let headerIndex = -1; let bestScore = 0;
+  matrix.slice(0, 30).forEach((row, index) => {
+    const score = headerScore(row);
+    if (score > bestScore) { bestScore = score; headerIndex = index; }
+  });
+  if (headerIndex < 0 || bestScore < 1) return [];
   const originalHeaders = matrix[headerIndex].map(cell => key(cell));
   const headers = matrix[headerIndex].map(cell => aliasMap.get(key(cell)) || key(cell).replace(/\s/g, '_'));
   const alfaExport = originalHeaders.includes('тип заказчика') && originalHeaders.includes('активные группы');
@@ -119,16 +132,31 @@ async function readClientFile(file) {
   if (!['xlsx', 'xlsm'].includes(ext)) throw Object.assign(new Error('Поддерживаются файлы .xlsx, .xlsm и .csv'), { status: 400 });
   inspectXlsxArchive(file.tempPath);
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(file.tempPath);
-  const sheet = workbook.worksheets[0];
-  if (!sheet) return [];
-  const matrix = []; let overflow = false;
-  sheet.eachRow({ includeEmpty: false }, row => {
-    if (matrix.length >= MAX_IMPORT_ROWS + 1) { overflow = true; return; }
-    matrix.push(row.values.slice(1).map(value => value?.text ?? value?.result ?? value));
-  });
+  try {
+    await workbook.xlsx.readFile(file.tempPath);
+  } catch (error) {
+    console.warn('[client-import] XLSX parse rejected:', error.message);
+    throw Object.assign(new Error('Не удалось прочитать структуру Excel. Пересохраните файл как обычный XLSX в Excel или LibreOffice и загрузите снова.'), { status: 400 });
+  }
+  if (!workbook.worksheets.length) throw Object.assign(new Error('В Excel не найден лист с клиентами. Пересохраните файл как обычный XLSX и загрузите снова.'), { status: 400 });
+  let best = { score: 0, rows: [], sheet: null }; let overflow = false;
+  for (const sheet of workbook.worksheets) {
+    const matrix = [];
+    sheet.eachRow({ includeEmpty: false }, row => {
+      if (matrix.length >= MAX_IMPORT_ROWS + 1) { overflow = true; return; }
+      matrix.push(row.values.slice(1).map(value => value?.text ?? value?.result ?? value));
+    });
+    const score = Math.max(0, ...matrix.slice(0, 30).map(headerScore));
+    const rows = normalizeRows(matrix);
+    if (score > best.score || (score === best.score && rows.length > best.rows.length)) best = { score, rows, sheet: sheet.name };
+  }
   if (overflow) throw Object.assign(new Error(`За один импорт разрешено не более ${MAX_IMPORT_ROWS} клиентов`), { status: 413 });
-  return normalizeRows(matrix);
+  if (!best.rows.length) {
+    const names = workbook.worksheets.map(sheet => sheet.name).join(', ');
+    throw Object.assign(new Error(`Не найден лист с колонкой «ФИО» или «Имя». Найдены листы: ${names || 'без названия'}`), { status: 400 });
+  }
+  Object.defineProperty(best.rows, 'sourceSheet', { value: best.sheet, enumerable: false });
+  return best.rows;
 }
 
 async function makeTemplate() {
@@ -152,4 +180,4 @@ async function makeTemplate() {
   return workbook.xlsx.writeBuffer();
 }
 
-module.exports = { normalizeRows, readClientFile, makeTemplate, inspectXlsxArchive, MAX_IMPORT_ROWS };
+module.exports = { normalizeRows, readClientFile, makeTemplate, inspectXlsxArchive, headerScore, MAX_IMPORT_ROWS };

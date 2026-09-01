@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=32">
+<link rel="stylesheet" href="/css/style.css?v=33">
 <style>
 /* ======= PARENT PANEL STYLES ======= */
 .parent-layout {
@@ -310,10 +310,10 @@
   <div class="p-loader">Загружаем кабинет…</div>
 </div>
 
-<script src="/data/database.js?v=32"></script>
-<script src="/js/i18n.js?v=32"></script>
-<script src="/js/api.js?v=32"></script>
-<script src="/js/app.js?v=32"></script>
+<script src="/data/database.js?v=33"></script>
+<script src="/js/i18n.js?v=33"></script>
+<script src="/js/api.js?v=33"></script>
+<script src="/js/app.js?v=33"></script>
 <script>
 const user = requireAuth(['parent']);
 let child = null;     // единственный ребёнок
@@ -523,7 +523,7 @@ function videoBlockHtml(a) {
 function linkBlockHtml(a) {
   return `<div class="ig-block">
     ${a.title ? `<div class="ig-caption" style="padding:0 0 8px">🔗 ${escapeHtml(a.title)}</div>` : ''}
-    <a class="ig-download-btn" href="${escapeHtml(a.url)}" target="_blank">🔗 Открыть ссылку</a>${mediaPublishedHtml(a)}
+    <a class="ig-download-btn" href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer">🔗 Открыть ссылку</a>${mediaPublishedHtml(a)}
   </div>`;
 }
 function unavailableBlockHtml(text) {

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=32">
+<link rel="stylesheet" href="/css/style.css?v=33">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,10 +38,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=32"></script>
-<script src="/js/i18n.js?v=32"></script>
-<script src="/js/api.js?v=32"></script>
-<script src="/js/app.js?v=32"></script>
+<script src="/data/database.js?v=33"></script>
+<script src="/js/i18n.js?v=33"></script>
+<script src="/js/api.js?v=33"></script>
+<script src="/js/app.js?v=33"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -369,7 +369,7 @@ async function openUserForm(id) {
     <div class="form-group"><label>Логин</label><input class="form-input" id="f_login" value="${escapeHtml(u.login||'')}" placeholder="aliya"></div>
     <div class="form-group">
       <label>Пароль ${id ? '<small style="color:#64748b">(оставь пустым, чтобы не менять)</small>' : ''}</label>
-      <input class="form-input" id="f_password" type="password" value="" placeholder="${id ? 'не менять' : 'минимум 10 символов'}" autocomplete="new-password">
+      <input class="form-input" id="f_password" type="password" value="" placeholder="${id ? 'не менять' : 'минимум 12 символов'}" autocomplete="new-password">
     </div>
     <label style="display:flex;align-items:flex-start;gap:9px;margin:0 0 14px">
       <input type="checkbox" id="f_force_password" ${u.mustChangePassword?'checked':''}>
@@ -517,7 +517,7 @@ async function saveUser(id) {
   err.textContent = '';
   if (!data.name || !data.login) { err.textContent = 'Введи имя и логин'; return; }
   if (!id && !pwd) { err.textContent = 'Пароль обязателен при создании'; return; }
-  if (pwd && pwd.length < 10) { err.textContent = 'Временный пароль должен содержать минимум 10 символов'; return; }
+  if (pwd && pwd.length < 12) { err.textContent = 'Временный пароль должен содержать минимум 12 символов'; return; }
   try {
     let savedId = id;
     if (id) await API.updateUser(id, data);
@@ -911,7 +911,7 @@ async function renderMaterials() {
         <td><b>${escapeHtml(m.title)}</b></td>
         <td>${escapeHtml(moduleTitle(m.courseId))}</td>
         <td>${escapeHtml(m.type||'—')}</td>
-        <td>${isUrl(m.content) ? `<a href="${escapeHtml(m.content)}" target="_blank">${I18N.t('common.open')}</a>` : (m.content ? `<span style="color:#64748b">${escapeHtml(m.content.slice(0,40))}…</span>` : '—')}</td>
+        <td>${isUrl(m.content) ? `<a href="${escapeHtml(m.content)}" target="_blank" rel="noopener noreferrer">${I18N.t('common.open')}</a>` : (m.content ? `<span style="color:#64748b">${escapeHtml(m.content.slice(0,40))}…</span>` : '—')}</td>
         <td>${canWrite ? `<button class="btn btn-ghost" onclick="openMaterialForm('${m.id}')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/1159/1159633.png"></button>
           <button class="btn btn-ghost" style="color:#ef4444" onclick="removeMaterial('${m.id}')"><img class="ic ic-16" src="https://cdn-icons-png.flaticon.com/512/3221/3221897.png"></button>` : '—'}</td>
       </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#64748b">${I18N.t('common.none')}</td></tr>`}
@@ -938,7 +938,7 @@ function openMaterialForm(id) {
       <label>${I18N.t('mat.or_upload')}</label>
       <input class="form-input" id="mt_file" type="file"
              accept=".pdf,.ppt,.pptx,.xls,.xlsx,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt,.zip">
-      <div style="font-size:12px;color:#64748b;margin-top:4px">${I18N.t('mat.file_hint')}${isUrl(m.content) ? ` <a href="${escapeHtml(m.content)}" target="_blank">${I18N.t('mat.current_file')}</a>` : ''}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">${I18N.t('mat.file_hint')}${isUrl(m.content) ? ` <a href="${escapeHtml(m.content)}" target="_blank" rel="noopener noreferrer">${I18N.t('mat.current_file')}</a>` : ''}</div>
     </div>
     <div id="modalErr" style="color:#ef4444;font-weight:700;min-height:18px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -1980,7 +1980,7 @@ function artChipHtml(a) {
   const icon = a.type === 'video' ? uiIcon('video') : uiIcon('file');
   const label = escapeHtml(a.title || ({video:'Видеоотчёт',screenshot:'Скрин работы',file:'Файл',link:'Ссылка'}[a.type] || a.type));
   const inner = a.url
-    ? `<a href="${escapeHtml(a.url)}" target="_blank" style="text-decoration:none">${icon} ${label}</a>`
+    ? `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">${icon} ${label}</a>`
     : `<span style="color:#94a3b8">${icon} ${escapeHtml(a.unavailable || label)}</span>`;
   return `<span class="art-chip" style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border-radius:8px;padding:4px 8px;font-size:12px">
     ${inner}
@@ -2278,6 +2278,7 @@ async function renderSipuni() {
       <div><h1 style="margin:0">Телефония Sipuni</h1><p style="color:#64748b;margin:5px 0 0">Звонки родителям прямо из задачника куратора, история и записи разговоров.</p></div>
       <span class="badge" style="background:${cfg.configured?'#dcfce7':'#fef3c7'};color:${statusColor};font-size:13px">${cfg.configured?'Подключено':'Нужно настроить'}</span>
     </div>
+    ${cfg.webhookNeedsReconnect?`<div class="notice-box" style="max-width:880px;margin-top:14px;border-color:#f59e0b;background:#fffbeb"><b>Webhook Sipuni обновлён для безопасности</b><span>Скопируйте новый адрес ниже и заново вставьте его в кабинете Sipuni. Старый адрес отключён, потому что прежние журналы могли содержать секрет.</span></div>`:''}
     <div class="card" style="padding:22px;margin-top:18px;max-width:880px">
       <div style="display:grid;gap:22px">
         <section style="display:grid;grid-template-columns:36px 1fr;gap:12px">

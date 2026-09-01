@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 const crypto = require('crypto');
+const { sourceHash } = require('./audit-utils');
+const requestLimits = require('./request-limits');
 
 // A fallback exists only so local development remains one-command. index.js
 // refuses to start production with it.
@@ -14,6 +16,11 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const SESSION_COOKIE = IS_PRODUCTION ? '__Host-kursor_session' : 'kursor_session';
 const CSRF_COOKIE = IS_PRODUCTION ? '__Host-kursor_csrf' : 'kursor_csrf';
 const SESSION_MAX_AGE = Math.min(30 * 86400000, Math.max(5 * 60000, Number(process.env.SESSION_MAX_AGE_MS) || 7 * 86400000));
+const SESSION_IDLE_TIMEOUT = Math.min(7 * 86400000, Math.max(15 * 60000, Number(process.env.SESSION_IDLE_TIMEOUT_MS) || 12 * 60 * 60 * 1000));
+const STAFF_IDLE_TIMEOUT = Math.min(24 * 60 * 60 * 1000, Math.max(15 * 60000, Number(process.env.STAFF_SESSION_IDLE_TIMEOUT_MS) || 2 * 60 * 60 * 1000));
+const JWT_ISSUER = 'kursor';
+const JWT_AUDIENCE = 'kursor-web';
+const MAX_ACTIVE_SESSIONS = Math.min(20, Math.max(1, Number(process.env.MAX_ACTIVE_SESSIONS) || 5));
 
 function parseCookies(header = '') {
   const out = {};
@@ -44,20 +51,77 @@ function clearSession(res) {
 
 function tokenFromCookie(header) { return parseCookies(header)[SESSION_COOKIE] || null; }
 
-function signToken(user) {
+function sessionFingerprint(value) {
+  return value ? crypto.createHmac('sha256', SECRET).update(String(value)).digest('hex') : null;
+}
+
+function signToken(user, context = {}) {
+  const now = Date.now();
+  const id = crypto.randomUUID();
+  const idleMs = ['admin', 'teacher', 'curator'].includes(user.role) ? STAFF_IDLE_TIMEOUT : SESSION_IDLE_TIMEOUT;
+  const absoluteExpiresAt = now + SESSION_MAX_AGE;
+  db.transaction(() => {
+    db.prepare(`INSERT INTO auth_sessions
+      (id,user_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_hash,user_agent_hash)
+      VALUES (?,?,?,?,?,?,?,?)`).run(
+      id, user.id, now, now, Math.min(absoluteExpiresAt, now + idleMs), absoluteExpiresAt,
+      context.source ? sourceHash(context.source) : null, sessionFingerprint(context.userAgent),
+    );
+    const active = db.prepare(`SELECT id FROM auth_sessions WHERE user_id=? AND revoked_at IS NULL
+      ORDER BY created_at DESC`).all(user.id);
+    const revoke = db.prepare('UPDATE auth_sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL');
+    active.slice(MAX_ACTIVE_SESSIONS).forEach(row => revoke.run(now, row.id));
+    db.prepare('DELETE FROM auth_sessions WHERE absolute_expires_at<? OR (revoked_at IS NOT NULL AND revoked_at<?)')
+      .run(now - 86400000, now - 30 * 86400000);
+  })();
   return jwt.sign(
-    { sub: user.id, role: user.role, login: user.login, name: user.name },
-    SECRET,
-    { expiresIn: EXPIRES_IN }
+    { sub: user.id, jti: id }, SECRET,
+    { algorithm: 'HS256', issuer: JWT_ISSUER, audience: JWT_AUDIENCE, expiresIn: EXPIRES_IN }
   );
 }
 
-function verifyToken(token) {
-  try { return jwt.verify(token, SECRET); } catch { return null; }
+function verifyToken(token, { touch = true } = {}) {
+  try {
+    const payload = jwt.verify(token, SECRET, { algorithms: ['HS256'], issuer: JWT_ISSUER, audience: JWT_AUDIENCE });
+    if (!payload.jti || !payload.sub) return null;
+    const now = Date.now();
+    const session = db.prepare(`SELECT * FROM auth_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL
+      AND idle_expires_at>? AND absolute_expires_at>?`).get(payload.jti, payload.sub, now, now);
+    if (!session) return null;
+    if (touch && session.last_seen_at < now - 60_000) {
+      const user = db.prepare('SELECT role FROM users WHERE id=?').get(payload.sub);
+      const idleMs = ['admin', 'teacher', 'curator'].includes(user?.role) ? STAFF_IDLE_TIMEOUT : SESSION_IDLE_TIMEOUT;
+      db.prepare('UPDATE auth_sessions SET last_seen_at=?,idle_expires_at=? WHERE id=?')
+        .run(now, Math.min(session.absolute_expires_at, now + idleMs), session.id);
+    }
+    return payload;
+  } catch { return null; }
 }
 
-function hashPassword(plain) { return bcrypt.hashSync(plain, 10); }
+function revokeToken(token, now = Date.now()) {
+  try {
+    const payload = jwt.verify(token, SECRET, { algorithms: ['HS256'], issuer: JWT_ISSUER, audience: JWT_AUDIENCE, ignoreExpiration: true });
+    if (payload.jti) db.prepare('UPDATE auth_sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(now, payload.jti);
+  } catch {}
+}
+
+function revokeAllUserSessions(userId, now = Date.now(), exceptSessionId = null) {
+  if (exceptSessionId) {
+    return db.prepare('UPDATE auth_sessions SET revoked_at=? WHERE user_id=? AND id<>? AND revoked_at IS NULL')
+      .run(now, userId, exceptSessionId).changes;
+  }
+  return db.prepare('UPDATE auth_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(now, userId).changes;
+}
+
+function hashPassword(plain) {
+  const rounds = Math.min(14, Math.max(11, Number(process.env.BCRYPT_COST) || 12));
+  return bcrypt.hashSync(plain, rounds);
+}
 function checkPassword(plain, hash) { return bcrypt.compareSync(plain, hash); }
+function needsPasswordRehash(hash) {
+  try { return bcrypt.getRounds(hash) < Math.min(14, Math.max(11, Number(process.env.BCRYPT_COST) || 12)); }
+  catch { return true; }
+}
 
 function authRequired(req, res, next) {
   const header = req.headers.authorization || '';
@@ -77,6 +141,7 @@ function authRequired(req, res, next) {
     avatar_url: user.avatar_url || null,
     mustChangePassword: !!user.must_change_password,
   };
+  req.sessionId = payload.jti;
   req.authMethod = cookieToken ? 'cookie' : 'bearer';
   if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
     const cookies = parseCookies(req.headers.cookie);
@@ -90,6 +155,12 @@ function authRequired(req, res, next) {
   if (req.user.mustChangePassword && !passwordChangeRoute) {
     return res.status(403).json({ error: 'Сначала смените временный пароль', code: 'PASSWORD_CHANGE_REQUIRED' });
   }
+  const rate = requestLimits.userRequest(req);
+  res.setHeader('X-RateLimit-Remaining', String(rate.remaining));
+  if (!rate.allowed) {
+    res.setHeader('Retry-After', String(rate.retryAfter));
+    return res.status(429).json({ error: 'Слишком много запросов. Повторите позже', code: 'RATE_LIMITED' });
+  }
   next();
 }
 
@@ -101,5 +172,6 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { signToken, verifyToken, hashPassword, checkPassword, authRequired, requireRole,
-  issueSession, clearSession, tokenFromCookie, parseCookies, SESSION_COOKIE, CSRF_COOKIE };
+module.exports = { signToken, verifyToken, hashPassword, checkPassword, needsPasswordRehash, authRequired, requireRole,
+  issueSession, clearSession, tokenFromCookie, parseCookies, revokeToken, revokeAllUserSessions,
+  SESSION_COOKIE, CSRF_COOKIE, SESSION_MAX_AGE, SESSION_IDLE_TIMEOUT, STAFF_IDLE_TIMEOUT };

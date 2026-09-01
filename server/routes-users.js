@@ -5,7 +5,8 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const db = require('./db');
-const { authRequired, requireRole, hashPassword } = require('./auth');
+const { authRequired, requireRole, hashPassword, revokeAllUserSessions } = require('./auth');
+const { genId } = require('./util');
 const { isAcceptablePassword } = require('./security-config');
 const { accessibleStudentIds } = require('./access-scope');
 const { z, id: idSchema, text, validateBody } = require('./validation');
@@ -19,13 +20,13 @@ const ROLES = ['admin', 'teacher', 'curator', 'student', 'parent'];
 const roleSchema = z.enum(ROLES);
 const languagesSchema = z.array(z.string().trim().min(1).max(50)).max(30);
 const createUserSchema = z.strictObject({
-  name: text(200), login: text(100), password: z.string().min(10).max(1024), role: roleSchema,
+  name: text(200), login: text(100), password: z.string().min(12).max(1024), role: roleSchema,
   age: z.coerce.number().int().min(0).max(130).optional(), group: z.coerce.number().int().min(0).max(1000000).optional(),
   languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(), sipuni_extension: z.string().trim().max(30).nullable().optional(),
   mustChangePassword: z.boolean().optional(),
 });
 const updateUserSchema = z.strictObject({
-  name: text(200).optional(), login: text(100).optional(), password: z.string().min(10).max(1024).optional(), role: roleSchema.optional(),
+  name: text(200).optional(), login: text(100).optional(), password: z.string().min(12).max(1024).optional(), role: roleSchema.optional(),
   age: z.coerce.number().int().min(0).max(130).optional(), group: z.coerce.number().int().min(0).max(1000000).optional(),
   languages: languagesSchema.optional(), teacher_id: idSchema.nullable().optional(), sipuni_extension: z.string().trim().max(30).nullable().optional(),
   mustChangePassword: z.boolean().optional(),
@@ -57,7 +58,7 @@ function rowToUser(row) {
 }
 
 function randomId() {
-  return `u_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  return genId('u');
 }
 
 function canEditAvatar(user, target) {
@@ -139,7 +140,7 @@ router.get('/staff', requireRole('curator','admin'), (_req,res)=>{
 router.post('/', requireRole('admin'), validateBody(createUserSchema), (req, res) => {
   const { name, login, password, role, age, group, languages, teacher_id, sipuni_extension, mustChangePassword } = req.body || {};
   if (!name || !login || !password) return res.status(400).json({ error: 'Имя, логин, пароль обязательны' });
-  if (!isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 10 символов' });
+  if (!isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 12 символов' });
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'Некорректная роль' });
 
   const exists = db.prepare('SELECT 1 FROM users WHERE login = ?').get(String(login).trim());
@@ -197,7 +198,7 @@ router.put('/:id', validateBody(updateUserSchema), (req, res) => {
     patch.sipuni_extension = cur.sipuni_extension;
   }
 
-  if (password && !isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 10 символов' });
+  if (password && !isAcceptablePassword(password)) return res.status(400).json({ error: 'Временный пароль должен содержать минимум 12 символов' });
   const passwordHash = password ? hashPassword(password) : cur.password_hash;
   const nextMustChangePassword = mustChangePassword !== undefined
     ? (mustChangePassword ? 1 : 0)
@@ -207,6 +208,7 @@ router.put('/:id', validateBody(updateUserSchema), (req, res) => {
     UPDATE users SET login=?, password_hash=?, name=?, role=?, age=?, group_id=?, languages=?, teacher_id=?, must_change_password=?, sipuni_extension=?
     WHERE id=?
   `).run(patch.login, passwordHash, patch.name, patch.role, patch.age, patch.group_id, patch.languages, patch.teacher_id, nextMustChangePassword, patch.sipuni_extension, targetId);
+  if (password || patch.role !== cur.role || patch.login !== cur.login) revokeAllUserSessions(targetId);
 
   res.json(rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(targetId)));
 });
@@ -329,7 +331,7 @@ router.put('/:id/children', requireRole('admin'), validateBody(childrenSchema), 
     for (const sid of uniqueChildren) {
       const student = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'student'").get(sid);
       if (student) {
-        const linkId = `pc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const linkId = genId('pc');
         insertLink.run(linkId, parentId, sid, Date.now());
       }
     }

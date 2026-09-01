@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('./db');
-const { authRequired, requireRole, hashPassword } = require('./auth');
+const { authRequired, requireRole, hashPassword, revokeAllUserSessions } = require('./auth');
 const { parseCsv } = require('./util');
 const { onboardClients, revealCredential, temporaryPassword, storeCredential } = require('./onboarding');
 const { sendAccessMessage, normalizePhone } = require('./whatsapp');
@@ -84,6 +84,7 @@ router.post('/client-credentials/reset-student', credentialsAllowed, (req, res) 
   const password = temporaryPassword();
   db.transaction(() => {
     db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(hashPassword(password), student.id);
+    revokeAllUserSessions(student.id);
     storeCredential({ userId: student.id, login: student.login, password, kind: 'student', actorId: req.user.id });
   })();
   res.json({ userId: student.id, login: student.login, password, kind: 'student' });

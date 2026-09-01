@@ -8,6 +8,7 @@ const { canAccessStudent } = require('./access-scope');
 const { originAllowed } = require('./http-security');
 
 let wss = null;
+let authSweep = null;
 const MAX_CONNECTIONS_PER_SOURCE = 20;
 const MAX_TOTAL_CONNECTIONS = 1000;
 const sourceConnections = new Map();
@@ -63,6 +64,7 @@ function init(server) {
       return;
     }
     socket.userId = current.id;
+    socket.sessionId = payload.jti;
     socket.role = current.role;
     socket.send(JSON.stringify({ type: 'hello', userId: current.id, role: current.role }));
 
@@ -73,6 +75,16 @@ function init(server) {
       } catch {}
     });
   });
+  authSweep = setInterval(() => {
+    const now = Date.now();
+    for (const socket of wss.clients) {
+      if (!socket.sessionId) continue;
+      const active = db.prepare(`SELECT 1 FROM auth_sessions WHERE id=? AND revoked_at IS NULL
+        AND idle_expires_at>? AND absolute_expires_at>?`).get(socket.sessionId, now, now);
+      if (!active) try { socket.close(4001, 'session expired'); } catch {}
+    }
+  }, 60_000);
+  authSweep.unref();
   console.log('[ws] WebSocket-сервер запущен на /ws');
 }
 
@@ -100,6 +112,8 @@ function broadcastToUsers(userIds, payload) {
 
 function close() {
   if (!wss) return;
+  if (authSweep) clearInterval(authSweep);
+  authSweep = null;
   for (const client of wss.clients) try { client.close(1001, 'server shutdown'); } catch {}
   wss.close(); wss = null; sourceConnections.clear();
 }

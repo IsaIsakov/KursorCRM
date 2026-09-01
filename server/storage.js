@@ -106,7 +106,7 @@ async function downloadUrl(relativePath, { fileName, contentType, expiresIn = 60
   if (!isBucketPath(relativePath)) return null;
   const command = new GetObjectCommand({ Bucket: process.env.BUCKET, Key: bucketKey(relativePath),
     ResponseContentType: contentType || undefined,
-    ResponseContentDisposition: fileName ? `inline; filename*=UTF-8''${encodeURIComponent(fileName)}` : undefined });
+    ResponseContentDisposition: fileName ? `${/^image\/(?!svg)|^video\//i.test(contentType || '') ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}` : undefined });
   return getSignedUrl(bucketClient(), command, { expiresIn: Math.max(60, Math.min(3600, expiresIn)) });
 }
 
@@ -121,6 +121,29 @@ async function headFile(relativePath) {
   if (!isBucketPath(relativePath)) return null;
   const result = await bucketClient().send(new HeadObjectCommand({ Bucket: process.env.BUCKET, Key: bucketKey(relativePath) }));
   return { size: Number(result.ContentLength || 0), contentType: result.ContentType || null };
+}
+
+async function readPrefix(relativePath, maxBytes = 4096) {
+  const limit = Math.max(64, Math.min(64 * 1024, Number(maxBytes) || 4096));
+  if (isBucketPath(relativePath)) {
+    const result = await bucketClient().send(new GetObjectCommand({
+      Bucket: process.env.BUCKET, Key: bucketKey(relativePath), Range: `bytes=0-${limit - 1}`,
+    }));
+    const chunks = []; let total = 0;
+    for await (const chunk of result.Body) {
+      const part = Buffer.from(chunk); chunks.push(part); total += part.length;
+      if (total >= limit) break;
+    }
+    return Buffer.concat(chunks).subarray(0, limit);
+  }
+  const full = resolveFile(relativePath);
+  if (!full) return null;
+  const fd = fs.openSync(full, 'r');
+  try {
+    const buffer = Buffer.alloc(limit);
+    const bytes = fs.readSync(fd, buffer, 0, limit, 0);
+    return buffer.subarray(0, bytes);
+  } finally { fs.closeSync(fd); }
 }
 
 async function copyLocalFile(localPath, relativePath, options = {}) {
@@ -156,6 +179,22 @@ async function pruneBucket(prefix, olderThanMs) {
   return removed;
 }
 
+async function removeBucketObjects(prefix, predicate) {
+  if (!BUCKET_ENABLED) return [];
+  const removed = []; let continuationToken;
+  do {
+    const page = await bucketClient().send(new ListObjectsV2Command({ Bucket: process.env.BUCKET, Prefix: prefix, ContinuationToken: continuationToken }));
+    for (const object of page.Contents || []) {
+      if (object.Key && predicate(object.Key)) {
+        await bucketClient().send(new DeleteObjectCommand({ Bucket: process.env.BUCKET, Key: object.Key }));
+        removed.push(object.Key);
+      }
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return removed;
+}
+
 async function sendStoredFile(res, relativePath, options = {}) {
   if (isBucketPath(relativePath)) {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -165,7 +204,10 @@ async function sendStoredFile(res, relativePath, options = {}) {
   const full = resolveFile(relativePath);
   if (!full) return false;
   if (options.contentType) res.setHeader('Content-Type', options.contentType);
-  if (options.fileName) res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(options.fileName)}`);
+  if (options.fileName) {
+    const mode = /^image\/(?!svg)|^video\//i.test(options.contentType || '') ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${mode}; filename*=UTF-8''${encodeURIComponent(options.fileName)}`);
+  }
   res.setHeader('Cache-Control', options.cacheControl || 'private, no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.sendFile(full);
@@ -197,5 +239,5 @@ function verifyUrl(artifactId, expires, supplied, now = Date.now()) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-module.exports = { saveFile, importFile, deleteFile, resolveFile, sendStoredFile, downloadUrl, uploadUrl, headFile, copyLocalFile, pruneBucket, checkReady,
+module.exports = { saveFile, importFile, deleteFile, resolveFile, sendStoredFile, downloadUrl, uploadUrl, headFile, readPrefix, copyLocalFile, pruneBucket, removeBucketObjects, checkReady,
   getUrl, verifyUrl, isBucketPath, asBucketPath, isManagedPath, managedRelativePath, PRIVATE_ROOT, BUCKET_ENABLED, BUCKET_PARTIAL };

@@ -596,6 +596,52 @@ const MIGRATIONS = [
         WHERE external_source IS NOT NULL AND external_id IS NOT NULL`);
     },
   },
+  {
+    version: 23,
+    name: 'revocable_auth_sessions_and_webhook_replay_guard',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL,
+          idle_expires_at INTEGER NOT NULL,
+          absolute_expires_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          source_hash TEXT,
+          user_agent_hash TEXT,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
+          ON auth_sessions(user_id, revoked_at, absolute_expires_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry
+          ON auth_sessions(absolute_expires_at, idle_expires_at);
+
+        CREATE TABLE IF NOT EXISTS webhook_events (
+          provider TEXT NOT NULL,
+          event_key TEXT NOT NULL,
+          received_at INTEGER NOT NULL,
+          PRIMARY KEY(provider, event_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_webhook_events_received
+          ON webhook_events(received_at);
+      `);
+      // Older releases placed the Sipuni credential in the callback path and
+      // logged that path. Rotate it once so any historic log copy is useless.
+      const sipuni = db.prepare("SELECT value FROM app_settings WHERE key='sipuni'").get();
+      if (sipuni) {
+        let value = {};
+        try { value = JSON.parse(sipuni.value); } catch {}
+        if (value.webhookToken) {
+          value.webhookToken = require('./settings-crypto').encrypt(crypto.randomBytes(32).toString('base64url'));
+          value.webhookRotatedAt = Date.now();
+          value.webhookNeedsReconnect = true;
+          db.prepare("UPDATE app_settings SET value=? WHERE key='sipuni'").run(JSON.stringify(value));
+        }
+      }
+    },
+  },
 ];
 
 function runMigrations(db, migrations = MIGRATIONS) {

@@ -11,7 +11,7 @@ const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
-const { originAllowed, headers: securityHeaders } = require('./http-security');
+const { originAllowed, headers: securityHeaders, apiProtocolGuard } = require('./http-security');
 const logger = require('./logger');
 
 const db = require('./db');
@@ -35,6 +35,7 @@ if (process.env.TRUST_PROXY_HOPS !== undefined) {
   app.set('trust proxy', hops);
 }
 app.use(securityHeaders);
+app.use(apiProtocolGuard);
 app.use(compression({ threshold: 1024 }));
 app.use(cors({
   origin(origin, callback) {
@@ -49,6 +50,7 @@ app.use(cors({
 // Большие файлы идут потоковым multipart непосредственно в закрытое хранилище.
 // JSON остаётся небольшим; 4 МБ нужны только для совместимости с текущими аватарами.
 app.use(express.json({ limit: '4mb' }));
+app.use(express.urlencoded({ extended: false, limit: '64kb', parameterLimit: 100 }));
 app.use(require('./validation').safeJson);
 app.use(require('./audit').middleware);
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
@@ -65,7 +67,7 @@ app.get('/api/ready', async (_req, res) => {
     const latest = require('./migrations').MIGRATIONS.at(-1).version;
     if (version !== latest) throw new Error(`schema ${version}/${latest}`);
     const fileStorage = await require('./storage').checkReady();
-    res.json({ status: 'ready', schemaVersion: version, persistentDataRoot: persistence.root, fileStorage: fileStorage.mode });
+    res.json({ status: 'ready', schemaVersion: version, persistentStorage: true, fileStorage: fileStorage.mode });
   } catch (error) {
     logger.error('readiness_failed', { message: error.message });
     res.status(503).json({ status: 'not_ready' });

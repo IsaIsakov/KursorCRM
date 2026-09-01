@@ -3,6 +3,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const db = require('./db');
 const storage = require('./storage');
+const backupCrypto = require('./backup-crypto');
 
 const BACKUP_DIR = path.resolve(process.env.BACKUP_DIR || path.join(__dirname, 'backups'));
 const RETENTION_DAYS = Math.max(1, Number(process.env.BACKUP_RETENTION_DAYS) || 14);
@@ -52,14 +53,17 @@ async function createBackup(now = new Date()) {
     enforceRetention(now.getTime());
     console.log(`[backup] Создан и проверен: ${path.basename(finalFile)}`);
     if (storage.BUCKET_ENABLED) {
+      const encryptedFile = `${finalFile}.enc`;
       try {
-        await storage.copyLocalFile(finalFile, `backups/${path.basename(finalFile)}`, { contentType: 'application/vnd.sqlite3' });
+        await backupCrypto.encryptFile(finalFile, encryptedFile);
+        await storage.copyLocalFile(encryptedFile, `backups/${path.basename(finalFile)}.enc`, { contentType: 'application/octet-stream' });
+        await storage.removeBucketObjects('backups/', key => /\.sqlite$/i.test(key));
         await storage.pruneBucket('backups/', now.getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
-        console.log(`[backup] Внешняя копия проверена: backups/${path.basename(finalFile)}`);
+        console.log(`[backup] Зашифрованная внешняя копия проверена: backups/${path.basename(finalFile)}.enc`);
       } catch (error) {
         console.error('[backup] Локальная копия готова, но внешняя копия не создана:', error.message);
         if (process.env.REQUIRE_OFFSITE_BACKUP === 'true') throw error;
-      }
+      } finally { try { if (fs.existsSync(encryptedFile)) fs.unlinkSync(encryptedFile); } catch {} }
     }
     return finalFile;
   } catch (error) {

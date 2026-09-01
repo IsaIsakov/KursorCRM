@@ -10,6 +10,7 @@ const { genId } = require('./util');
 const { hasPermission } = require('./permissions');
 const storage = require('./storage');
 const { parseMultipart } = require('./multipart');
+const fileSecurity = require('./file-security');
 
 const MAT_MAX_BYTES = 50 * 1024 * 1024; // 50 МБ на файл материала
 // Разрешённые расширения для загружаемых файлов материалов
@@ -44,6 +45,8 @@ async function saveMaterialFile(dataUrl, matId, fileName) {
   let ext = MAT_EXT[mime];
   if (!ext && fileName && /\.([a-z0-9]{1,8})$/i.test(fileName)) ext = fileName.split('.').pop().toLowerCase();
   ext = (ext || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin';
+  const checked = fileSecurity.validatePrefix(buf.subarray(0, 4096), { fileName: fileName || `material.${ext}`, mime });
+  if (!checked.ok) throw { code: 400, msg: checked.error };
   const rel = `materials/${matId}.${ext}`;
   return storage.saveFile(buf, rel, { contentType: mime });
 }
@@ -138,6 +141,8 @@ router.post('/materials', multipartMaterial, async (req, res, next) => {
   if (req.upload) {
     const ext = MAT_EXT[req.upload.mime];
     if (!ext) return res.status(400).json({ error: 'Тип файла не разрешён' });
+    const checked = fileSecurity.validateLocalFile(req.upload.tempPath, { fileName:req.upload.filename, mime:req.upload.mime });
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
     const rel = `materials/${id}.${ext}`;
     try { finalContent = await storage.importFile(req.upload.tempPath, rel, { size: req.upload.size, contentType: req.upload.mime }); }
     catch (error) { return next(error); }

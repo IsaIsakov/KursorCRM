@@ -4,7 +4,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const db = require('./db');
-const { signToken, checkPassword, authRequired, requireRole, hashPassword, issueSession, clearSession, parseCookies, CSRF_COOKIE } = require('./auth');
+const { signToken, checkPassword, needsPasswordRehash, authRequired, requireRole, hashPassword, issueSession, clearSession,
+  parseCookies, tokenFromCookie, revokeToken, revokeAllUserSessions, CSRF_COOKIE } = require('./auth');
 const { getPermissions } = require('./permissions');
 const { isAcceptablePassword } = require('./security-config');
 const loginGuard = require('./login-guard');
@@ -16,11 +17,11 @@ const { sendAccessMessage, normalizePhone } = require('./whatsapp');
 const router = express.Router();
 
 const loginSchema = z.strictObject({ login: text(100), password: z.string().min(1).max(1024) });
-const changePasswordSchema = z.strictObject({ oldPassword: z.string().min(1).max(1024), newPassword: z.string().min(10).max(1024) });
+const changePasswordSchema = z.strictObject({ oldPassword: z.string().min(1).max(1024), newPassword: z.string().min(12).max(1024) });
 const recoverySchema = z.strictObject({
   login: text(100),
   recoveryCode: z.string().min(1).max(1024),
-  newPassword: z.string().min(10).max(1024),
+  newPassword: z.string().min(12).max(1024),
 });
 const resetRequestSchema = z.strictObject({ login: text(100) });
 
@@ -47,10 +48,11 @@ router.post('/recover-admin', validateBody(recoverySchema), (req, res) => {
     if (failure.locked) res.setHeader('Retry-After', String(failure.retryAfter));
     return res.status(401).json({ error: 'Неверный логин администратора или код восстановления' });
   }
-  if (!isAcceptablePassword(newPassword)) return res.status(400).json({ error: 'Пароль должен содержать не менее 10 символов' });
+  if (!isAcceptablePassword(newPassword)) return res.status(400).json({ error: 'Пароль должен содержать не менее 12 символов' });
   db.transaction(() => {
     db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(hashPassword(newPassword), row.id);
     db.prepare('UPDATE account_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(Date.now(), row.id);
+    revokeAllUserSessions(row.id);
   })();
   loginGuard.recordSuccess(source, limiterLogin);
   clearSession(res);
@@ -117,6 +119,7 @@ router.post('/password-reset/requests/:id/resolve', authRequired, async (req, re
     const password=temporaryPassword(), context=resetContext(row.user_id), now=Date.now();
     db.transaction(()=>{
       db.prepare('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?').run(hashPassword(password),row.user_id);
+      revokeAllUserSessions(row.user_id, now);
       storeCredential({userId:row.user_id,login:row.login,password,kind:row.role,actorId:req.user.id});
       db.prepare("UPDATE password_reset_requests SET status='resolved',resolved_at=?,resolved_by=?,delivery_channel=? WHERE id=?")
         .run(now,req.user.id,context.phone?'whatsapp_or_copy':'copy',row.id);
@@ -147,13 +150,16 @@ router.post('/login', validateBody(loginSchema), (req, res) => {
   const row = db.prepare('SELECT * FROM users WHERE login = ?').get(String(login).trim());
   // Always run bcrypt. This makes an unknown login and a wrong password much
   // harder to distinguish by response time.
-  const dummyHash = '$2a$10$7EqJtq98hPqEX7fNZaFWoO5Yf2mP9m7xvL1nH6tZQzK0Qh6VQ7L3a';
+  const dummyHash = '$2b$12$rFdvfnqNvabZbkMu9qbkje25htEdWNWg3H9Zxsyt2mxYCu8sLIxfa';
   const passwordOk = checkPassword(password, row ? row.password_hash : dummyHash);
   if (!row || !passwordOk) {
     const failure = loginGuard.recordFailure(source, login);
     console.warn(`[security] login_failed key=${failure.eventKey} count=${failure.count} locked=${failure.locked}`);
     if (failure.locked) res.setHeader('Retry-After', String(failure.retryAfter));
     return res.status(401).json({ error: 'Неверный логин или пароль' });
+  }
+  if (needsPasswordRehash(row.password_hash)) {
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(password), row.id);
   }
   loginGuard.recordSuccess(source, login);
   const user = {
@@ -163,7 +169,7 @@ router.post('/login', validateBody(loginSchema), (req, res) => {
     teacher_id: row.teacher_id,
     mustChangePassword: !!row.must_change_password,
   };
-  const token = signToken(user);
+  const token = signToken(user, { source, userAgent: req.headers['user-agent'] });
   const csrfToken = issueSession(res, token);
   res.json({ user, csrfToken });
 });
@@ -186,7 +192,8 @@ router.get('/me', authRequired, (req, res) => {
   res.json(out);
 });
 
-router.post('/logout', authRequired, validateBody(z.strictObject({})), (_req, res) => {
+router.post('/logout', authRequired, validateBody(z.strictObject({})), (req, res) => {
+  revokeToken(tokenFromCookie(req.headers.cookie));
   clearSession(res);
   res.json({ ok: true });
 });
@@ -194,16 +201,19 @@ router.post('/logout', authRequired, validateBody(z.strictObject({})), (_req, re
 router.post('/change-password', authRequired, validateBody(changePasswordSchema), (req, res) => {
   const { oldPassword, newPassword } = req.body || {};
   if (!oldPassword || !isAcceptablePassword(newPassword)) {
-    return res.status(400).json({ error: 'Новый пароль слишком короткий (минимум 10 символов)' });
+    return res.status(400).json({ error: 'Новый пароль слишком короткий (минимум 12 символов)' });
   }
   if (oldPassword === newPassword) return res.status(400).json({ error: 'Новый пароль должен отличаться от старого' });
   const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
   if (!row || !checkPassword(oldPassword, row.password_hash)) {
     return res.status(401).json({ error: 'Старый пароль неверен' });
   }
-  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(newPassword), req.user.id);
-  // A temporary password must never remain revealable after the owner changes it.
-  db.prepare('UPDATE account_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(Date.now(), req.user.id);
+  const now = Date.now();
+  db.transaction(() => {
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(newPassword), req.user.id);
+    db.prepare('UPDATE account_credentials SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(now, req.user.id);
+    revokeAllUserSessions(req.user.id, now, req.sessionId);
+  })();
   res.json({ ok: true });
 });
 

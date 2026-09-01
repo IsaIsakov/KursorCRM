@@ -13,6 +13,7 @@ const { z, id: idSchema, optionalText, validateBody } = require('./validation');
 const { validateGroupStudents, sessionTimestamp } = require('./group-scope');
 const { parseMultipart, isMultipart } = require('./multipart');
 const { notifyParentAboutArtifact } = require('./whatsapp');
+const fileSecurity = require('./file-security');
 
 const router = express.Router();
 const ARTIFACT_MAX_BYTES = 150 * 1024 * 1024;
@@ -117,6 +118,12 @@ function rowToArtifact(r) {
   return o;
 }
 
+function contentTypeForPath(filePath, type) {
+  const ext = /\.([a-z0-9]{1,10})$/i.exec(storage.managedRelativePath(filePath || ''))?.[1]?.toLowerCase();
+  const map = { mp4:'video/mp4',mov:'video/quicktime',webm:'video/webm',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',heic:'image/heic',heif:'image/heif' };
+  return map[ext] || (type === 'video' ? 'video/mp4' : type === 'screenshot' ? 'image/jpeg' : 'application/octet-stream');
+}
+
 // GET /api/session-artifacts?student_id=&lesson_session_id=
 router.get('/', authRequired, (req, res) => {
   const { student_id, lesson_session_id } = req.query;
@@ -157,6 +164,7 @@ router.get('/:id/content', async (req, res, next) => {
   try {
     const sent = await storage.sendStoredFile(res, row.file_path, {
       fileName: row.title || (row.type === 'video' ? 'lesson-video' : 'lesson-file'),
+      contentType: contentTypeForPath(row.file_path, row.type),
       cacheControl: 'private, max-age=300',
     });
     if (!sent) return res.status(404).json({ error: 'Файл не найден' });
@@ -177,6 +185,7 @@ router.post('/direct-upload', validateBody(directUploadSchema), async (req, res,
   if (status) return res.status(status).json({ error: lessonOrMessage });
   if (type === 'video' && !mime.startsWith('video/')) return res.status(400).json({ error: 'Для видео нужен видеофайл' });
   if (type === 'screenshot' && !mime.startsWith('image/')) return res.status(400).json({ error: 'Для скриншота нужно изображение' });
+  if (!fileSecurity.SAFE_EXTENSIONS.has(fileSecurity.extension(fileName))) return res.status(400).json({ error: 'Тип файла не разрешён' });
   const id = genId('sa');
   const extByMime = { 'video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov','image/png':'png','image/jpeg':'jpg',
     'image/webp':'webp','application/pdf':'pdf','text/plain':'txt','application/zip':'zip',
@@ -187,7 +196,7 @@ router.post('/direct-upload', validateBody(directUploadSchema), async (req, res,
   const safeStudent = String(studentId).replace(/[^a-zA-Z0-9_-]/g, '_');
   const safeSession = String(lessonSessionId).replace(/[^a-zA-Z0-9_-]/g, '_');
   const key = `sessions/${safeStudent}/${safeSession}/${id}.${ext}`;
-  const payload = { id, key, lessonSessionId, studentId, type, title: title || null, mime, size,
+  const payload = { id, key, lessonSessionId, studentId, type, title: title || null, fileName, mime, size,
     userId: req.user.id, expiresAt: Date.now() + 20 * 60 * 1000 };
   try {
     const uploadUrl = await storage.uploadUrl(key, { contentType: mime, expiresIn: 15 * 60 });
@@ -208,6 +217,12 @@ router.post('/direct-upload/complete', async (req, res, next) => {
     if (!object || object.size !== payload.size || object.size > ARTIFACT_MAX_BYTES || (object.contentType && object.contentType !== payload.mime)) {
       await storage.deleteFile(storedPath).catch(() => {});
       return res.status(400).json({ error: 'Загруженный файл не прошёл проверку размера или типа' });
+    }
+    const prefix = await storage.readPrefix(storedPath);
+    const checked = fileSecurity.validatePrefix(prefix, { fileName: payload.fileName, mime: payload.mime, kind: payload.type });
+    if (!checked.ok) {
+      await storage.deleteFile(storedPath).catch(() => {});
+      return res.status(400).json({ error: checked.error });
     }
     const inserted = db.prepare(`INSERT OR IGNORE INTO session_artifacts
       (id,lesson_session_id,student_id,type,title,file_path,url,created_at,expires_at,deleted)
@@ -263,6 +278,8 @@ router.post('/', multipartArtifact, validateArtifact, async (req, res, next) => 
     };
     if (type === 'video' && !req.upload.mime.startsWith('video/')) return res.status(400).json({ error: 'Для видео нужен видеофайл' });
     if (type === 'screenshot' && !req.upload.mime.startsWith('image/')) return res.status(400).json({ error: 'Для скриншота нужно изображение' });
+    const checked = fileSecurity.validateLocalFile(req.upload.tempPath, { fileName:req.upload.filename, mime:req.upload.mime, kind:type });
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
     const ext = mimeExt[req.upload.mime] || 'bin';
     const safeStudent = String(studentId).replace(/[^a-zA-Z0-9_-]/g, '_');
     const safeSession = String(lessonSessionId).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -278,7 +295,10 @@ router.post('/', multipartArtifact, validateArtifact, async (req, res, next) => 
     if (!buf.length) return res.status(400).json({ error: 'Пустой файл' });
     if (buf.length > MAX_BYTES) return res.status(413).json({ error: 'Файл больше 150 МБ' });
     const mime = m[1];
-    const ext = (mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin';
+    const extByMime = { 'video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov','image/png':'png','image/jpeg':'jpg','image/webp':'webp','application/pdf':'pdf','text/plain':'txt','application/zip':'zip' };
+    const ext = extByMime[mime] || '';
+    const checked = fileSecurity.validatePrefix(buf.subarray(0,4096), { fileName:`upload.${ext}`, mime, kind:type });
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
     const safeStudent = String(studentId).replace(/[^a-zA-Z0-9_-]/g, '_');
     const safeSession = String(lessonSessionId).replace(/[^a-zA-Z0-9_-]/g, '_');
     const rel = `sessions/${safeStudent}/${safeSession}/${id}.${ext}`;

@@ -113,8 +113,8 @@ router.post('/import/users', requireRole('admin'), (req, res) => {
     const existsId = existingLogins.get(login);
     const action = existsId ? 'update' : 'create';
     const createPassword = (r.password || 'kursor-temp-123').toString();
-    if (action === 'create' && createPassword.length < 10) {
-      result.errors.push({ line, error: `Пароль для ${login} должен содержать минимум 10 символов` });
+    if (action === 'create' && createPassword.length < 12) {
+      result.errors.push({ line, error: `Пароль для ${login} должен содержать минимум 12 символов` });
       return;
     }
     if (action === 'create') result.toCreate++; else result.toUpdate++;

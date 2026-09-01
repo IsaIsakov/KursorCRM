@@ -14,6 +14,7 @@ const { z, id: idSchema, optionalText, timestamp, validateBody } = require('./va
 const { parseMultipart } = require('./multipart');
 const storage = require('./storage');
 const { lessonDay: normalizedLessonDay, lessonTimestamp } = require('./lesson-date');
+const fileSecurity = require('./file-security');
 
 const router = express.Router();
 router.use(authRequired);
@@ -578,6 +579,8 @@ router.post('/homework/:id/file', homeworkUpload, async (req, res, next) => {
   const previousPath = hw.file_path;
   const safeId = String(hw.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const original = String(req.upload.filename || 'homework-file').slice(0, 180);
+  const checked = fileSecurity.validateLocalFile(req.upload.tempPath, { fileName:original, mime:req.upload.mime });
+  if (!checked.ok) return res.status(400).json({ error: checked.error });
   const ext = original.includes('.') ? original.split('.').pop().replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) : 'bin';
   const rel = `homework/${safeId}/${genId('file')}.${ext || 'bin'}`;
   let storedPath;
@@ -621,6 +624,8 @@ router.post('/homework/:id/submission', requireRole('student'), homeworkSubmissi
   const ext = original.includes('.') ? original.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) : '';
   const allowedExt = new Set(['jpg','jpeg','png','webp','heic','heif','pdf','doc','docx','ppt','pptx','xls','xlsx','txt','zip']);
   if (!allowedExt.has(ext)) return res.status(400).json({ error: 'Разрешены фото, PDF, документы Office, TXT и ZIP' });
+  const checked = fileSecurity.validateLocalFile(req.upload.tempPath, { fileName:original, mime:req.upload.mime });
+  if (!checked.ok) return res.status(400).json({ error: checked.error });
   const safeHomework = String(homework.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const safeStudent = String(req.user.id).replace(/[^a-zA-Z0-9_-]/g, '_');
   const rel = `homework-submissions/${safeHomework}/${safeStudent}/${genId('answer')}.${ext}`;

@@ -36,7 +36,7 @@ function seedAdmin() {
       throw new Error('Для первой production-установки задайте SEED_ADMIN_LOGIN и уникальный SEED_ADMIN_PASSWORD длиной не менее 12 символов');
     }
   }
-  const hash = bcrypt.hashSync(password, 10);
+  const hash = bcrypt.hashSync(password, Math.min(14, Math.max(11, Number(process.env.BCRYPT_COST) || 12)));
   db.prepare(`
     INSERT INTO users (id, login, password_hash, name, role, age, group_id, languages, must_change_password, created_at)
     VALUES (?, ?, ?, ?, 'admin', 0, 0, '[]', 1, ?)

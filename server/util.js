@@ -2,16 +2,21 @@
    KURSOR — Общие утилиты для роутов CRM.
    ============================================================ */
 
+const crypto = require('crypto');
+
 // ID в стиле проекта: prefix_<timestamp36>_<random>
 function genId(prefix) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  return `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(9).toString('base64url')}`;
 }
 
 // --- CSV ---
 function toCsv(rows, columns) {
   const esc = (v) => {
     if (v === null || v === undefined) return '';
-    const s = String(v);
+    let s = String(v);
+    // Excel/LibreOffice execute leading formula characters when a CSV is
+    // opened. Prefix untrusted cells so exports cannot become formula payloads.
+    if (/^[\t\r ]*[=+\-@]/.test(s)) s = `'${s}`;
     if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
     return s;
   };

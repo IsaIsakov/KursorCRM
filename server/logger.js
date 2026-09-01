@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { safeRequestPath } = require('./http-security');
 const production = process.env.NODE_ENV === 'production';
 
 function write(level, event, fields = {}) {
@@ -19,7 +20,7 @@ function accessLog(req, res, next) {
   res.once('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - req.startedAt) / 1e6;
     write(res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info', 'http_request', {
-      requestId: req.id, method: req.method, path: req.originalUrl.split('?')[0], status: res.statusCode,
+      requestId: req.id, method: req.method, path: safeRequestPath(req.originalUrl), status: res.statusCode,
       durationMs: Math.round(durationMs * 10) / 10, userId: req.user && req.user.id || null,
     });
   });

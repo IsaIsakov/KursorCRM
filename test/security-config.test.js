@@ -39,9 +39,10 @@ test('development warns instead of blocking startup', () => {
   assert.equal(result.warnings.length, 3);
 });
 
-test('temporary and replacement passwords require at least 10 characters', () => {
+test('temporary and replacement passwords require at least 12 characters', () => {
   assert.equal(isAcceptablePassword('123456789'), false);
-  assert.equal(isAcceptablePassword('1234567890'), true);
+  assert.equal(isAcceptablePassword('1234567890'), false);
+  assert.equal(isAcceptablePassword('123456789012'), true);
   assert.equal(isAcceptablePassword(null), false);
 });
 

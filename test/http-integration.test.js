@@ -28,7 +28,7 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   }
   const ready = await fetch(`${base}/api/ready`);
   assert.equal(ready.status, 200);
-  assert.equal((await ready.json()).schemaVersion, 22);
+  assert.equal((await ready.json()).schemaVersion, 23);
 
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin', password: 'admin' }) });
   assert.equal(login.status, 200);
@@ -216,13 +216,13 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
 
   const artifactForm = new FormData();
   for (const [key, value] of Object.entries({ lessonSessionId: lesson.id, studentId: student.id, type: 'screenshot', title: 'E2E image' })) artifactForm.append(key, value);
-  artifactForm.append('file', new Blob([Buffer.from('fake-png-stream')], { type: 'image/png' }), 'screen.png');
+  artifactForm.append('file', new Blob([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]),Buffer.from('fake-png-stream')], { type: 'image/png' }), 'screen.png');
   const artifact = (await api('POST', '/api/session-artifacts', artifactForm, 201)).body;
   assert.match(artifact.url, /^\/api\/session-artifacts\//);
   const teacherArtifacts=await sessionApi(teacherCookie,teacherLoginBody.csrfToken,'GET','/api/session-artifacts');
   assert.ok(teacherArtifacts.some(item=>item.id===artifact.id&&item.studentName===student.name&&item.groupName===group.name));
   const file = await api('GET', artifact.url, undefined, 200);
-  assert.equal(file.body, 'fake-png-stream');
+  assert.match(file.body, /fake-png-stream/);
 
   const materialForm = new FormData();
   for (const [key, value] of Object.entries({ courseId: modules[0].id, type: 'file', title: 'E2E material', content: '' })) materialForm.append(key, value);
@@ -239,10 +239,10 @@ test('admin journey works end-to-end with cookie, ledger and multipart files', {
   assert.ok(studentReset);
   const resetResult=(await api('POST',`/api/auth/password-reset/requests/${studentReset.id}/resolve`,{})).body;
   assert.equal(resetResult.login,`student_${port}`);
-  assert.ok(resetResult.password.length>=10);
+  assert.ok(resetResult.password.length>=12);
 
   await api('POST', '/api/auth/logout', {});
-  const after = await fetch(`${base}/api/auth/me`, { headers: { Cookie: 'kursor_session=' } });
+  const after = await fetch(`${base}/api/auth/me`, { headers: { Cookie: cookie } });
   assert.equal(after.status, 401);
 
   child.kill('SIGTERM');

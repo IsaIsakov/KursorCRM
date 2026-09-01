@@ -4,6 +4,7 @@ const db = require('./db');
 const { authRequired } = require('./auth');
 const { genId } = require('./util');
 const { encrypt, decrypt } = require('./settings-crypto');
+const requestLimits = require('./request-limits');
 
 const router = express.Router();
 const normalizePhone = value => String(value || '').replace(/\D/g, '').replace(/^8(?=\d{10}$)/, '7');
@@ -21,6 +22,7 @@ function readSettings() {
     enabled: stored.enabled !== false,
     webhookToken: webhookToken || String(process.env.SIPUNI_WEBHOOK_TOKEN || '').trim(),
     callUrlTemplate: callUrlTemplate || String(process.env.SIPUNI_CALL_URL_TEMPLATE || '').trim(),
+    webhookNeedsReconnect: !!stored.webhookNeedsReconnect,
   };
 }
 
@@ -60,6 +62,11 @@ function safeTemplateUrl(template, phone, extension) {
 
 // Sipuni calls this URL without a KURSOR session. The long random token is the credential.
 router.all('/events/:token', (req, res) => {
+  const rate = requestLimits.publicRequest(req.ip || req.socket.remoteAddress, 'sipuni-webhook', 300);
+  if (!rate.allowed) {
+    res.setHeader('Retry-After', String(rate.retryAfter));
+    return res.status(429).json({ success: false });
+  }
   const settings = readSettings();
   const actual = Buffer.from(String(req.params.token || ''));
   const expected = Buffer.from(settings.webhookToken);
@@ -67,11 +74,19 @@ router.all('/events/:token', (req, res) => {
   const p = { ...req.query, ...req.body }, event = Number(p.event), callId = String(p.call_id || '').trim();
   // Sipuni may ping the URL without call fields while saving integration settings.
   if (!callId || ![1, 2, 3, 4].includes(event)) return res.json({ success: true });
+  const eventKey = crypto.createHash('sha256').update([
+    callId, event, p.timestamp || '', p.status || '', p.call_answer_timestamp || '', p.call_record_link || '',
+  ].join('|')).digest('hex');
+  const accepted = db.prepare("INSERT OR IGNORE INTO webhook_events(provider,event_key,received_at) VALUES ('sipuni',?,?)")
+    .run(eventKey, Date.now());
+  if (!accepted.changes) return res.json({ success: true, duplicate: true });
+  db.prepare("DELETE FROM webhook_events WHERE provider='sipuni' AND received_at<?").run(Date.now() - 30 * 86400000);
   const external = normalizePhone(p.src_type === '1' ? p.src_num : p.dst_type === '1' ? p.dst_num : (p.src_num || p.dst_num));
   const extension = String(p.short_src_num || p.short_dst_num || '').trim();
   let row = db.prepare('SELECT * FROM sipuni_calls WHERE call_id=?').get(callId);
   if (!row) {
-    row = db.prepare('SELECT * FROM sipuni_calls WHERE call_id IS NULL AND phone=? AND created_at>? ORDER BY created_at DESC LIMIT 1').get(external, Date.now() - 30 * 60 * 1000);
+    row = db.prepare(`SELECT * FROM sipuni_calls WHERE call_id IS NULL AND phone=? AND extension=?
+      AND created_at>? ORDER BY created_at DESC LIMIT 1`).get(external, extension, Date.now() - 30 * 60 * 1000);
     if (row) db.prepare('UPDATE sipuni_calls SET call_id=?,updated_at=? WHERE id=?').run(callId, Date.now(), row.id);
     else {
       const curator = db.prepare("SELECT id FROM users WHERE role='curator' AND sipuni_extension=?").get(extension);
@@ -84,10 +99,16 @@ router.all('/events/:token', (req, res) => {
   const now = Date.now();
   if (event === 1) db.prepare("UPDATE sipuni_calls SET status='ringing',started_at=COALESCE(started_at,?),updated_at=? WHERE id=?").run(eventTime(p.timestamp), now, row.id);
   if (event === 3) db.prepare("UPDATE sipuni_calls SET status='answered',answered_at=COALESCE(answered_at,?),updated_at=? WHERE id=?").run(eventTime(p.timestamp), now, row.id);
-  if (event === 2 || event === 4) {
+  if (event === 4) {
+    db.prepare("UPDATE sipuni_calls SET status=CASE WHEN status='answered' THEN 'answered' ELSE 'transferred' END,raw_status=?,updated_at=? WHERE id=?")
+      .run(String(p.status || 'TRANSFER'), now, row.id);
+  }
+  if (event === 2) {
     const started = eventTime(p.call_start_timestamp || p.timestamp), answered = Number(p.call_answer_timestamp) ? eventTime(p.call_answer_timestamp) : null, ended = eventTime(p.timestamp);
     const status = p.status === 'ANSWER' ? 'completed' : p.status === 'NOANSWER' ? 'no_answer' : p.status === 'BUSY' ? 'busy' : 'failed';
-    db.prepare('UPDATE sipuni_calls SET status=?,started_at=COALESCE(started_at,?),answered_at=COALESCE(answered_at,?),ended_at=?,duration_sec=?,recording_url=COALESCE(?,recording_url),raw_status=?,updated_at=? WHERE id=?').run(status, started, answered, ended, answered ? Math.max(0, Math.round((ended - answered) / 1000)) : 0, p.call_record_link || null, String(p.status || ''), now, row.id);
+    let recordingUrl = null;
+    try { const candidate = new URL(String(p.call_record_link || '')); if (candidate.protocol === 'https:' && candidate.toString().length <= 2048) recordingUrl = candidate.toString(); } catch {}
+    db.prepare('UPDATE sipuni_calls SET status=?,started_at=COALESCE(started_at,?),answered_at=COALESCE(answered_at,?),ended_at=?,duration_sec=?,recording_url=COALESCE(?,recording_url),raw_status=?,updated_at=? WHERE id=?').run(status, started, answered, ended, answered ? Math.max(0, Math.round((ended - answered) / 1000)) : 0, recordingUrl, String(p.status || ''), now, row.id);
   }
   res.json({ success: true });
 });
@@ -102,6 +123,7 @@ router.get('/settings', (req, res) => {
     enabled: settings.enabled,
     configured: configured(settings),
     callUrlConfigured: !!settings.callUrlTemplate,
+    webhookNeedsReconnect: settings.webhookNeedsReconnect,
     webhookUrl: settings.webhookToken && origin ? `${origin}/api/sipuni/events/${settings.webhookToken}` : '',
   });
 });
@@ -130,7 +152,7 @@ router.put('/settings', (req, res) => {
       : previous.callUrlTemplate;
     if (!callUrlTemplate) return res.status(400).json({ error: 'Вставьте ссылку заказа звонка из Sipuni' });
     const webhookToken = previous.webhookToken || crypto.randomBytes(32).toString('base64url');
-    const value = JSON.stringify({ enabled: req.body?.enabled !== false, webhookToken: encrypt(webhookToken), callUrlTemplate: encrypt(callUrlTemplate) });
+    const value = JSON.stringify({ enabled: req.body?.enabled !== false, webhookToken: encrypt(webhookToken), callUrlTemplate: encrypt(callUrlTemplate), webhookNeedsReconnect: false });
     db.prepare("INSERT INTO app_settings(key,value) VALUES('sipuni',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(value);
     const origin = String(process.env.APP_ORIGIN || '').split(',')[0].replace(/\/$/, '');
     res.json({ ok: true, configured: true, webhookUrl: `${origin}/api/sipuni/events/${webhookToken}` });
@@ -158,11 +180,11 @@ router.post('/cases/:id/call', async (req, res) => {
   if (req.user.role === 'curator' && (c.taken_by !== req.user.id || c.status !== 'in_progress')) return res.status(409).json({ error: 'Сначала возьмите клиента в работу' });
   const phone = normalizePhone(c.parent_phone), extension = String(db.prepare('SELECT sipuni_extension FROM users WHERE id=?').get(req.user.id)?.sipuni_extension || '').trim();
   if (phone.length < 10) return res.status(400).json({ error: 'У родителя не указан корректный телефон' });
-  if (!extension) return res.status(400).json({ error: 'Администратор не указал ваш внутренний номер Sipuni' });
+  if (!/^\d{1,10}$/.test(extension)) return res.status(400).json({ error: 'Внутренний номер Sipuni должен содержать только цифры' });
   const id = genId('call'), now = Date.now();
   db.prepare('INSERT INTO sipuni_calls(id,case_id,student_id,curator_id,phone,extension,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(id, c.id, c.student_id, req.user.id, phone, extension, 'requested', now, now);
   try {
-    const response = await fetch(safeTemplateUrl(settings.callUrlTemplate, phone, extension), { signal: AbortSignal.timeout(10000) });
+    const response = await fetch(safeTemplateUrl(settings.callUrlTemplate, phone, extension), { signal: AbortSignal.timeout(10000), redirect: 'error' });
     if (!response.ok) throw new Error('Sipuni ответил ' + response.status);
     res.status(202).json({ id, status: 'requested', phoneMasked: '•••' + phone.slice(-4) });
   } catch (e) {
@@ -173,6 +195,9 @@ router.post('/cases/:id/call', async (req, res) => {
 
 router.get('/cases/:id/calls', (req, res) => {
   if (!['curator', 'admin'].includes(req.user.role)) return res.status(403).json({ error: 'Нет доступа' });
+  const c = db.prepare('SELECT * FROM curator_cases WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Задача не найдена' });
+  if (req.user.role === 'curator' && c.taken_by !== req.user.id) return res.status(403).json({ error: 'Нет доступа к звонкам этой задачи' });
   res.json(db.prepare('SELECT id,status,started_at,answered_at,ended_at,duration_sec,recording_url,raw_status,created_at FROM sipuni_calls WHERE case_id=? ORDER BY created_at DESC LIMIT 100').all(req.params.id));
 });
 

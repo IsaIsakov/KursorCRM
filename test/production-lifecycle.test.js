@@ -43,7 +43,9 @@ test('admin and curator can manage staff and roster for one lesson', () => {
 
 test('overdue lessons are checked in Kazakhstan time and notify staff in background', () => {
   const cleanup = read('server/cleanup.js');
-  assert.match(cleanup, /APP_TIMEZONE_OFFSET_MINUTES\|\|300/);
+  const daily = read('server/daily-operations.js');
+  assert.match(daily, /APP_TIMEZONE_OFFSET_MINUTES \|\| 300/);
+  assert.match(daily, /teacher_day_issue/);
   assert.match(cleanup, /generateUnmarkedLessonNotifications/);
   assert.match(cleanup, /5\*60\*1000/);
 });

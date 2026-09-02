@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/uploads/mascot/happy.png">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/style.css?v=33">
+<link rel="stylesheet" href="/css/style.css?v=34">
 </head>
 <body class="admin-page">
 <header class="admin-mobile-header">
@@ -38,10 +38,10 @@
 
 <div id="modal" class="modal-overlay"><div class="modal" id="modalContent"></div></div>
 
-<script src="/data/database.js?v=33"></script>
-<script src="/js/i18n.js?v=33"></script>
-<script src="/js/api.js?v=33"></script>
-<script src="/js/app.js?v=33"></script>
+<script src="/data/database.js?v=34"></script>
+<script src="/js/i18n.js?v=34"></script>
+<script src="/js/api.js?v=34"></script>
+<script src="/js/app.js?v=34"></script>
 <script>
 const user = requireAuth(['admin','teacher','assistant']);
 let userPerms = {};
@@ -303,13 +303,14 @@ function renderUsers() {
     <p style="color:#64748b;margin-bottom:14px">Пароли хранятся на сервере в виде bcrypt-хешей и не показываются.</p>
     <div class="list-toolbar"><input class="form-input" type="search" placeholder="Поиск по имени, логину или роли" oninput="filterTableRows('usersTable',this.value)"><span data-filter-count="usersTable">Всего: ${cache.users.length}</span></div>
     <div class="table-wrap"><table class="table" id="usersTable">
-      <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Возраст</th><th>Группа</th><th>Языки</th><th>Действия</th></tr></thead>
+      <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Ставка</th><th>Возраст</th><th>Группа</th><th>Языки</th><th>Действия</th></tr></thead>
       <tbody>
         ${cache.users.map(u => `
           <tr data-search="${escapeHtml((u.name+' '+u.login+' '+u.role).toLowerCase())}">
             <td><b>${escapeHtml(u.name)}</b></td>
             <td><code>${escapeHtml(u.login)}</code></td>
             <td><span class="badge badge-${u.role==='admin'?'danger':u.role==='teacher'?'warning':'info'}">${u.role}</span></td>
+            <td>${u.role==='teacher'?(u.payRate?`${Number(u.payRate.mainRate||0).toLocaleString('ru-RU')} ₸ / ${u.payRate.rateType==='hourly'?'час':'урок'}`:'<span style="color:#dc2626">Не задана</span>'):'—'}</td>
             <td>${u.age || '—'}</td>
             <td>${KURSOR_DB.GROUPS[u.group]?.name || '—'}</td>
             <td>${(u.languages||[]).map(l=>KURSOR_DB.LANGS[l]?.icon ? `<img src="${KURSOR_DB.LANGS[l].icon}" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px;margin-right:2px">` : '').join('') || '—'}</td>
@@ -385,6 +386,16 @@ async function openUserForm(id) {
       </select>
     </div>
     <div class="form-group"><label>Внутренний номер Sipuni <small style="color:#64748b">(для куратора)</small></label><input class="form-input" id="f_sipuni_extension" value="${escapeHtml(u.sipuni_extension||'')}" placeholder="Например, 101" inputmode="numeric"><small style="color:#64748b">Должен совпадать с коротким номером сотрудника в Sipuni.</small></div>
+    <div id="teacherFields" style="display:none">
+      <div class="notice-box" style="display:block">
+        <b>Зарплатная ставка преподавателя</b><small style="display:block;color:#64748b;margin:4px 0 12px">Начисление попадёт в итог дня только за проведённые занятия.</small>
+        <div class="form-grid-2">
+          <div class="form-group"><label>Тип ставки</label><select class="form-input" id="f_rate_type"><option value="per_lesson" ${u.payRate?.rateType!=='hourly'?'selected':''}>За проведённый урок</option><option value="hourly" ${u.payRate?.rateType==='hourly'?'selected':''}>За фактический час</option></select></div>
+          <div class="form-group"><label>Основной преподаватель, ₸</label><input class="form-input" id="f_main_rate" type="number" min="0" step="100" value="${Number(u.payRate?.mainRate||0)}"></div>
+          <div class="form-group"><label>Второй преподаватель, ₸</label><input class="form-input" id="f_assistant_rate" type="number" min="0" step="100" value="${Number(u.payRate?.assistantRate||0)}"></div>
+        </div>
+      </div>
+    </div>
     <div class="form-group" id="studentFields">
       <label>Возраст</label><input class="form-input" id="f_age" type="number" value="${u.age||10}" min="6" max="18">
       <label style="margin-top:10px">Группа</label>
@@ -513,6 +524,11 @@ async function saveUser(id) {
   };
   const pwd = document.getElementById('f_password').value;
   if (pwd) data.password = pwd;
+  if (data.role === 'teacher') data.payRate = {
+    rateType: document.getElementById('f_rate_type').value,
+    mainRate: Number(document.getElementById('f_main_rate').value) || 0,
+    assistantRate: Number(document.getElementById('f_assistant_rate').value) || 0,
+  };
   const err = document.getElementById('modalErr');
   err.textContent = '';
   if (!data.name || !data.login) { err.textContent = 'Введи имя и логин'; return; }
@@ -546,8 +562,10 @@ function toggleStudentFields() {
   const role = document.getElementById('f_role').value;
   const sf  = document.getElementById('studentFields');
   const pf  = document.getElementById('parentFields');
+  const tf  = document.getElementById('teacherFields');
   if (sf)  sf.style.display  = (role === 'student') ? '' : 'none';
   if (pf)  pf.style.display  = (role === 'parent')  ? '' : 'none';
+  if (tf)  tf.style.display  = (role === 'teacher') ? '' : 'none';
 }
 
 function renderModules() {

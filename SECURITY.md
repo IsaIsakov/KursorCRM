@@ -55,9 +55,9 @@ BACKUP_RETENTION_DAYS=14
 
 Bucket должен быть private. Разрешённые CORS origin: только `APP_ORIGIN`; методы `PUT`, `GET`, `HEAD`; заголовок `Content-Type`.
 
-Railway Healthcheck Path: `/api/ready`. После deploy ожидаются `status=ready`, `schemaVersion=23`, `fileStorage=bucket`.
+Railway Healthcheck Path: `/api/ready`. После deploy ожидаются `status=ready`, `schemaVersion=24`, `fileStorage=bucket`.
 
-## После установки v33
+## После установки v34
 
 1. Все пользователи входят заново: старые stateless JWT намеренно недействительны.
 2. Открыть «Админ → Телефония Sipuni», скопировать новый webhook URL и заменить старый в кабинете Sipuni.
@@ -68,4 +68,3 @@ Railway Healthcheck Path: `/api/ready`. После deploy ожидаются `st
 ## Остаточные организационные меры
 
 Код не заменяет внешний pentest и процессы школы. Для максимального уровня дополнительно нужны MFA/passkeys для администраторов, антивирус/CDR для Office-файлов, оповещения SIEM по журналам, регулярная ротация секретов и ежегодный независимый тест доступа между ролями.
-
